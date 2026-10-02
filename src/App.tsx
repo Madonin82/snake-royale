@@ -189,8 +189,8 @@ export const App: React.FC = () => {
     const current = stateRef.current;
     if (current.phase === 'OVER' || inLobby || inOnlineLobby) return;
 
-    // The server has no snake of its own (DM mode): ignore local steering.
-    if (playModeRef.current === 'ONLINE_SERVER') return;
+    // The server and spectators have no snake: ignore local steering.
+    if (playModeRef.current === 'ONLINE_SERVER' || playModeRef.current === 'ONLINE_SPECTATOR') return;
 
     soundEngine.playTick();
 
@@ -364,7 +364,7 @@ export const App: React.FC = () => {
 
         case 'STATE_SYNC': {
           // Client received authoritative state from Host
-          if (playModeRef.current === 'ONLINE_JOIN' && msg.state) {
+          if ((playModeRef.current === 'ONLINE_JOIN' || playModeRef.current === 'ONLINE_SPECTATOR') && msg.state) {
             setGameState(msg.state);
             setMatchHistory(prev =>
               prev.length === 0 || msg.state.tick > prev[prev.length - 1].tick
@@ -406,8 +406,21 @@ export const App: React.FC = () => {
           break;
         }
 
+        case 'SPECTATORS_CHANGED': {
+          setSpectatorsCount(msg.count || 0);
+          break;
+        }
+
         case 'RESTART_MATCH': {
-          startNewMatch();
+          if (playModeRef.current === 'ONLINE_SPECTATOR') {
+            // Spectators just reset their recording; the host re-deals the match.
+            setMatchHistory([]);
+            setReplayActive(false);
+            setReplayIdx(0);
+            setReplayPlaying(false);
+          } else {
+            startNewMatch();
+          }
           break;
         }
       }
@@ -432,7 +445,7 @@ export const App: React.FC = () => {
   // turn-based matches step event-driven from maybeAdvanceTurn instead)
   useEffect(() => {
     if (inLobby || inOnlineLobby) return;
-    if (playMode === 'ONLINE_JOIN') return; // Client only listens to state updates
+    if (playMode === 'ONLINE_JOIN' || playMode === 'ONLINE_SPECTATOR') return; // Clients/spectators only listen to state updates
     if (settings.turnBased) return; // No wall-clock loop in turn-based mode
 
     const tickIntervalMs = 1000 / settings.tickRate;
@@ -491,7 +504,7 @@ export const App: React.FC = () => {
   // back via ROOM_MEMBERS_CHANGED). Solo/local: counted in local state.
   useEffect(() => {
     if (gameState.phase !== 'OVER' || seriesCountedRef.current) return;
-    if (playMode === 'ONLINE_JOIN') return;
+    if (playMode === 'ONLINE_JOIN' || playMode === 'ONLINE_SPECTATOR') return;
     if (!gameState.winner) return;
     seriesCountedRef.current = true;
     const w = gameState.winner;
@@ -522,8 +535,6 @@ export const App: React.FC = () => {
       matchNames = onlineRoleRef.current === 'p1'
         ? { p1: me || 'PLAYER 1', p2: playerNamesRef.current.p2 || 'PLAYER 2' }
         : { p1: playerNamesRef.current.p1 || 'PLAYER 1', p2: me || 'PLAYER 2' };
-    } else if (playMode === 'ONLINE_JOIN') {
-      matchNames = { p1: playerNamesRef.current.p1 || 'PLAYER 1', p2: me || 'PLAYER 2' };
     }
     const initial = createInitialState(settings, matchNames);
     seriesCountedRef.current = false;
@@ -593,8 +604,21 @@ export const App: React.FC = () => {
     await networkManager.connect(roomCode, undefined, displayName.trim() || undefined);
     const assigned = networkManager.getRole();
     if (assigned) setOnlineRole(assigned);
-    await networkManager.connect(roomCode, 'p2', displayName.trim() || undefined);
-    setOnlineRole('p2');
+  };
+
+  // Watch a room as a public spectator (no seat, no input).
+  const handleSpectateRoom = async (code: string) => {
+    const roomCode = code.toUpperCase().trim();
+    if (!roomCode) return;
+    setOnlineRoomId(roomCode);
+    setPlayMode('ONLINE_SPECTATOR');
+    setInOnlineLobby(true);
+    setInLobby(false);
+
+    const ok = await networkManager.connect(roomCode, 'spectator', displayName.trim() || undefined);
+    if (ok) {
+      setOnlineRole('spectator');
+    }
   };
 
   const handleLeaveRoom = () => {
@@ -611,7 +635,7 @@ export const App: React.FC = () => {
   };
 
   const handleReturnToLobby = () => {
-    if (playMode === 'ONLINE_HOST' || playMode === 'ONLINE_JOIN' || playMode === 'ONLINE_SERVER') {
+    if (playMode === 'ONLINE_HOST' || playMode === 'ONLINE_JOIN' || playMode === 'ONLINE_SERVER' || playMode === 'ONLINE_SPECTATOR') {
       networkManager.disconnect();
       setSeries({ p1: 0, p2: 0, draws: 0 });
       setPlayerNames({ p1: 'PLAYER 1', p2: 'PLAYER 2' });
@@ -662,6 +686,7 @@ export const App: React.FC = () => {
               onStartLocal2P={handleStartLocal2P}
               onCreateOnlineRoom={handleCreateOnlineRoom}
               onCreateServerRoom={handleCreateServerRoom}
+              onSpectateRoom={handleSpectateRoom}
               onJoinOnlineRoom={handleJoinOnlineRoom}
               onOpenSettings={() => setSettingsModalOpen(true)}
               onOpenLatencyHarness={() => setLatencyModalOpen(true)}
@@ -747,6 +772,7 @@ export const App: React.FC = () => {
           playMode={playMode}
           series={series}
           canReplay={matchHistory.length > 1}
+          isSpectator={playMode === 'ONLINE_SPECTATOR'}
           onWatchReplay={() => {
             setReplayActive(true);
             setReplayIdx(0);

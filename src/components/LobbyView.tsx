@@ -7,6 +7,7 @@ interface LobbyViewProps {
   onStartLocal2P: () => void;
   onCreateOnlineRoom: () => void;
   onCreateServerRoom: () => void;
+  onSpectateRoom: (roomCode: string) => void;
   onJoinOnlineRoom: (roomCode: string) => void;
   onOpenSettings: () => void;
   onOpenLatencyHarness: () => void;
@@ -21,6 +22,7 @@ export const LobbyView: React.FC<LobbyViewProps> = ({
   onStartLocal2P,
   onCreateOnlineRoom,
   onCreateServerRoom,
+  onSpectateRoom,
   onJoinOnlineRoom,
   onOpenSettings,
   onOpenLatencyHarness,
@@ -210,6 +212,16 @@ export const LobbyView: React.FC<LobbyViewProps> = ({
             >
               <Globe className="w-4 h-4" />
               <span>HOST AS SERVER (DM MODE) — RUN THE WORLD, DON'T PLAY</span>
+            </button>
+
+            <button
+              onClick={() => roomInput.trim() && onSpectateRoom(roomInput.trim())}
+              disabled={!roomInput.trim()}
+              className="w-full bg-[#8BAC0F] hover:bg-[#306230] hover:text-[#9BBC0F] text-[#0F380F] py-2 px-2 border-2 border-dashed border-[#0F380F] font-bold text-xs flex items-center justify-center gap-2 cursor-pointer transition-all disabled:opacity-50"
+              title="Watch a live match with a room code — no seat, no input"
+            >
+              <span>👁</span>
+              <span>WATCH A MATCH (SPECTATOR) — ENTER CODE ABOVE</span>
             </button>
           </div>
         )}

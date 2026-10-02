@@ -84,6 +84,13 @@ export const OnlineRoomLobby: React.FC<OnlineRoomLobbyProps> = ({
         </div>
       )}
 
+      {/* Spectator banner */}
+      {role === 'spectator' && (
+        <div className="bg-[#0F380F] text-[#9BBC0F] p-2 border-2 border-[#0F380F] text-center text-[11px] font-black">
+          👁 SPECTATING — YOU'RE WATCHING. THE PLAYERS CAN'T SEE YOUR INPUT (YOU HAVE NONE).
+        </div>
+      )}
+
       {/* Seat Roster */}
       <div className="grid grid-cols-2 gap-2">
         {/* Seat P1 */}

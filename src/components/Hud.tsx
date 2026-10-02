@@ -28,7 +28,7 @@ export const Hud: React.FC<HudProps> = ({
 
   // Who is "you" on this screen, per seat — drives the (YOU) tags.
   const seatTag = (seat: 'p1' | 'p2'): string => {
-    if (playMode === 'ONLINE_SERVER') return seat === 'p1' ? '(P1)' : '(P2)';
+    if (playMode === 'ONLINE_SERVER' || playMode === 'ONLINE_SPECTATOR') return seat === 'p1' ? '(P1)' : '(P2)';
     if (playMode === 'SOLO_AI') return seat === 'p1' ? '(YOU)' : '(BOT)';
     if (playMode === 'LOCAL_2P') return seat === 'p1' ? '(P1)' : '(P2)';
     if (viewerSeat) return viewerSeat === seat ? '(YOU)' : '(REMOTE)';
@@ -130,7 +130,6 @@ export const Hud: React.FC<HudProps> = ({
             <span className="flex items-center gap-1 min-w-0">
               <span className="w-2.5 h-2.5 shrink-0 bg-[#0F380F] inline-block border border-[#0F380F]" />
               <span className="truncate">{p1.name} {seatTag('p1')}</span>
-              <span className="truncate">{p1.name} {playMode === 'ONLINE_JOIN' ? '(HOST)' : '(YOU)'}</span>
             </span>
             <span className="text-[10px] opacity-80">LEN: {p1.body.length}</span>
           </div>
@@ -146,7 +145,6 @@ export const Hud: React.FC<HudProps> = ({
             <span className="flex items-center gap-1 min-w-0">
               <span className="w-2.5 h-2.5 shrink-0 bg-[#306230] inline-block border border-[#0F380F]" />
               <span className="truncate">{p2.name} {seatTag('p2')}</span>
-              <span className="truncate">{p2.name} {playMode === 'ONLINE_HOST' ? '(REMOTE)' : playMode === 'ONLINE_JOIN' ? '(YOU)' : ''}</span>
             </span>
             <span className="text-[10px] opacity-80">LEN: {p2.body.length}</span>
           </div>

@@ -5,6 +5,7 @@ import {
   setDoc,
   getDoc,
   updateDoc,
+  deleteDoc,
   onSnapshot,
   collection,
   addDoc,
@@ -18,6 +19,7 @@ type MessageHandler = (data: any) => void;
 export class NetworkManager {
   private roomId: string = '';
   private role: 'p1' | 'p2' | 'spectator' | 'server' | null = null;
+  private uid: string | null = null;
   private messageHandlers: Set<MessageHandler> = new Set();
   private isConnected: boolean = false;
   private firestoreUnsubs: Unsubscribe[] = [];
@@ -50,10 +52,16 @@ export class NetworkManager {
 
     try {
       const uid = await initAuth();
+      this.uid = uid;
       const roomRef = doc(db, 'rooms', this.roomId);
       const roomSnap = await getDoc(roomRef);
 
       if (!roomSnap.exists()) {
+        // Spectators never create rooms: there must be a room to watch.
+        if (requestedRole === 'spectator') {
+          this.isConnected = false;
+          return false;
+        }
         // Create new room. A 'server' host claims NO seat: it runs the
         // simulation while two other clients play (DM mode).
         this.role = requestedRole === 'p2' ? 'p2' : requestedRole === 'server' ? 'server' : 'p1';
@@ -104,6 +112,12 @@ export class NetworkManager {
 
       this.isConnected = true;
 
+      // Spectators register a presence doc (drives the watcher count).
+      if (this.role === 'spectator') {
+        const presenceRef = doc(db, 'rooms', this.roomId, 'spectators', uid);
+        setDoc(presenceRef, { joinedAt: Date.now() }).catch(() => {});
+      }
+
       // Broadcast room joined to local subscribers
       this.notifyHandlers({
         type: 'ROOM_JOINED',
@@ -138,6 +152,13 @@ export class NetworkManager {
         }
       });
       this.firestoreUnsubs.push(unsubRoom);
+
+      // 1b. Live spectator count for everyone in the room
+      const spectatorsCol = collection(db, 'rooms', this.roomId, 'spectators');
+      const unsubSpectators = onSnapshot(spectatorsCol, (snap) => {
+        this.notifyHandlers({ type: 'SPECTATORS_CHANGED', count: snap.size });
+      });
+      this.firestoreUnsubs.push(unsubSpectators);
 
       // 2. Listen to Game State (Client/Spectator listens to Host)
       const stateRef = doc(db, 'rooms', this.roomId, 'state', 'current');
@@ -228,11 +249,17 @@ export class NetworkManager {
       if (this.role === 'p1') updatePayload.hasP1 = false;
       if (this.role === 'p2') updatePayload.hasP2 = false;
 
-      updateDoc(roomRef, updatePayload).catch(() => {});
+      if (this.role === 'spectator' && this.uid) {
+        // Remove our spectator presence doc.
+        deleteDoc(doc(db, 'rooms', this.roomId, 'spectators', this.uid)).catch(() => {});
+      } else if (Object.keys(updatePayload).length > 0) {
+        updateDoc(roomRef, updatePayload).catch(() => {});
+      }
     }
 
     this.isConnected = false;
     this.role = null;
+    this.uid = null;
     this.roomId = '';
   }
 
