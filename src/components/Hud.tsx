@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useEffect, useState } from 'react';
 import { GameState, LatencyReport, PlayMode } from '../types/game';
 import { Activity, Gamepad, Wifi } from 'lucide-react';
 
@@ -10,6 +10,7 @@ interface HudProps {
   onOpenSettings: () => void;
   gamepadCount: number;
   locks?: { p1: boolean; p2: boolean };
+  turnClock?: { startedAt: number; p1At: number | null; p2At: number | null };
 }
 
 export const Hud: React.FC<HudProps> = ({
@@ -19,10 +20,29 @@ export const Hud: React.FC<HudProps> = ({
   onOpenLatencyHarness,
   gamepadCount,
   locks,
+  turnClock,
 }) => {
   const { p1, p2 } = gameState.snakes;
   const isRacing = gameState.phase === 'RACING';
   const isShrinking = gameState.phase === 'SHRINKING';
+
+  // Live clock for the turn timer (re-renders 4x/sec while a turn is open)
+  const [nowMs, setNowMs] = useState<number>(() => Date.now());
+  useEffect(() => {
+    if (!gameState.turnBased || gameState.phase === 'OVER') return;
+    const id = setInterval(() => setNowMs(Date.now()), 250);
+    return () => clearInterval(id);
+  }, [gameState.turnBased, gameState.phase]);
+
+  const fmtSecs = (ms: number) => `${(Math.max(0, ms) / 1000).toFixed(1)}s`;
+  const thinkLabel = (who: 'p1' | 'p2') => {
+    if (!turnClock) return who === 'p1' ? 'P1' : 'P2';
+    const at = who === 'p1' ? turnClock.p1At : turnClock.p2At;
+    const name = who === 'p1' ? 'P1' : 'P2';
+    return at !== null
+      ? `${name} ✓ ${fmtSecs(at - turnClock.startedAt)}`
+      : `${name} … ${fmtSecs(nowMs - turnClock.startedAt)}`;
+  };
 
   // Format seconds mm:ss
   const totalSeconds = Math.ceil(gameState.phaseTimeRemaining / 1000);
@@ -65,16 +85,23 @@ export const Hud: React.FC<HudProps> = ({
         </div>
       </div>
 
-      {/* Turn-based lock status */}
+      {/* Turn-based lock status + per-player thinking time */}
       {gameState.turnBased && locks && gameState.phase !== 'OVER' && (
-        <div className="flex items-center justify-between text-[10px] font-bold bg-[#8BAC0F] px-2.5 py-1 border-2 border-[#0F380F]">
-          <span className={locks.p1 ? 'text-[#0F380F]' : 'opacity-60'}>
-            P1 {locks.p1 ? '✓ MOVE LOCKED' : '… THINKING'}
-          </span>
-          <span className="opacity-70">BOTH LOCK → BOARD STEPS</span>
-          <span className={locks.p2 ? 'text-[#0F380F]' : 'opacity-60'}>
-            P2 {locks.p2 ? '✓ MOVE LOCKED' : '… THINKING'}
-          </span>
+        <div className="flex flex-col gap-0.5 text-[10px] font-bold bg-[#8BAC0F] px-2.5 py-1 border-2 border-[#0F380F]">
+          <div className="flex items-center justify-between">
+            <span className={locks.p1 ? 'text-[#0F380F]' : 'opacity-60'}>
+              {thinkLabel('p1')}
+            </span>
+            <span className="opacity-70">BOTH LOCK → BOARD STEPS</span>
+            <span className={locks.p2 ? 'text-[#0F380F]' : 'opacity-60'}>
+              {thinkLabel('p2')}
+            </span>
+          </div>
+          {gameState.lastTurnTimes && (
+            <div className="text-center opacity-70">
+              LAST TURN — P1 {gameState.lastTurnTimes.p1.toFixed(1)}s · P2 {gameState.lastTurnTimes.p2.toFixed(1)}s
+            </div>
+          )}
         </div>
       )}
 
