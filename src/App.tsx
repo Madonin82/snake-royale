@@ -71,6 +71,7 @@ export const App: React.FC = () => {
     }
 
     if (playerSlot === 1) {
+      queueSnakeDirection(stateRef.current.snakes.p1, dir);
       const p1 = { ...current.snakes.p1 };
       queueSnakeDirection(p1, dir);
       setGameState(prev => ({
@@ -78,6 +79,7 @@ export const App: React.FC = () => {
         snakes: { ...prev.snakes, p1 }
       }));
     } else if (playerSlot === 2 && playModeRef.current === 'LOCAL_2P') {
+      queueSnakeDirection(stateRef.current.snakes.p2, dir);
       const p2 = { ...current.snakes.p2 };
       queueSnakeDirection(p2, dir);
       setGameState(prev => ({
@@ -195,6 +197,7 @@ export const App: React.FC = () => {
           if (playModeRef.current === 'ONLINE_HOST' && msg.role === 'p2' && msg.dir) {
             const current = stateRef.current;
             networkManager.recordTickLag(msg.tick, current.tick);
+            queueSnakeDirection(current.snakes.p2, msg.dir);
             const p2 = { ...current.snakes.p2 };
             queueSnakeDirection(p2, msg.dir);
             setGameState(prev => ({
@@ -350,6 +353,7 @@ export const App: React.FC = () => {
     if (playMode === 'ONLINE_HOST' || playMode === 'ONLINE_JOIN') {
       networkManager.disconnect();
     }
+    setGameState(createInitialState(settingsRef.current));
     setInLobby(true);
     setInOnlineLobby(false);
   };
@@ -433,7 +437,7 @@ export const App: React.FC = () => {
 
       {/* Footer info */}
       <footer className="text-center text-[10px] font-mono opacity-80 py-1">
-        Game Boy 4-shade palette • 8×8 grid • Host-authoritative 5 TPS • Gamepad API ready
+        Game Boy 4-shade palette • {settings.gridSize}×{settings.gridSize} grid • Host-authoritative {settings.tickRate} TPS • Gamepad API ready
       </footer>
 
       {/* Modals */}
@@ -453,12 +457,14 @@ export const App: React.FC = () => {
         onUpdateSettings={(newVals) => setSettings(s => ({ ...s, ...newVals }))}
       />
 
-      <MatchEndModal
-        gameState={gameState}
-        playMode={playMode}
-        onRematch={handleRematch}
-        onReturnToLobby={handleReturnToLobby}
-      />
+      {!inLobby && !inOnlineLobby && (
+        <MatchEndModal
+          gameState={gameState}
+          playMode={playMode}
+          onRematch={handleRematch}
+          onReturnToLobby={handleReturnToLobby}
+        />
+      )}
     </main>
   );
 };
