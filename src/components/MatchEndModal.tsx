@@ -1,11 +1,13 @@
 import React from 'react';
 import { GameState, PlayMode } from '../types/game';
-import { RotateCcw, Home, Trophy, AlertTriangle } from 'lucide-react';
+import { RotateCcw, Home, Trophy, AlertTriangle, Play } from 'lucide-react';
 
 interface MatchEndModalProps {
   gameState: GameState;
   playMode: PlayMode;
   series?: { p1: number; p2: number; draws: number };
+  canReplay?: boolean;
+  onWatchReplay?: () => void;
   onRematch: () => void;
   onReturnToLobby: () => void;
 }
@@ -14,6 +16,8 @@ export const MatchEndModal: React.FC<MatchEndModalProps> = ({
   gameState,
   playMode,
   series,
+  canReplay,
+  onWatchReplay,
   onRematch,
   onReturnToLobby,
 }) => {
@@ -94,6 +98,15 @@ export const MatchEndModal: React.FC<MatchEndModalProps> = ({
 
         {/* Action Buttons */}
         <div className="flex flex-col gap-2 pt-1">
+          {canReplay && onWatchReplay && (
+            <button
+              onClick={onWatchReplay}
+              className="w-full bg-[#306230] hover:bg-[#0F380F] text-[#9BBC0F] py-2.5 border-2 border-[#0F380F] font-black text-sm flex items-center justify-center gap-2 cursor-pointer transition-all shadow-[2px_2px_0px_#0F380F]"
+            >
+              <Play className="w-4 h-4 fill-current" />
+              <span>WATCH REPLAY</span>
+            </button>
+          )}
           <button
             onClick={onRematch}
             className="w-full bg-[#0F380F] hover:bg-[#306230] text-[#9BBC0F] py-2.5 border-2 border-[#0F380F] font-black text-sm flex items-center justify-center gap-2 cursor-pointer transition-all shadow-[2px_2px_0px_#0F380F]"

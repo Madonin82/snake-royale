@@ -18,6 +18,7 @@ import { LatencyHarnessModal } from './components/LatencyHarnessModal';
 import { SettingsModal } from './components/SettingsModal';
 import { MatchEndModal } from './components/MatchEndModal';
 import { ControlsOverlay } from './components/ControlsOverlay';
+import { ReplayControls } from './components/ReplayControls';
 import { ArrowLeft, Gamepad, RefreshCw, Volume2, VolumeX } from 'lucide-react';
 
 export const App: React.FC = () => {
@@ -47,10 +48,36 @@ export const App: React.FC = () => {
   const [series, setSeries] = useState<{ p1: number; p2: number; draws: number }>({ p1: 0, p2: 0, draws: 0 });
   const seriesCountedRef = useRef<boolean>(false);
 
+  // MATCH REPLAY: every completed turn's state is recorded; the replay viewer
+  // plays them back at a steady pace (thinking pauses edited out).
+  const [matchHistory, setMatchHistory] = useState<GameState[]>([]);
+  const [replayActive, setReplayActive] = useState<boolean>(false);
+  const [replayIdx, setReplayIdx] = useState<number>(0);
+  const [replayPlaying, setReplayPlaying] = useState<boolean>(false);
+  const [replaySpeed, setReplaySpeed] = useState<number>(5);
+
   const handleDisplayNameChange = useCallback((value: string) => {
     setDisplayName(value);
     try { localStorage.setItem('snake-royale-name', value); } catch { /* private mode */ }
   }, []);
+
+  // Replay playback driver
+  useEffect(() => {
+    if (!replayActive || !replayPlaying) return;
+    const id = setInterval(() => {
+      setReplayIdx(prev => {
+        if (prev >= matchHistory.length - 1) {
+          setReplayPlaying(false);
+          return prev;
+        }
+        return prev + 1;
+      });
+    }, 1000 / replaySpeed);
+    return () => clearInterval(id);
+  }, [replayActive, replayPlaying, replaySpeed, matchHistory.length]);
+
+  // What the board + HUD render: live state, or the replayed turn while replaying.
+  const displayState = replayActive ? (matchHistory[replayIdx] ?? gameState) : gameState;
 
   const stateRef = useRef<GameState>(gameState);
   stateRef.current = gameState;
@@ -149,6 +176,7 @@ export const App: React.FC = () => {
     };
     playTickEvents(events);
     setGameState(nextState);
+    setMatchHistory(prev => [...prev, nextState]);
 
     if (playModeRef.current === 'ONLINE_HOST') {
       networkManager.broadcastState(nextState);
@@ -334,6 +362,11 @@ export const App: React.FC = () => {
           // Client received authoritative state from Host
           if (playModeRef.current === 'ONLINE_JOIN' && msg.state) {
             setGameState(msg.state);
+            setMatchHistory(prev =>
+              prev.length === 0 || msg.state.tick > prev[prev.length - 1].tick
+                ? [...prev, msg.state]
+                : prev
+            );
             if (settingsRef.current.turnBased) clearLocks(); // new turn: moves unlocked
             if (inOnlineLobby) {
               setInOnlineLobby(false);
@@ -433,6 +466,7 @@ export const App: React.FC = () => {
       }
 
       setGameState(nextState);
+      setMatchHistory(prev => [...prev, nextState]);
 
       // If online host, broadcast state to connected client
       if (playModeRef.current === 'ONLINE_HOST') {
@@ -478,6 +512,10 @@ export const App: React.FC = () => {
     }
     const initial = createInitialState(settings, matchNames);
     seriesCountedRef.current = false;
+    setMatchHistory([initial]);
+    setReplayActive(false);
+    setReplayIdx(0);
+    setReplayPlaying(false);
     setGameState(initial);
     clearLocks();
     sentTickRef.current = -1;
@@ -616,17 +654,29 @@ export const App: React.FC = () => {
           ) : (
             <div className="flex flex-col items-center gap-2">
               <Hud
-                gameState={gameState}
+                gameState={displayState}
                 playMode={playMode}
                 latencyReport={latencyReport}
                 onOpenLatencyHarness={() => setLatencyModalOpen(true)}
                 onOpenSettings={() => setSettingsModalOpen(true)}
                 gamepadCount={gamepadCount}
-                locks={locks}
-                turnClock={turnClock}
+                locks={replayActive ? undefined : locks}
+                turnClock={replayActive ? undefined : turnClock}
               />
-              <GameBoard gameState={gameState} settings={settings} />
-              <ControlsOverlay onDirection={(dir) => handleDirectionInput(1, dir)} />
+              <GameBoard gameState={displayState} settings={settings} />
+              {!replayActive && <ControlsOverlay onDirection={(dir) => handleDirectionInput(1, dir)} />}
+              {replayActive && (
+                <ReplayControls
+                  index={replayIdx}
+                  total={matchHistory.length}
+                  playing={replayPlaying}
+                  speed={replaySpeed}
+                  onTogglePlay={() => setReplayPlaying(p => !p)}
+                  onSeek={(i) => setReplayIdx(i)}
+                  onSpeedChange={setReplaySpeed}
+                  onExit={() => { setReplayActive(false); setReplayPlaying(false); }}
+                />
+              )}
             </div>
           )}
         </div>
@@ -654,11 +704,17 @@ export const App: React.FC = () => {
         onUpdateSettings={(newVals) => setSettings(s => ({ ...s, ...newVals }))}
       />
 
-      {!inLobby && !inOnlineLobby && (
+      {!inLobby && !inOnlineLobby && !replayActive && (
         <MatchEndModal
           gameState={gameState}
           playMode={playMode}
           series={series}
+          canReplay={matchHistory.length > 1}
+          onWatchReplay={() => {
+            setReplayActive(true);
+            setReplayIdx(0);
+            setReplayPlaying(true);
+          }}
           onRematch={handleRematch}
           onReturnToLobby={handleReturnToLobby}
         />
