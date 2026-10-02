@@ -130,6 +130,7 @@ export const Hud: React.FC<HudProps> = ({
             <span className="flex items-center gap-1 min-w-0">
               <span className="w-2.5 h-2.5 shrink-0 bg-[#0F380F] inline-block border border-[#0F380F]" />
               <span className="truncate">{p1.name} {seatTag('p1')}</span>
+              <span className="truncate">{p1.name} {playMode === 'ONLINE_JOIN' ? '(HOST)' : '(YOU)'}</span>
             </span>
             <span className="text-[10px] opacity-80">LEN: {p1.body.length}</span>
           </div>
@@ -145,6 +146,7 @@ export const Hud: React.FC<HudProps> = ({
             <span className="flex items-center gap-1 min-w-0">
               <span className="w-2.5 h-2.5 shrink-0 bg-[#306230] inline-block border border-[#0F380F]" />
               <span className="truncate">{p2.name} {seatTag('p2')}</span>
+              <span className="truncate">{p2.name} {playMode === 'ONLINE_HOST' ? '(REMOTE)' : playMode === 'ONLINE_JOIN' ? '(YOU)' : ''}</span>
             </span>
             <span className="text-[10px] opacity-80">LEN: {p2.body.length}</span>
           </div>
