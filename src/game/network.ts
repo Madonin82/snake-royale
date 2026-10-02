@@ -10,6 +10,7 @@ import {
   addDoc,
   Unsubscribe,
   serverTimestamp,
+  increment,
 } from 'firebase/firestore';
 
 type MessageHandler = (data: any) => void;
@@ -42,9 +43,10 @@ export class NetworkManager {
   private simulatedDelayMs: number = 0;
   private simulatedJitterMs: number = 0;
 
-  public async connect(roomId: string, requestedRole?: 'p1' | 'p2' | 'spectator'): Promise<boolean> {
+  public async connect(roomId: string, requestedRole?: 'p1' | 'p2' | 'spectator', displayName?: string): Promise<boolean> {
     this.disconnect();
     this.roomId = roomId.toUpperCase().trim();
+    const cleanName = (displayName || '').trim().slice(0, 14);
 
     try {
       const uid = await initAuth();
@@ -58,6 +60,11 @@ export class NetworkManager {
           createdAt: Date.now(),
           p1Uid: this.role === 'p1' ? uid : null,
           p2Uid: this.role === 'p2' ? uid : null,
+          p1Name: this.role === 'p1' && cleanName ? cleanName : null,
+          p2Name: this.role === 'p2' && cleanName ? cleanName : null,
+          seriesP1: 0,
+          seriesP2: 0,
+          seriesDraws: 0,
           hasP1: this.role === 'p1',
           hasP2: this.role === 'p2',
           status: 'lobby',
@@ -67,12 +74,25 @@ export class NetworkManager {
         const data = roomSnap.data();
         if (requestedRole === 'p1' || (!data.hasP1 && data.p1Uid !== uid)) {
           this.role = 'p1';
-          await updateDoc(roomRef, { hasP1: true, p1Uid: uid, lastActive: Date.now() });
+          await updateDoc(roomRef, {
+            hasP1: true, p1Uid: uid, lastActive: Date.now(),
+            ...(cleanName ? { p1Name: cleanName } : {}),
+          });
         } else if (requestedRole === 'p2' || (!data.hasP2 && data.p2Uid !== uid)) {
           this.role = 'p2';
-          await updateDoc(roomRef, { hasP2: true, p2Uid: uid, lastActive: Date.now() });
+          await updateDoc(roomRef, {
+            hasP2: true, p2Uid: uid, lastActive: Date.now(),
+            ...(cleanName ? { p2Name: cleanName } : {}),
+          });
         } else {
           this.role = (data.p1Uid === uid) ? 'p1' : (data.p2Uid === uid ? 'p2' : 'spectator');
+          // Reclaiming our own seat: refresh our display name too.
+          if (cleanName && (this.role === 'p1' || this.role === 'p2')) {
+            await updateDoc(roomRef, {
+              [this.role === 'p1' ? 'p1Name' : 'p2Name']: cleanName,
+              lastActive: Date.now(),
+            }).catch(() => {});
+          }
         }
       }
 
@@ -87,7 +107,7 @@ export class NetworkManager {
         hasP2: false,
       });
 
-      // 1. Listen to Room document (membership, restart)
+      // 1. Listen to Room document (membership, restart, names, series)
       const unsubRoom = onSnapshot(roomRef, (snapshot) => {
         if (!snapshot.exists()) return;
         const rData = snapshot.data();
@@ -96,6 +116,13 @@ export class NetworkManager {
           roomId: this.roomId,
           hasP1: !!rData.hasP1,
           hasP2: !!rData.hasP2,
+          p1Name: rData.p1Name || null,
+          p2Name: rData.p2Name || null,
+          series: {
+            p1: rData.seriesP1 || 0,
+            p2: rData.seriesP2 || 0,
+            draws: rData.seriesDraws || 0,
+          },
           spectatorsCount: 0,
         });
 
@@ -263,6 +290,14 @@ export class NetworkManager {
       restartSender: this.role,
       status: 'racing',
     }).catch(() => {});
+  }
+
+  // Host records a finished match in the room's running series score.
+  public recordSeriesResult(winner: 'p1' | 'p2' | 'DRAW') {
+    if (!this.isConnected || !this.roomId || this.role !== 'p1') return;
+    const roomRef = doc(db, 'rooms', this.roomId);
+    const field = winner === 'p1' ? 'seriesP1' : winner === 'p2' ? 'seriesP2' : 'seriesDraws';
+    updateDoc(roomRef, { [field]: increment(1), lastActive: Date.now() }).catch(() => {});
   }
 
   // Latency Probe Trigger (auto 20-burst on join and on demand)
