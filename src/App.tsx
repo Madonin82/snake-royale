@@ -18,7 +18,6 @@ import { LatencyHarnessModal } from './components/LatencyHarnessModal';
 import { SettingsModal } from './components/SettingsModal';
 import { MatchEndModal } from './components/MatchEndModal';
 import { ControlsOverlay } from './components/ControlsOverlay';
-import { GameBoyShell } from './components/GameBoyShell';
 import { ArrowLeft, Gamepad, RefreshCw, Volume2, VolumeX } from 'lucide-react';
 
 export const App: React.FC = () => {
@@ -50,12 +49,108 @@ export const App: React.FC = () => {
   const onlineRoleRef = useRef<'p1' | 'p2' | 'spectator' | null>(onlineRole);
   onlineRoleRef.current = onlineRole;
 
+  // TURN-BASED MOVE LOCKS
+  // The board steps only when BOTH players have locked a direction for the
+  // current turn. Locks reset after every step. (refs for sync logic, state for HUD)
+  const locksRef = useRef<{ p1: boolean; p2: boolean }>({ p1: false, p2: false });
+  const [locks, setLocks] = useState<{ p1: boolean; p2: boolean }>({ p1: false, p2: false });
+  const sentTickRef = useRef<number>(-1); // ONLINE_JOIN: tick we already sent a move for
+
+  const setLock = useCallback((who: 'p1' | 'p2') => {
+    locksRef.current = { ...locksRef.current, [who]: true };
+    setLocks(locksRef.current);
+  }, []);
+
+  const clearLocks = useCallback(() => {
+    locksRef.current = { p1: false, p2: false };
+    setLocks(locksRef.current);
+  }, []);
+
+  // Sound effects for a completed step (shared by real-time loop + turn steps)
+  const playTickEvents = useCallback((events: {
+    tokenEatenP1: boolean;
+    tokenEatenP2: boolean;
+    shrinkTelegraphStarted: boolean;
+    ringShrunk: boolean;
+    deathOccurred: boolean;
+    matchEnded: boolean;
+  }) => {
+    if (events.tokenEatenP1 || events.tokenEatenP2) soundEngine.playTokenEat();
+    if (events.shrinkTelegraphStarted) soundEngine.playShrinkWarning();
+    if (events.ringShrunk) soundEngine.playRingShrunk();
+    if (events.deathOccurred) soundEngine.playCrash();
+    if (events.matchEnded) soundEngine.playVictory();
+  }, []);
+
+  // Advance exactly one turn if both players have locked a move.
+  const maybeAdvanceTurn = useCallback(() => {
+    const current = stateRef.current;
+    const s = settingsRef.current;
+    if (!s.turnBased || current.phase === 'OVER') return;
+
+    // Solo vs bot: the bot locks the instant the human does.
+    if (playModeRef.current === 'SOLO_AI' && !locksRef.current.p2) {
+      const aiDir = calculateAIMove(current, s.gridSize, 'p2', s.botDifficulty);
+      if (aiDir) queueSnakeDirection(current.snakes.p2, aiDir);
+      locksRef.current = { ...locksRef.current, p2: true };
+      setLocks(locksRef.current);
+    }
+
+    if (!locksRef.current.p1 || !locksRef.current.p2) return;
+
+    const { nextState, events } = processGameTick(stateRef.current, s, 0);
+    playTickEvents(events);
+    setGameState(nextState);
+
+    if (playModeRef.current === 'ONLINE_HOST') {
+      networkManager.broadcastState(nextState);
+    }
+    clearLocks();
+  }, [clearLocks, playTickEvents]);
+
   // Handle Input routing
   const handleDirectionInput = useCallback((playerSlot: 1 | 2, dir: Direction) => {
     const current = stateRef.current;
     if (current.phase === 'OVER' || inLobby || inOnlineLobby) return;
 
     soundEngine.playTick();
+
+    // TURN-BASED: an input locks that player's move for this turn.
+    if (settingsRef.current.turnBased) {
+      if (playModeRef.current === 'ONLINE_JOIN') {
+        // One locked move per turn: ignore extra presses until state advances.
+        if (sentTickRef.current === current.tick) return;
+        sentTickRef.current = current.tick;
+        networkManager.sendInput(dir, current.tick);
+        setLock('p2');
+        return;
+      }
+
+      if (playerSlot === 1) {
+        if (locksRef.current.p1) return; // already locked this turn
+        queueSnakeDirection(stateRef.current.snakes.p1, dir);
+        const p1 = { ...current.snakes.p1 };
+        queueSnakeDirection(p1, dir);
+        setGameState(prev => ({
+          ...prev,
+          snakes: { ...prev.snakes, p1 }
+        }));
+        setLock('p1');
+        maybeAdvanceTurn();
+      } else if (playerSlot === 2 && playModeRef.current === 'LOCAL_2P') {
+        if (locksRef.current.p2) return; // already locked this turn
+        queueSnakeDirection(stateRef.current.snakes.p2, dir);
+        const p2 = { ...current.snakes.p2 };
+        queueSnakeDirection(p2, dir);
+        setGameState(prev => ({
+          ...prev,
+          snakes: { ...prev.snakes, p2 }
+        }));
+        setLock('p2');
+        maybeAdvanceTurn();
+      }
+      return;
+    }
 
     if (playModeRef.current === 'ONLINE_JOIN') {
       // Client (P2) sending input to Host
@@ -184,6 +279,7 @@ export const App: React.FC = () => {
           // Client received authoritative state from Host
           if (playModeRef.current === 'ONLINE_JOIN' && msg.state) {
             setGameState(msg.state);
+            if (settingsRef.current.turnBased) clearLocks(); // new turn: moves unlocked
             if (inOnlineLobby) {
               setInOnlineLobby(false);
               setInLobby(false);
@@ -204,6 +300,11 @@ export const App: React.FC = () => {
               ...prev,
               snakes: { ...prev.snakes, p2 }
             }));
+            // Turn-based: P2's input locks their move; step when P1 has locked too.
+            if (settingsRef.current.turnBased) {
+              setLock('p2');
+              maybeAdvanceTurn();
+            }
           }
           break;
         }
@@ -230,10 +331,12 @@ export const App: React.FC = () => {
     return () => clearInterval(interval);
   }, []);
 
-  // Main Simulation Loop (Runs on Host / Local)
+  // Main Simulation Loop (Runs on Host / Local — real-time mode only;
+  // turn-based matches step event-driven from maybeAdvanceTurn instead)
   useEffect(() => {
     if (inLobby || inOnlineLobby) return;
     if (playMode === 'ONLINE_JOIN') return; // Client only listens to state updates
+    if (settings.turnBased) return; // No wall-clock loop in turn-based mode
 
     const tickIntervalMs = 1000 / settings.tickRate;
 
@@ -283,12 +386,14 @@ export const App: React.FC = () => {
     }, tickIntervalMs);
 
     return () => clearInterval(intervalId);
-  }, [inLobby, inOnlineLobby, playMode, settings.tickRate]);
+  }, [inLobby, inOnlineLobby, playMode, settings.tickRate, settings.turnBased]);
 
   // Start match helper
   const startNewMatch = () => {
     const initial = createInitialState(settings);
     setGameState(initial);
+    clearLocks();
+    sentTickRef.current = -1;
     setInLobby(false);
     setInOnlineLobby(false);
 
@@ -390,12 +495,9 @@ export const App: React.FC = () => {
         </div>
       </header>
 
-      {/* Main Container / Handheld frame */}
+      {/* Main Container */}
       <div className="flex-1 flex flex-col items-center justify-center w-full my-2">
-        <GameBoyShell
-          enabled={settings.gameBoyFrameEnabled}
-          onDirectionInput={(dir) => handleDirectionInput(1, dir)}
-        >
+        <div className="w-full flex flex-col items-center">
           {inLobby ? (
             <LobbyView
               onStartSolo={handleStartSolo}
@@ -427,17 +529,18 @@ export const App: React.FC = () => {
                 onOpenLatencyHarness={() => setLatencyModalOpen(true)}
                 onOpenSettings={() => setSettingsModalOpen(true)}
                 gamepadCount={gamepadCount}
+                locks={locks}
               />
               <GameBoard gameState={gameState} settings={settings} />
               <ControlsOverlay onDirection={(dir) => handleDirectionInput(1, dir)} />
             </div>
           )}
-        </GameBoyShell>
+        </div>
       </div>
 
       {/* Footer info */}
       <footer className="text-center text-[10px] font-mono opacity-80 py-1">
-        Game Boy 4-shade palette • {settings.gridSize}×{settings.gridSize} grid • Host-authoritative {settings.tickRate} TPS • Gamepad API ready
+        4-shade palette • {settings.gridSize}×{settings.gridSize} grid • {settings.turnBased ? 'Turn-based simultaneous moves' : `Host-authoritative ${settings.tickRate} TPS`} • Gamepad API ready
       </footer>
 
       {/* Modals */}
