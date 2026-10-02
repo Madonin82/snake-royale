@@ -7,6 +7,8 @@ interface OnlineRoomLobbyProps {
   hasP1: boolean;
   hasP2: boolean;
   spectatorsCount: number;
+  playerNames: { p1: string; p2: string };
+  series: { p1: number; p2: number; draws: number };
   onStartMatch: () => void;
   onLeaveRoom: () => void;
   onOpenLatencyHarness: () => void;
@@ -18,6 +20,8 @@ export const OnlineRoomLobby: React.FC<OnlineRoomLobbyProps> = ({
   hasP1,
   hasP2,
   spectatorsCount,
+  playerNames,
+  series,
   onStartMatch,
   onLeaveRoom,
   onOpenLatencyHarness,
@@ -79,7 +83,7 @@ export const OnlineRoomLobby: React.FC<OnlineRoomLobbyProps> = ({
           <div className="flex items-center gap-2 mt-1">
             <span className="w-3 h-3 bg-[#0F380F] border border-[#0F380F]" />
             <span className="font-black text-xs">
-              {hasP1 ? (role === 'p1' ? 'YOU (HOST)' : 'PLAYER 1') : 'WAITING...'}
+              {hasP1 ? (role === 'p1' ? `${playerNames.p1} (YOU)` : playerNames.p1) : 'WAITING...'}
             </span>
           </div>
           <span className="text-[9px] opacity-75 mt-0.5">Runs Host Simulation</span>
@@ -91,7 +95,7 @@ export const OnlineRoomLobby: React.FC<OnlineRoomLobbyProps> = ({
           <div className="flex items-center gap-2 mt-1">
             <span className="w-3 h-3 bg-[#306230] border border-[#0F380F]" />
             <span className="font-black text-xs">
-              {hasP2 ? (role === 'p2' ? 'YOU (CHALLENGER)' : 'PLAYER 2 READY') : 'WAITING FOR OPPONENT...'}
+              {hasP2 ? (role === 'p2' ? `${playerNames.p2} (YOU)` : playerNames.p2) : 'WAITING FOR OPPONENT...'}
             </span>
           </div>
           <span className="text-[9px] opacity-75 mt-0.5">Remote Input Stream</span>
@@ -102,6 +106,14 @@ export const OnlineRoomLobby: React.FC<OnlineRoomLobbyProps> = ({
         <div className="text-center text-[10px] font-bold opacity-80">
           <Users className="w-3 h-3 inline mr-1" />
           {spectatorsCount} spectator(s) connected
+        </div>
+      )}
+
+      {/* Series scoreboard */}
+      {(series.p1 + series.p2 + series.draws) > 0 && (
+        <div className="bg-[#8BAC0F] p-2 border-2 border-[#0F380F] text-center text-[11px] font-black">
+          🏆 SERIES — {playerNames.p1} {series.p1} · {playerNames.p2} {series.p2}
+          {series.draws > 0 ? ` · DRAWS ${series.draws}` : ''}
         </div>
       )}
 
