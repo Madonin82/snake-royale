@@ -41,14 +41,17 @@ export function getNextHeadPosition(head: Position, dir: Direction): Position {
   }
 }
 
-export function createInitialState(settings: GameSettings = DEFAULT_SETTINGS): GameState {
+export function createInitialState(
+  settings: GameSettings = DEFAULT_SETTINGS,
+  playerNames?: { p1?: string; p2?: string }
+): GameState {
   const size = settings.gridSize;
   const midY1 = Math.floor(size / 3);
   const midY2 = size - 1 - midY1;
 
   const p1: Snake = {
     id: 'p1',
-    name: 'PLAYER 1',
+    name: (playerNames?.p1 || 'PLAYER 1').toUpperCase().slice(0, 14),
     body: [
       { x: 2, y: midY1 },
       { x: 1, y: midY1 },
@@ -63,7 +66,7 @@ export function createInitialState(settings: GameSettings = DEFAULT_SETTINGS): G
 
   const p2: Snake = {
     id: 'p2',
-    name: 'PLAYER 2',
+    name: (playerNames?.p2 || 'PLAYER 2').toUpperCase().slice(0, 14),
     body: [
       { x: size - 3, y: midY2 },
       { x: size - 2, y: midY2 },
@@ -90,6 +93,7 @@ export function createInitialState(settings: GameSettings = DEFAULT_SETTINGS): G
     turnBased: settings.turnBased,
     phaseTurnsRemaining: settings.turnBased ? settings.raceTurns : 0,
     lastTurnTimes: null,
+    totalThinkTime: { p1: 0, p2: 0 },
     phase: 'RACING',
     phaseTimeRemaining: raceDurationMs,
     phaseEndTime: now + raceDurationMs,
