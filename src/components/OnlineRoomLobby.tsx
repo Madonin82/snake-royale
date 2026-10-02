@@ -3,10 +3,12 @@ import { Copy, Check, Play, Users, ArrowLeft, Activity } from 'lucide-react';
 
 interface OnlineRoomLobbyProps {
   roomId: string;
-  role: 'p1' | 'p2' | 'spectator' | null;
+  role: 'p1' | 'p2' | 'spectator' | 'server' | null;
   hasP1: boolean;
   hasP2: boolean;
   spectatorsCount: number;
+  playerNames: { p1: string; p2: string };
+  series: { p1: number; p2: number; draws: number };
   onStartMatch: () => void;
   onLeaveRoom: () => void;
   onOpenLatencyHarness: () => void;
@@ -18,6 +20,8 @@ export const OnlineRoomLobby: React.FC<OnlineRoomLobbyProps> = ({
   hasP1,
   hasP2,
   spectatorsCount,
+  playerNames,
+  series,
   onStartMatch,
   onLeaveRoom,
   onOpenLatencyHarness,
@@ -31,6 +35,8 @@ export const OnlineRoomLobby: React.FC<OnlineRoomLobbyProps> = ({
   };
 
   const isHost = role === 'p1';
+  const isServer = role === 'server';
+  const canStart = isHost || isServer;
   const bothPlayersReady = hasP1 && hasP2;
 
   return (
@@ -71,6 +77,13 @@ export const OnlineRoomLobby: React.FC<OnlineRoomLobbyProps> = ({
         {copied && <span className="text-[10px] font-bold">COPIED TO CLIPBOARD!</span>}
       </div>
 
+      {/* DM banner */}
+      {isServer && (
+        <div className="bg-[#0F380F] text-[#9BBC0F] p-2 border-2 border-[#0F380F] text-center text-[11px] font-black">
+          🐉 DM MODE — YOU RUN THE WORLD. TWO PLAYERS TAKE THE SEATS.
+        </div>
+      )}
+
       {/* Seat Roster */}
       <div className="grid grid-cols-2 gap-2">
         {/* Seat P1 */}
@@ -79,7 +92,7 @@ export const OnlineRoomLobby: React.FC<OnlineRoomLobbyProps> = ({
           <div className="flex items-center gap-2 mt-1">
             <span className="w-3 h-3 bg-[#0F380F] border border-[#0F380F]" />
             <span className="font-black text-xs">
-              {hasP1 ? (role === 'p1' ? 'YOU (HOST)' : 'PLAYER 1') : 'WAITING...'}
+              {hasP1 ? (role === 'p1' ? `${playerNames.p1} (YOU)` : playerNames.p1) : 'WAITING...'}
             </span>
           </div>
           <span className="text-[9px] opacity-75 mt-0.5">Runs Host Simulation</span>
@@ -91,7 +104,7 @@ export const OnlineRoomLobby: React.FC<OnlineRoomLobbyProps> = ({
           <div className="flex items-center gap-2 mt-1">
             <span className="w-3 h-3 bg-[#306230] border border-[#0F380F]" />
             <span className="font-black text-xs">
-              {hasP2 ? (role === 'p2' ? 'YOU (CHALLENGER)' : 'PLAYER 2 READY') : 'WAITING FOR OPPONENT...'}
+              {hasP2 ? (role === 'p2' ? `${playerNames.p2} (YOU)` : playerNames.p2) : 'WAITING FOR OPPONENT...'}
             </span>
           </div>
           <span className="text-[9px] opacity-75 mt-0.5">Remote Input Stream</span>
@@ -105,8 +118,16 @@ export const OnlineRoomLobby: React.FC<OnlineRoomLobbyProps> = ({
         </div>
       )}
 
+      {/* Series scoreboard */}
+      {(series.p1 + series.p2 + series.draws) > 0 && (
+        <div className="bg-[#8BAC0F] p-2 border-2 border-[#0F380F] text-center text-[11px] font-black">
+          🏆 SERIES — {playerNames.p1} {series.p1} · {playerNames.p2} {series.p2}
+          {series.draws > 0 ? ` · DRAWS ${series.draws}` : ''}
+        </div>
+      )}
+
       {/* Start Button */}
-      {isHost ? (
+      {canStart ? (
         <button
           onClick={onStartMatch}
           disabled={!bothPlayersReady}
@@ -117,7 +138,7 @@ export const OnlineRoomLobby: React.FC<OnlineRoomLobbyProps> = ({
           }`}
         >
           <Play className="w-4 h-4 fill-current" />
-          <span>{bothPlayersReady ? 'LAUNCH MATCH NOW' : 'WAITING FOR PLAYER 2 TO JOIN...'}</span>
+          <span>{bothPlayersReady ? 'LAUNCH MATCH NOW' : `WAITING FOR ${hasP1 ? 'PLAYER 2' : 'PLAYER 1'} TO JOIN...`}</span>
         </button>
       ) : (
         <div className="bg-[#8BAC0F] p-2.5 border border-[#0F380F] text-center text-xs font-bold">
