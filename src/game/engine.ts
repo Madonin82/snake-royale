@@ -9,7 +9,7 @@ export const GAMEBOY_COLORS = {
 };
 
 export const DEFAULT_SETTINGS: GameSettings = {
-  gridSize: 8,
+  gridSize: 16,
   tickRate: 5,
   raceDurationSeconds: 180, // 3 minutes
   shrinkIntervalSeconds: 10, // 10s per ring step
