@@ -113,7 +113,7 @@ export class NetworkManager {
       this.isConnected = true;
 
       // Spectators register a presence doc (drives the watcher count).
-      if (this.role === 'spectator') {
+      if (this.role === 'spectator' && this.roomId && uid) {
         const presenceRef = doc(db, 'rooms', this.roomId, 'spectators', uid);
         setDoc(presenceRef, { joinedAt: Date.now() }).catch(() => {});
       }
