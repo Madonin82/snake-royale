@@ -9,6 +9,7 @@ interface HudProps {
   onOpenLatencyHarness: () => void;
   onOpenSettings: () => void;
   gamepadCount: number;
+  locks?: { p1: boolean; p2: boolean };
 }
 
 export const Hud: React.FC<HudProps> = ({
@@ -17,6 +18,7 @@ export const Hud: React.FC<HudProps> = ({
   latencyReport,
   onOpenLatencyHarness,
   gamepadCount,
+  locks,
 }) => {
   const { p1, p2 } = gameState.snakes;
   const isRacing = gameState.phase === 'RACING';
@@ -55,11 +57,26 @@ export const Hud: React.FC<HudProps> = ({
           )}
         </div>
 
-        {/* Phase Clock */}
+        {/* Phase Clock / Turn Counter */}
         <div className="text-sm font-black tracking-widest bg-[#9BBC0F] px-2 py-0.5 border border-[#0F380F]">
-          ⏱️ {formattedTime}
+          {gameState.turnBased
+            ? `TURN ${gameState.tick} • ${gameState.phase === 'RACING' ? `${gameState.phaseTurnsRemaining} LEFT` : gameState.phase === 'SHRINKING' ? `RING IN ${gameState.phaseTurnsRemaining}` : '—'}`
+            : `⏱️ ${formattedTime}`}
         </div>
       </div>
+
+      {/* Turn-based lock status */}
+      {gameState.turnBased && locks && gameState.phase !== 'OVER' && (
+        <div className="flex items-center justify-between text-[10px] font-bold bg-[#8BAC0F] px-2.5 py-1 border-2 border-[#0F380F]">
+          <span className={locks.p1 ? 'text-[#0F380F]' : 'opacity-60'}>
+            P1 {locks.p1 ? '✓ MOVE LOCKED' : '… THINKING'}
+          </span>
+          <span className="opacity-70">BOTH LOCK → BOARD STEPS</span>
+          <span className={locks.p2 ? 'text-[#0F380F]' : 'opacity-60'}>
+            P2 {locks.p2 ? '✓ MOVE LOCKED' : '… THINKING'}
+          </span>
+        </div>
+      )}
 
       {/* Score Boards: P1 vs P2 */}
       <div className="grid grid-cols-2 gap-2">
