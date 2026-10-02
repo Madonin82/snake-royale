@@ -79,13 +79,15 @@ export const MatchEndModal: React.FC<MatchEndModalProps> = ({
 
         {/* Action Buttons */}
         <div className="flex flex-col gap-2 pt-1">
-          <button
-            onClick={onRematch}
-            className="w-full bg-[#0F380F] hover:bg-[#306230] text-[#9BBC0F] py-2.5 border-2 border-[#0F380F] font-black text-sm flex items-center justify-center gap-2 cursor-pointer transition-all shadow-[2px_2px_0px_#0F380F]"
-          >
-            <RotateCcw className="w-4 h-4" />
-            <span>PLAY AGAIN (REMATCH)</span>
-          </button>
+          {!isSpectator && (
+            <button
+              onClick={onRematch}
+              className="w-full bg-[#0F380F] hover:bg-[#306230] text-[#9BBC0F] py-2.5 border-2 border-[#0F380F] font-black text-sm flex items-center justify-center gap-2 cursor-pointer transition-all shadow-[2px_2px_0px_#0F380F]"
+            >
+              <RotateCcw className="w-4 h-4" />
+              <span>PLAY AGAIN (REMATCH)</span>
+            </button>
+          )}
 
           <button
             onClick={onReturnToLobby}
