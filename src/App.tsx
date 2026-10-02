@@ -522,6 +522,8 @@ export const App: React.FC = () => {
       matchNames = onlineRoleRef.current === 'p1'
         ? { p1: me || 'PLAYER 1', p2: playerNamesRef.current.p2 || 'PLAYER 2' }
         : { p1: playerNamesRef.current.p1 || 'PLAYER 1', p2: me || 'PLAYER 2' };
+    } else if (playMode === 'ONLINE_JOIN') {
+      matchNames = { p1: playerNamesRef.current.p1 || 'PLAYER 1', p2: me || 'PLAYER 2' };
     }
     const initial = createInitialState(settings, matchNames);
     seriesCountedRef.current = false;
@@ -591,6 +593,8 @@ export const App: React.FC = () => {
     await networkManager.connect(roomCode, undefined, displayName.trim() || undefined);
     const assigned = networkManager.getRole();
     if (assigned) setOnlineRole(assigned);
+    await networkManager.connect(roomCode, 'p2', displayName.trim() || undefined);
+    setOnlineRole('p2');
   };
 
   const handleLeaveRoom = () => {
