@@ -11,6 +11,9 @@ export const GAMEBOY_COLORS = {
 export const DEFAULT_SETTINGS: GameSettings = {
   gridSize: 16,
   tickRate: 5,
+  turnBased: true,
+  raceTurns: 90,
+  shrinkEveryTurns: 8,
   raceDurationSeconds: 180, // 3 minutes
   shrinkIntervalSeconds: 10, // 10s per ring step
   shrinkWarningSeconds: 2,   // 2s telegraph
@@ -84,6 +87,8 @@ export function createInitialState(settings: GameSettings = DEFAULT_SETTINGS): G
 
   return {
     tick: 0,
+    turnBased: settings.turnBased,
+    phaseTurnsRemaining: settings.turnBased ? settings.raceTurns : 0,
     phase: 'RACING',
     phaseTimeRemaining: raceDurationMs,
     phaseEndTime: now + raceDurationMs,
@@ -215,7 +220,47 @@ export function processGameTick(
   const maxRingInset = Math.floor(settings.gridSize / 2) - 1; // 8x8 -> max inset is 3 (2x2 remaining)
 
   // 1. PHASE PROGRESSION & SHRINK TIMING
-  if (state.phase === 'RACING') {
+  if (settings.turnBased) {
+    // TURN-BASED: phases advance by turns taken, never by wall clock.
+    // phaseTurnsRemaining = turns left in race / turns until next ring closes.
+    if (state.phase === 'RACING') {
+      state.phaseTurnsRemaining = Math.max(0, state.phaseTurnsRemaining - 1);
+      if (state.phaseTurnsRemaining <= 0) {
+        state.phase = 'SHRINKING';
+        state.phaseTurnsRemaining = settings.shrinkEveryTurns;
+        state.isTelegraphingShrink = false;
+      }
+    } else if (state.phase === 'SHRINKING') {
+      state.phaseTurnsRemaining = Math.max(0, state.phaseTurnsRemaining - 1);
+
+      // Telegraph the next ring closing during the final 2 turns of the countdown
+      if (state.ringInset < maxRingInset && state.phaseTurnsRemaining <= 2 && state.phaseTurnsRemaining > 0) {
+        if (!state.isTelegraphingShrink) {
+          state.isTelegraphingShrink = true;
+          state.telegraphRingInset = state.ringInset + 1;
+          events.shrinkTelegraphStarted = true;
+        }
+      } else if (state.phaseTurnsRemaining > 2) {
+        state.isTelegraphingShrink = false;
+      }
+
+      if (state.phaseTurnsRemaining <= 0) {
+        if (state.ringInset < maxRingInset) {
+          state.ringInset += 1;
+          events.ringShrunk = true;
+          state.isTelegraphingShrink = false;
+          // Eject tokens now outside arena
+          state.tokens = state.tokens.filter(t => isCellInArena(t, settings.gridSize, state.ringInset));
+          state.phaseTurnsRemaining = settings.shrinkEveryTurns;
+        } else {
+          // Arena fully closed and the countdown is spent: decide on tiebreakers
+          resolveMatchByTiebreakers(state, 'Arena fully closed');
+          events.matchEnded = true;
+          return { nextState: state, events };
+        }
+      }
+    }
+  } else if (state.phase === 'RACING') {
     if (state.phaseTimeRemaining <= 0) {
       state.phase = 'SHRINKING';
       state.phaseTimeRemaining = 120 * 1000; // 2 minutes for shrink phase
@@ -223,7 +268,7 @@ export function processGameTick(
     }
   }
 
-  if (state.phase === 'SHRINKING') {
+  if (!settings.turnBased && state.phase === 'SHRINKING') {
     const elapsedInShrink = (120 * 1000) - state.phaseTimeRemaining;
     const intervalMs = settings.shrinkIntervalSeconds * 1000;
     const warningMs = settings.shrinkWarningSeconds * 1000;

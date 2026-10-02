@@ -46,7 +46,7 @@ export const LobbyView: React.FC<LobbyViewProps> = ({
           <span className="text-xl">👑</span>
         </div>
         <div className="text-[11px] font-bold mt-1 text-[#306230] uppercase tracking-widest">
-          2-Player Token Race • 8×8 Battle Arena
+          {settings.turnBased ? 'Turn-Based Strategy' : '2-Player Token Race'} • {settings.gridSize}×{settings.gridSize} Battle Arena
         </div>
       </div>
 
@@ -153,7 +153,7 @@ export const LobbyView: React.FC<LobbyViewProps> = ({
         {tab === 'ONLINE' && (
           <div className="flex flex-col gap-3">
             <div className="text-xs font-bold leading-tight">
-              🌐 Host-authoritative real-time room with live Latency Harness!
+              🌐 Host-authoritative room with live Latency Harness! {settings.turnBased ? 'Turn-based: latency can\'t hurt you here.' : ''}
             </div>
 
             <div className="grid grid-cols-2 gap-2">
@@ -191,8 +191,18 @@ export const LobbyView: React.FC<LobbyViewProps> = ({
       <div className="bg-[#9BBC0F] p-2.5 border-2 border-[#0F380F] text-[10px] leading-relaxed">
         <div className="font-bold border-b border-[#0F380F] pb-1 mb-1">RULES BRIEFING:</div>
         <ul className="list-disc pl-4 space-y-0.5">
-          <li><strong>Phase 1 (3:00):</strong> Race for tokens. Each eaten token adds +1 segment & spawns escalating tokens next round.</li>
-          <li><strong>Phase 2 (2:00):</strong> No new tokens. Outer ring shrinks every 10s into deadly walls.</li>
+          {settings.turnBased ? (
+            <>
+              <li><strong>Turns:</strong> Both snakes pick a direction and lock it — the board steps only when both moves are in. No clock, no lag deaths.</li>
+              <li><strong>Phase 1 ({settings.raceTurns} turns):</strong> Race for tokens. Each eaten token adds +1 segment & spawns escalating tokens next round.</li>
+              <li><strong>Phase 2:</strong> No new tokens. Outer ring shrinks every {settings.shrinkEveryTurns} turns into deadly walls.</li>
+            </>
+          ) : (
+            <>
+              <li><strong>Phase 1 (3:00):</strong> Race for tokens. Each eaten token adds +1 segment & spawns escalating tokens next round.</li>
+              <li><strong>Phase 2 (2:00):</strong> No new tokens. Outer ring shrinks every 10s into deadly walls.</li>
+            </>
+          )}
           <li><strong>Win:</strong> Last snake alive. On tie/expiry: highest score, then longest length.</li>
         </ul>
       </div>
@@ -204,7 +214,7 @@ export const LobbyView: React.FC<LobbyViewProps> = ({
           className="flex items-center gap-1 bg-[#8BAC0F] hover:bg-[#0F380F] hover:text-[#9BBC0F] px-2 py-1 border border-[#0F380F] font-bold cursor-pointer transition-colors"
         >
           <Settings className="w-3.5 h-3.5" />
-          <span>SETTINGS ({settings.gridSize}×{settings.gridSize} / {settings.tickRate}tps)</span>
+          <span>SETTINGS ({settings.gridSize}×{settings.gridSize} / {settings.turnBased ? 'TURNS' : `${settings.tickRate}tps`})</span>
         </button>
 
         <button
