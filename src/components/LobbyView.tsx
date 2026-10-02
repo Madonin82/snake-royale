@@ -6,22 +6,28 @@ interface LobbyViewProps {
   onStartSolo: (difficulty: 'EASY' | 'MEDIUM' | 'HARD') => void;
   onStartLocal2P: () => void;
   onCreateOnlineRoom: () => void;
+  onCreateServerRoom: () => void;
   onJoinOnlineRoom: (roomCode: string) => void;
   onOpenSettings: () => void;
   onOpenLatencyHarness: () => void;
   gamepadCount: number;
   settings: GameSettings;
+  displayName: string;
+  onDisplayNameChange: (value: string) => void;
 }
 
 export const LobbyView: React.FC<LobbyViewProps> = ({
   onStartSolo,
   onStartLocal2P,
   onCreateOnlineRoom,
+  onCreateServerRoom,
   onJoinOnlineRoom,
   onOpenSettings,
   onOpenLatencyHarness,
   gamepadCount,
   settings,
+  displayName,
+  onDisplayNameChange,
 }) => {
   const [roomInput, setRoomInput] = useState('');
   const [difficulty, setDifficulty] = useState<'EASY' | 'MEDIUM' | 'HARD'>('MEDIUM');
@@ -48,6 +54,19 @@ export const LobbyView: React.FC<LobbyViewProps> = ({
         <div className="text-[11px] font-bold mt-1 text-[#306230] uppercase tracking-widest">
           {settings.turnBased ? 'Turn-Based Strategy' : '2-Player Token Race'} • {settings.gridSize}×{settings.gridSize} Battle Arena
         </div>
+      </div>
+
+      {/* Optional display name */}
+      <div className="flex items-center gap-2 bg-[#8BAC0F] p-2 border-2 border-[#0F380F]">
+        <label className="text-[10px] font-bold uppercase whitespace-nowrap">Your name<br />(optional):</label>
+        <input
+          type="text"
+          value={displayName}
+          onChange={(e) => onDisplayNameChange(e.target.value)}
+          placeholder="e.g. ANNIE"
+          maxLength={14}
+          className="flex-1 min-w-0 bg-[#9BBC0F] border-2 border-[#0F380F] px-2 py-1 font-black text-xs uppercase placeholder:text-[#306230]/50"
+        />
       </div>
 
       {/* Mode Selector Tabs */}
@@ -183,6 +202,15 @@ export const LobbyView: React.FC<LobbyViewProps> = ({
                 </button>
               </form>
             </div>
+
+            <button
+              onClick={onCreateServerRoom}
+              className="w-full bg-[#8BAC0F] hover:bg-[#306230] hover:text-[#9BBC0F] text-[#0F380F] py-2 px-2 border-2 border-dashed border-[#0F380F] font-bold text-xs flex items-center justify-center gap-2 cursor-pointer transition-all"
+              title="Run the simulation for two other players without taking a seat"
+            >
+              <Globe className="w-4 h-4" />
+              <span>HOST AS SERVER (DM MODE) — RUN THE WORLD, DON'T PLAY</span>
+            </button>
           </div>
         )}
       </div>
