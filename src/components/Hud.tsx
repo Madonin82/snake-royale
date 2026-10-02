@@ -11,6 +11,7 @@ interface HudProps {
   gamepadCount: number;
   locks?: { p1: boolean; p2: boolean };
   turnClock?: { startedAt: number; p1At: number | null; p2At: number | null };
+  viewerSeat?: 'p1' | 'p2' | null;
 }
 
 export const Hud: React.FC<HudProps> = ({
@@ -21,8 +22,18 @@ export const Hud: React.FC<HudProps> = ({
   gamepadCount,
   locks,
   turnClock,
+  viewerSeat,
 }) => {
   const { p1, p2 } = gameState.snakes;
+
+  // Who is "you" on this screen, per seat — drives the (YOU) tags.
+  const seatTag = (seat: 'p1' | 'p2'): string => {
+    if (playMode === 'ONLINE_SERVER') return seat === 'p1' ? '(P1)' : '(P2)';
+    if (playMode === 'SOLO_AI') return seat === 'p1' ? '(YOU)' : '(BOT)';
+    if (playMode === 'LOCAL_2P') return seat === 'p1' ? '(P1)' : '(P2)';
+    if (viewerSeat) return viewerSeat === seat ? '(YOU)' : '(REMOTE)';
+    return seat === 'p1' ? '(YOU)' : '';
+  };
   const isRacing = gameState.phase === 'RACING';
   const isShrinking = gameState.phase === 'SHRINKING';
 
@@ -35,13 +46,18 @@ export const Hud: React.FC<HudProps> = ({
   }, [gameState.turnBased, gameState.phase]);
 
   const fmtSecs = (ms: number) => `${(Math.max(0, ms) / 1000).toFixed(1)}s`;
+  const fmtTotal = (secs: number) => {
+    const m = Math.floor(secs / 60);
+    const s = Math.floor(secs % 60);
+    return m > 0 ? `${m}:${s < 10 ? '0' : ''}${s}` : `${s}s`;
+  };
   const thinkLabel = (who: 'p1' | 'p2') => {
-    if (!turnClock) return who === 'p1' ? 'P1' : 'P2';
+    const snake = who === 'p1' ? p1 : p2;
+    if (!turnClock) return snake.name;
     const at = who === 'p1' ? turnClock.p1At : turnClock.p2At;
-    const name = who === 'p1' ? 'P1' : 'P2';
     return at !== null
-      ? `${name} ✓ ${fmtSecs(at - turnClock.startedAt)}`
-      : `${name} … ${fmtSecs(nowMs - turnClock.startedAt)}`;
+      ? `${snake.name} ✓ ${fmtSecs(at - turnClock.startedAt)}`
+      : `${snake.name} … ${fmtSecs(nowMs - turnClock.startedAt)}`;
   };
 
   // Format seconds mm:ss
@@ -88,18 +104,19 @@ export const Hud: React.FC<HudProps> = ({
       {/* Turn-based lock status + per-player thinking time */}
       {gameState.turnBased && locks && gameState.phase !== 'OVER' && (
         <div className="flex flex-col gap-0.5 text-[10px] font-bold bg-[#8BAC0F] px-2.5 py-1 border-2 border-[#0F380F]">
-          <div className="flex items-center justify-between">
-            <span className={locks.p1 ? 'text-[#0F380F]' : 'opacity-60'}>
+          <div className="flex items-center justify-between gap-2">
+            <span className={`truncate ${locks.p1 ? 'text-[#0F380F]' : 'opacity-60'}`}>
               {thinkLabel('p1')}
             </span>
-            <span className="opacity-70">BOTH LOCK → BOARD STEPS</span>
-            <span className={locks.p2 ? 'text-[#0F380F]' : 'opacity-60'}>
+            <span className="opacity-70 whitespace-nowrap">BOTH LOCK → BOARD STEPS</span>
+            <span className={`truncate text-right ${locks.p2 ? 'text-[#0F380F]' : 'opacity-60'}`}>
               {thinkLabel('p2')}
             </span>
           </div>
           {gameState.lastTurnTimes && (
             <div className="text-center opacity-70">
-              LAST TURN — P1 {gameState.lastTurnTimes.p1.toFixed(1)}s · P2 {gameState.lastTurnTimes.p2.toFixed(1)}s
+              LAST TURN — {p1.name} {gameState.lastTurnTimes.p1.toFixed(1)}s · {p2.name} {gameState.lastTurnTimes.p2.toFixed(1)}s
+              {'  |  '}TOTAL — {p1.name} {fmtTotal(gameState.totalThinkTime.p1)} · {p2.name} {fmtTotal(gameState.totalThinkTime.p2)}
             </div>
           )}
         </div>
@@ -110,9 +127,9 @@ export const Hud: React.FC<HudProps> = ({
         {/* Player 1 Card */}
         <div className="bg-[#9BBC0F] p-2 border-2 border-[#0F380F] flex flex-col justify-between">
           <div className="flex items-center justify-between text-[11px] font-bold">
-            <span className="flex items-center gap-1">
-              <span className="w-2.5 h-2.5 bg-[#0F380F] inline-block border border-[#0F380F]" />
-              P1 {playMode === 'ONLINE_JOIN' ? '(HOST)' : '(YOU)'}
+            <span className="flex items-center gap-1 min-w-0">
+              <span className="w-2.5 h-2.5 shrink-0 bg-[#0F380F] inline-block border border-[#0F380F]" />
+              <span className="truncate">{p1.name} {seatTag('p1')}</span>
             </span>
             <span className="text-[10px] opacity-80">LEN: {p1.body.length}</span>
           </div>
@@ -125,9 +142,9 @@ export const Hud: React.FC<HudProps> = ({
         {/* Player 2 Card */}
         <div className="bg-[#9BBC0F] p-2 border-2 border-[#0F380F] flex flex-col justify-between">
           <div className="flex items-center justify-between text-[11px] font-bold">
-            <span className="flex items-center gap-1">
-              <span className="w-2.5 h-2.5 bg-[#306230] inline-block border border-[#0F380F]" />
-              P2 {playMode === 'SOLO_AI' ? '(BOT)' : playMode === 'ONLINE_HOST' ? '(REMOTE)' : '(YOU/P2)'}
+            <span className="flex items-center gap-1 min-w-0">
+              <span className="w-2.5 h-2.5 shrink-0 bg-[#306230] inline-block border border-[#0F380F]" />
+              <span className="truncate">{p2.name} {seatTag('p2')}</span>
             </span>
             <span className="text-[10px] opacity-80">LEN: {p2.body.length}</span>
           </div>
