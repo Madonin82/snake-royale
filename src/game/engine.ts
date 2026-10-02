@@ -89,6 +89,7 @@ export function createInitialState(settings: GameSettings = DEFAULT_SETTINGS): G
     tick: 0,
     turnBased: settings.turnBased,
     phaseTurnsRemaining: settings.turnBased ? settings.raceTurns : 0,
+    lastTurnTimes: null,
     phase: 'RACING',
     phaseTimeRemaining: raceDurationMs,
     phaseEndTime: now + raceDurationMs,

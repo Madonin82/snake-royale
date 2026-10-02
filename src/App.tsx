@@ -56,15 +56,36 @@ export const App: React.FC = () => {
   const [locks, setLocks] = useState<{ p1: boolean; p2: boolean }>({ p1: false, p2: false });
   const sentTickRef = useRef<number>(-1); // ONLINE_JOIN: tick we already sent a move for
 
+  // TURN CLOCK: when this turn started and when each player locked (ms epoch),
+  // so the HUD can show per-player thinking time. State mirror for rendering.
+  interface TurnClock { startedAt: number; p1At: number | null; p2At: number | null }
+  const turnClockRef = useRef<TurnClock>({ startedAt: Date.now(), p1At: null, p2At: null });
+  const [turnClock, setTurnClock] = useState<TurnClock>(turnClockRef.current);
+
+  const stampLockTime = useCallback((who: 'p1' | 'p2', atMs?: number) => {
+    const key = who === 'p1' ? 'p1At' : 'p2At';
+    if (turnClockRef.current[key] === null) {
+      turnClockRef.current = { ...turnClockRef.current, [key]: atMs ?? Date.now() };
+      setTurnClock(turnClockRef.current);
+    }
+  }, []);
+
+  const resetTurnClock = useCallback(() => {
+    turnClockRef.current = { startedAt: Date.now(), p1At: null, p2At: null };
+    setTurnClock(turnClockRef.current);
+  }, []);
+
   const setLock = useCallback((who: 'p1' | 'p2') => {
     locksRef.current = { ...locksRef.current, [who]: true };
     setLocks(locksRef.current);
-  }, []);
+    stampLockTime(who);
+  }, [stampLockTime]);
 
   const clearLocks = useCallback(() => {
     locksRef.current = { p1: false, p2: false };
     setLocks(locksRef.current);
-  }, []);
+    resetTurnClock();
+  }, [resetTurnClock]);
 
   // Sound effects for a completed step (shared by real-time loop + turn steps)
   const playTickEvents = useCallback((events: {
@@ -94,11 +115,18 @@ export const App: React.FC = () => {
       if (aiDir) queueSnakeDirection(current.snakes.p2, aiDir);
       locksRef.current = { ...locksRef.current, p2: true };
       setLocks(locksRef.current);
+      stampLockTime('p2', turnClockRef.current.startedAt); // bot thinks in 0.0s
     }
 
     if (!locksRef.current.p1 || !locksRef.current.p2) return;
 
+    // Record how long each player took to lock this turn (seconds, 0.1 precision).
+    const now = Date.now();
+    const clock = turnClockRef.current;
+    const secs = (at: number | null) => parseFloat((((at ?? now) - clock.startedAt) / 1000).toFixed(1));
+
     const { nextState, events } = processGameTick(stateRef.current, s, 0);
+    nextState.lastTurnTimes = { p1: secs(clock.p1At), p2: secs(clock.p2At) };
     playTickEvents(events);
     setGameState(nextState);
 
@@ -106,7 +134,7 @@ export const App: React.FC = () => {
       networkManager.broadcastState(nextState);
     }
     clearLocks();
-  }, [clearLocks, playTickEvents]);
+  }, [clearLocks, playTickEvents, stampLockTime]);
 
   // Handle Input routing
   const handleDirectionInput = useCallback((playerSlot: 1 | 2, dir: Direction) => {
@@ -530,6 +558,7 @@ export const App: React.FC = () => {
                 onOpenSettings={() => setSettingsModalOpen(true)}
                 gamepadCount={gamepadCount}
                 locks={locks}
+                turnClock={turnClock}
               />
               <GameBoard gameState={gameState} settings={settings} />
               <ControlsOverlay onDirection={(dir) => handleDirectionInput(1, dir)} />
