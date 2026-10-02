@@ -39,6 +39,7 @@ export interface GameState {
   turnBased: boolean; // copied from settings at match start (host is authoritative in online play)
   phaseTurnsRemaining: number; // turn-based only: turns left in race phase / turns until next ring closes
   lastTurnTimes: { p1: number; p2: number } | null; // turn-based only: seconds each player took to lock last turn (set by App, travels with synced state)
+  totalThinkTime: { p1: number; p2: number }; // turn-based only: cumulative seconds spent thinking this match
   phase: GamePhase;
   phaseTimeRemaining: number; // in milliseconds
   phaseEndTime: number; // timestamp
@@ -56,7 +57,7 @@ export interface GameState {
   totalMatchTime: number;
 }
 
-export type PlayMode = 'SOLO_AI' | 'LOCAL_2P' | 'ONLINE_HOST' | 'ONLINE_JOIN' | 'VIRTUAL_BOT';
+export type PlayMode = 'SOLO_AI' | 'LOCAL_2P' | 'ONLINE_HOST' | 'ONLINE_JOIN' | 'ONLINE_SERVER' | 'VIRTUAL_BOT';
 
 export interface LatencySample {
   pingId: string;
