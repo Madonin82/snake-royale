@@ -38,6 +38,7 @@ export interface GameState {
   tick: number;
   turnBased: boolean; // copied from settings at match start (host is authoritative in online play)
   phaseTurnsRemaining: number; // turn-based only: turns left in race phase / turns until next ring closes
+  lastTurnTimes: { p1: number; p2: number } | null; // turn-based only: seconds each player took to lock last turn (set by App, travels with synced state)
   phase: GamePhase;
   phaseTimeRemaining: number; // in milliseconds
   phaseEndTime: number; // timestamp
