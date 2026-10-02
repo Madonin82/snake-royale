@@ -21,7 +21,10 @@ export type GamePhase = 'LOBBY' | 'RACING' | 'SHRINKING' | 'OVER';
 
 export interface GameSettings {
   gridSize: number; // 8 (default), 12, 16
-  tickRate: number; // 5 ticks/sec default
+  tickRate: number; // 5 ticks/sec default (real-time mode only)
+  turnBased: boolean; // true = simultaneous turns: snakes step only when both players lock a move
+  raceTurns: number; // turn-based: turns in Phase 1 before shrink starts
+  shrinkEveryTurns: number; // turn-based: ring closes every N turns in Phase 2
   raceDurationSeconds: number; // 180s (3m)
   shrinkIntervalSeconds: number; // 10s
   shrinkWarningSeconds: number; // 2s telegraph
@@ -33,6 +36,8 @@ export interface GameSettings {
 
 export interface GameState {
   tick: number;
+  turnBased: boolean; // copied from settings at match start (host is authoritative in online play)
+  phaseTurnsRemaining: number; // turn-based only: turns left in race phase / turns until next ring closes
   phase: GamePhase;
   phaseTimeRemaining: number; // in milliseconds
   phaseEndTime: number; // timestamp
