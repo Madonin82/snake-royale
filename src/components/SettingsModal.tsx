@@ -37,6 +37,66 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
 
         {/* Options */}
         <div className="flex flex-col gap-3 text-xs font-bold">
+          {/* Play Style: turn-based vs real-time */}
+          <div className="flex flex-col gap-1">
+            <div className="flex items-center gap-1 opacity-90">
+              <Gauge className="w-3.5 h-3.5" />
+              <span>PLAY STYLE:</span>
+            </div>
+            <div className="grid grid-cols-2 gap-1">
+              <button
+                onClick={() => onUpdateSettings({ turnBased: true })}
+                className={`py-1.5 border border-[#0F380F] font-black cursor-pointer ${
+                  settings.turnBased
+                    ? 'bg-[#0F380F] text-[#9BBC0F]'
+                    : 'bg-[#8BAC0F] hover:bg-[#9BBC0F]'
+                }`}
+              >
+                TURN-BASED ★
+              </button>
+              <button
+                onClick={() => onUpdateSettings({ turnBased: false })}
+                className={`py-1.5 border border-[#0F380F] font-black cursor-pointer ${
+                  !settings.turnBased
+                    ? 'bg-[#0F380F] text-[#9BBC0F]'
+                    : 'bg-[#8BAC0F] hover:bg-[#9BBC0F]'
+                }`}
+              >
+                REAL-TIME
+              </button>
+            </div>
+            <div className="text-[10px] font-medium opacity-80 leading-tight">
+              {settings.turnBased
+                ? 'Snakes step only when BOTH players lock a direction — chess pace, latency-proof.'
+                : 'Classic clock-driven snake at the tick rate below.'}
+            </div>
+          </div>
+
+          {/* Race length in turns (turn-based only) */}
+          {settings.turnBased && (
+            <div className="flex flex-col gap-1">
+              <div className="flex items-center gap-1 opacity-90">
+                <Grid className="w-3.5 h-3.5" />
+                <span>RACE LENGTH (TURNS BEFORE SHRINK):</span>
+              </div>
+              <div className="grid grid-cols-3 gap-1">
+                {[60, 90, 120].map((turns) => (
+                  <button
+                    key={turns}
+                    onClick={() => onUpdateSettings({ raceTurns: turns })}
+                    className={`py-1.5 border border-[#0F380F] font-black cursor-pointer ${
+                      settings.raceTurns === turns
+                        ? 'bg-[#0F380F] text-[#9BBC0F]'
+                        : 'bg-[#8BAC0F] hover:bg-[#9BBC0F]'
+                    }`}
+                  >
+                    {turns} {turns === 90 ? '★' : ''}
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
+
           {/* Grid Size */}
           <div className="flex flex-col gap-1">
             <div className="flex items-center gap-1 opacity-90">
@@ -119,18 +179,6 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
             </button>
           </div>
 
-          {/* Game Boy Shell Toggle */}
-          <div className="flex items-center justify-between bg-[#8BAC0F] p-2 border border-[#0F380F]">
-            <span>HANDHELD SHELL FRAME</span>
-            <button
-              onClick={() => onUpdateSettings({ gameBoyFrameEnabled: !settings.gameBoyFrameEnabled })}
-              className={`px-3 py-1 border border-[#0F380F] font-black cursor-pointer ${
-                settings.gameBoyFrameEnabled ? 'bg-[#0F380F] text-[#9BBC0F]' : 'bg-[#9BBC0F]'
-              }`}
-            >
-              {settings.gameBoyFrameEnabled ? 'SHOW' : 'HIDE'}
-            </button>
-          </div>
         </div>
 
         {/* Footer */}
