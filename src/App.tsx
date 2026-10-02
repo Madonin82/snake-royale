@@ -18,6 +18,7 @@ import { LatencyHarnessModal } from './components/LatencyHarnessModal';
 import { SettingsModal } from './components/SettingsModal';
 import { MatchEndModal } from './components/MatchEndModal';
 import { ControlsOverlay } from './components/ControlsOverlay';
+import { ReplayControls } from './components/ReplayControls';
 import { ArrowLeft, Gamepad, RefreshCw, Volume2, VolumeX } from 'lucide-react';
 
 export const App: React.FC = () => {
@@ -36,6 +37,47 @@ export const App: React.FC = () => {
   const [settingsModalOpen, setSettingsModalOpen] = useState<boolean>(false);
   const [latencyReport, setLatencyReport] = useState<LatencyReport>(() => networkManager.getLatencyReport());
   const [gamepadCount, setGamepadCount] = useState<number>(0);
+
+  // Optional display name (persisted locally) + room seat names + series score
+  const [displayName, setDisplayName] = useState<string>(() => {
+    try { return localStorage.getItem('snake-royale-name') || ''; } catch { return ''; }
+  });
+  const [playerNames, setPlayerNames] = useState<{ p1: string; p2: string }>({ p1: 'PLAYER 1', p2: 'PLAYER 2' });
+  const playerNamesRef = useRef(playerNames);
+  playerNamesRef.current = playerNames;
+  const [series, setSeries] = useState<{ p1: number; p2: number; draws: number }>({ p1: 0, p2: 0, draws: 0 });
+  const seriesCountedRef = useRef<boolean>(false);
+
+  // MATCH REPLAY: every completed turn's state is recorded; the replay viewer
+  // plays them back at a steady pace (thinking pauses edited out).
+  const [matchHistory, setMatchHistory] = useState<GameState[]>([]);
+  const [replayActive, setReplayActive] = useState<boolean>(false);
+  const [replayIdx, setReplayIdx] = useState<number>(0);
+  const [replayPlaying, setReplayPlaying] = useState<boolean>(false);
+  const [replaySpeed, setReplaySpeed] = useState<number>(5);
+
+  const handleDisplayNameChange = useCallback((value: string) => {
+    setDisplayName(value);
+    try { localStorage.setItem('snake-royale-name', value); } catch { /* private mode */ }
+  }, []);
+
+  // Replay playback driver
+  useEffect(() => {
+    if (!replayActive || !replayPlaying) return;
+    const id = setInterval(() => {
+      setReplayIdx(prev => {
+        if (prev >= matchHistory.length - 1) {
+          setReplayPlaying(false);
+          return prev;
+        }
+        return prev + 1;
+      });
+    }, 1000 / replaySpeed);
+    return () => clearInterval(id);
+  }, [replayActive, replayPlaying, replaySpeed, matchHistory.length]);
+
+  // What the board + HUD render: live state, or the replayed turn while replaying.
+  const displayState = replayActive ? (matchHistory[replayIdx] ?? gameState) : gameState;
 
   const stateRef = useRef<GameState>(gameState);
   stateRef.current = gameState;
@@ -126,9 +168,15 @@ export const App: React.FC = () => {
     const secs = (at: number | null) => parseFloat((((at ?? now) - clock.startedAt) / 1000).toFixed(1));
 
     const { nextState, events } = processGameTick(stateRef.current, s, 0);
-    nextState.lastTurnTimes = { p1: secs(clock.p1At), p2: secs(clock.p2At) };
+    const turnTimes = { p1: secs(clock.p1At), p2: secs(clock.p2At) };
+    nextState.lastTurnTimes = turnTimes;
+    nextState.totalThinkTime = {
+      p1: parseFloat((stateRef.current.totalThinkTime.p1 + turnTimes.p1).toFixed(1)),
+      p2: parseFloat((stateRef.current.totalThinkTime.p2 + turnTimes.p2).toFixed(1)),
+    };
     playTickEvents(events);
     setGameState(nextState);
+    setMatchHistory(prev => [...prev, nextState]);
 
     if (playModeRef.current === 'ONLINE_HOST') {
       networkManager.broadcastState(nextState);
@@ -300,6 +348,13 @@ export const App: React.FC = () => {
           setHasP1(msg.hasP1);
           setHasP2(msg.hasP2);
           setSpectatorsCount(msg.spectatorsCount || 0);
+          if ('p1Name' in msg || 'p2Name' in msg) {
+            setPlayerNames({
+              p1: msg.p1Name || 'PLAYER 1',
+              p2: msg.p2Name || 'PLAYER 2',
+            });
+          }
+          if (msg.series) setSeries(msg.series);
           break;
         }
 
@@ -307,6 +362,11 @@ export const App: React.FC = () => {
           // Client received authoritative state from Host
           if (playModeRef.current === 'ONLINE_JOIN' && msg.state) {
             setGameState(msg.state);
+            setMatchHistory(prev =>
+              prev.length === 0 || msg.state.tick > prev[prev.length - 1].tick
+                ? [...prev, msg.state]
+                : prev
+            );
             if (settingsRef.current.turnBased) clearLocks(); // new turn: moves unlocked
             if (inOnlineLobby) {
               setInOnlineLobby(false);
@@ -406,6 +466,7 @@ export const App: React.FC = () => {
       }
 
       setGameState(nextState);
+      setMatchHistory(prev => [...prev, nextState]);
 
       // If online host, broadcast state to connected client
       if (playModeRef.current === 'ONLINE_HOST') {
@@ -416,9 +477,45 @@ export const App: React.FC = () => {
     return () => clearInterval(intervalId);
   }, [inLobby, inOnlineLobby, playMode, settings.tickRate, settings.turnBased]);
 
+  // Series scorebook: count each finished match exactly once.
+  // Online: only the host writes, to the room doc (the joining client reads it
+  // back via ROOM_MEMBERS_CHANGED). Solo/local: counted in local state.
+  useEffect(() => {
+    if (gameState.phase !== 'OVER' || seriesCountedRef.current) return;
+    if (playMode === 'ONLINE_JOIN') return;
+    if (!gameState.winner) return;
+    seriesCountedRef.current = true;
+    const w = gameState.winner;
+    if (playMode === 'ONLINE_HOST') {
+      networkManager.recordSeriesResult(w);
+    } else {
+      setSeries(prev => ({
+        p1: prev.p1 + (w === 'p1' ? 1 : 0),
+        p2: prev.p2 + (w === 'p2' ? 1 : 0),
+        draws: prev.draws + (w === 'DRAW' ? 1 : 0),
+      }));
+    }
+  }, [gameState.phase, gameState.winner, playMode]);
+
   // Start match helper
   const startNewMatch = () => {
-    const initial = createInitialState(settings);
+    const me = displayName.trim();
+    let matchNames = { p1: 'PLAYER 1', p2: 'PLAYER 2' };
+    if (playMode === 'SOLO_AI') {
+      matchNames = { p1: me || 'PLAYER 1', p2: 'BOT' };
+    } else if (playMode === 'LOCAL_2P') {
+      matchNames = { p1: me || 'PLAYER 1', p2: 'PLAYER 2' };
+    } else if (playMode === 'ONLINE_HOST') {
+      matchNames = { p1: me || 'PLAYER 1', p2: playerNamesRef.current.p2 || 'PLAYER 2' };
+    } else if (playMode === 'ONLINE_JOIN') {
+      matchNames = { p1: playerNamesRef.current.p1 || 'PLAYER 1', p2: me || 'PLAYER 2' };
+    }
+    const initial = createInitialState(settings, matchNames);
+    seriesCountedRef.current = false;
+    setMatchHistory([initial]);
+    setReplayActive(false);
+    setReplayIdx(0);
+    setReplayPlaying(false);
     setGameState(initial);
     clearLocks();
     sentTickRef.current = -1;
@@ -453,7 +550,7 @@ export const App: React.FC = () => {
     setInOnlineLobby(true);
     setInLobby(false);
 
-    await networkManager.connect(code, 'p1');
+    await networkManager.connect(code, 'p1', displayName.trim() || undefined);
     setOnlineRole('p1');
   };
 
@@ -465,7 +562,7 @@ export const App: React.FC = () => {
     setInOnlineLobby(true);
     setInLobby(false);
 
-    await networkManager.connect(roomCode, 'p2');
+    await networkManager.connect(roomCode, 'p2', displayName.trim() || undefined);
     setOnlineRole('p2');
   };
 
@@ -485,6 +582,8 @@ export const App: React.FC = () => {
   const handleReturnToLobby = () => {
     if (playMode === 'ONLINE_HOST' || playMode === 'ONLINE_JOIN') {
       networkManager.disconnect();
+      setSeries({ p1: 0, p2: 0, draws: 0 });
+      setPlayerNames({ p1: 'PLAYER 1', p2: 'PLAYER 2' });
     }
     setGameState(createInitialState(settingsRef.current));
     setInLobby(true);
@@ -536,6 +635,8 @@ export const App: React.FC = () => {
               onOpenLatencyHarness={() => setLatencyModalOpen(true)}
               gamepadCount={gamepadCount}
               settings={settings}
+              displayName={displayName}
+              onDisplayNameChange={handleDisplayNameChange}
             />
           ) : inOnlineLobby ? (
             <OnlineRoomLobby
@@ -544,6 +645,8 @@ export const App: React.FC = () => {
               hasP1={hasP1}
               hasP2={hasP2}
               spectatorsCount={spectatorsCount}
+              playerNames={playerNames}
+              series={series}
               onStartMatch={startNewMatch}
               onLeaveRoom={handleLeaveRoom}
               onOpenLatencyHarness={() => setLatencyModalOpen(true)}
@@ -551,17 +654,29 @@ export const App: React.FC = () => {
           ) : (
             <div className="flex flex-col items-center gap-2">
               <Hud
-                gameState={gameState}
+                gameState={displayState}
                 playMode={playMode}
                 latencyReport={latencyReport}
                 onOpenLatencyHarness={() => setLatencyModalOpen(true)}
                 onOpenSettings={() => setSettingsModalOpen(true)}
                 gamepadCount={gamepadCount}
-                locks={locks}
-                turnClock={turnClock}
+                locks={replayActive ? undefined : locks}
+                turnClock={replayActive ? undefined : turnClock}
               />
-              <GameBoard gameState={gameState} settings={settings} />
-              <ControlsOverlay onDirection={(dir) => handleDirectionInput(1, dir)} />
+              <GameBoard gameState={displayState} settings={settings} />
+              {!replayActive && <ControlsOverlay onDirection={(dir) => handleDirectionInput(1, dir)} />}
+              {replayActive && (
+                <ReplayControls
+                  index={replayIdx}
+                  total={matchHistory.length}
+                  playing={replayPlaying}
+                  speed={replaySpeed}
+                  onTogglePlay={() => setReplayPlaying(p => !p)}
+                  onSeek={(i) => setReplayIdx(i)}
+                  onSpeedChange={setReplaySpeed}
+                  onExit={() => { setReplayActive(false); setReplayPlaying(false); }}
+                />
+              )}
             </div>
           )}
         </div>
@@ -589,10 +704,17 @@ export const App: React.FC = () => {
         onUpdateSettings={(newVals) => setSettings(s => ({ ...s, ...newVals }))}
       />
 
-      {!inLobby && !inOnlineLobby && (
+      {!inLobby && !inOnlineLobby && !replayActive && (
         <MatchEndModal
           gameState={gameState}
           playMode={playMode}
+          series={series}
+          canReplay={matchHistory.length > 1}
+          onWatchReplay={() => {
+            setReplayActive(true);
+            setReplayIdx(0);
+            setReplayPlaying(true);
+          }}
           onRematch={handleRematch}
           onReturnToLobby={handleReturnToLobby}
         />
