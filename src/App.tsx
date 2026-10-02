@@ -27,7 +27,7 @@ export const App: React.FC = () => {
   const [inLobby, setInLobby] = useState<boolean>(true);
   const [inOnlineLobby, setInOnlineLobby] = useState<boolean>(false);
   const [onlineRoomId, setOnlineRoomId] = useState<string>('');
-  const [onlineRole, setOnlineRole] = useState<'p1' | 'p2' | 'spectator' | null>(null);
+  const [onlineRole, setOnlineRole] = useState<'p1' | 'p2' | 'spectator' | 'server' | null>(null);
   const [hasP1, setHasP1] = useState<boolean>(false);
   const [hasP2, setHasP2] = useState<boolean>(false);
   const [spectatorsCount, setSpectatorsCount] = useState<number>(0);
@@ -88,7 +88,7 @@ export const App: React.FC = () => {
   const playModeRef = useRef<PlayMode>(playMode);
   playModeRef.current = playMode;
 
-  const onlineRoleRef = useRef<'p1' | 'p2' | 'spectator' | null>(onlineRole);
+  const onlineRoleRef = useRef<'p1' | 'p2' | 'spectator' | 'server' | null>(onlineRole);
   onlineRoleRef.current = onlineRole;
 
   // TURN-BASED MOVE LOCKS
@@ -178,7 +178,7 @@ export const App: React.FC = () => {
     setGameState(nextState);
     setMatchHistory(prev => [...prev, nextState]);
 
-    if (playModeRef.current === 'ONLINE_HOST') {
+    if (playModeRef.current === 'ONLINE_HOST' || playModeRef.current === 'ONLINE_SERVER') {
       networkManager.broadcastState(nextState);
     }
     clearLocks();
@@ -189,6 +189,9 @@ export const App: React.FC = () => {
     const current = stateRef.current;
     if (current.phase === 'OVER' || inLobby || inOnlineLobby) return;
 
+    // The server has no snake of its own (DM mode): ignore local steering.
+    if (playModeRef.current === 'ONLINE_SERVER') return;
+
     soundEngine.playTick();
 
     // TURN-BASED: an input locks that player's move for this turn.
@@ -198,7 +201,7 @@ export const App: React.FC = () => {
         if (sentTickRef.current === current.tick) return;
         sentTickRef.current = current.tick;
         networkManager.sendInput(dir, current.tick);
-        setLock('p2');
+        setLock(onlineRoleRef.current === 'p1' ? 'p1' : 'p2');
         return;
       }
 
@@ -229,14 +232,15 @@ export const App: React.FC = () => {
     }
 
     if (playModeRef.current === 'ONLINE_JOIN') {
-      // Client (P2) sending input to Host
+      // Client (either seat) sending input to the simulation authority.
       networkManager.sendInput(dir, current.tick);
       // Optimistic local queued direction for instant responsive render
-      const p2 = { ...current.snakes.p2 };
-      queueSnakeDirection(p2, dir);
+      const myKey = onlineRoleRef.current === 'p1' ? 'p1' : 'p2';
+      const mine = { ...current.snakes[myKey] };
+      queueSnakeDirection(mine, dir);
       setGameState(prev => ({
         ...prev,
-        snakes: { ...prev.snakes, p2 }
+        snakes: { ...prev.snakes, [myKey]: mine }
       }));
       return;
     }
@@ -377,20 +381,25 @@ export const App: React.FC = () => {
         }
 
         case 'INPUT_SYNC': {
-          // Host received input from P2
-          if (playModeRef.current === 'ONLINE_HOST' && msg.role === 'p2' && msg.dir) {
+          // Simulation authority received a player's input.
+          // Host (plays P1): only P2's stream matters. Server: both streams.
+          const isAuthority =
+            (playModeRef.current === 'ONLINE_HOST' && msg.role === 'p2') ||
+            (playModeRef.current === 'ONLINE_SERVER' && (msg.role === 'p1' || msg.role === 'p2'));
+          if (isAuthority && msg.dir) {
             const current = stateRef.current;
             networkManager.recordTickLag(msg.tick, current.tick);
-            queueSnakeDirection(current.snakes.p2, msg.dir);
-            const p2 = { ...current.snakes.p2 };
-            queueSnakeDirection(p2, msg.dir);
+            const key = msg.role === 'p1' ? 'p1' : 'p2';
+            queueSnakeDirection(current.snakes[key], msg.dir);
+            const snakeCopy = { ...current.snakes[key] };
+            queueSnakeDirection(snakeCopy, msg.dir);
             setGameState(prev => ({
               ...prev,
-              snakes: { ...prev.snakes, p2 }
+              snakes: { ...prev.snakes, [key]: snakeCopy }
             }));
-            // Turn-based: P2's input locks their move; step when P1 has locked too.
+            // Turn-based: this input locks that player's move.
             if (settingsRef.current.turnBased) {
-              setLock('p2');
+              setLock(key);
               maybeAdvanceTurn();
             }
           }
@@ -468,8 +477,8 @@ export const App: React.FC = () => {
       setGameState(nextState);
       setMatchHistory(prev => [...prev, nextState]);
 
-      // If online host, broadcast state to connected client
-      if (playModeRef.current === 'ONLINE_HOST') {
+      // If online host/server, broadcast state to connected clients
+      if (playModeRef.current === 'ONLINE_HOST' || playModeRef.current === 'ONLINE_SERVER') {
         networkManager.broadcastState(nextState);
       }
     }, tickIntervalMs);
@@ -486,7 +495,7 @@ export const App: React.FC = () => {
     if (!gameState.winner) return;
     seriesCountedRef.current = true;
     const w = gameState.winner;
-    if (playMode === 'ONLINE_HOST') {
+    if (playMode === 'ONLINE_HOST' || playMode === 'ONLINE_SERVER') {
       networkManager.recordSeriesResult(w);
     } else {
       setSeries(prev => ({
@@ -507,6 +516,12 @@ export const App: React.FC = () => {
       matchNames = { p1: me || 'PLAYER 1', p2: 'PLAYER 2' };
     } else if (playMode === 'ONLINE_HOST') {
       matchNames = { p1: me || 'PLAYER 1', p2: playerNamesRef.current.p2 || 'PLAYER 2' };
+    } else if (playMode === 'ONLINE_SERVER') {
+      matchNames = { p1: playerNamesRef.current.p1 || 'PLAYER 1', p2: playerNamesRef.current.p2 || 'PLAYER 2' };
+    } else if (playMode === 'ONLINE_JOIN') {
+      matchNames = onlineRoleRef.current === 'p1'
+        ? { p1: me || 'PLAYER 1', p2: playerNamesRef.current.p2 || 'PLAYER 2' }
+        : { p1: playerNamesRef.current.p1 || 'PLAYER 1', p2: me || 'PLAYER 2' };
     } else if (playMode === 'ONLINE_JOIN') {
       matchNames = { p1: playerNamesRef.current.p1 || 'PLAYER 1', p2: me || 'PLAYER 2' };
     }
@@ -524,7 +539,7 @@ export const App: React.FC = () => {
 
     soundEngine.playCountdown(true);
 
-    if (playMode === 'ONLINE_HOST') {
+    if (playMode === 'ONLINE_HOST' || playMode === 'ONLINE_SERVER') {
       networkManager.broadcastState(initial);
     }
   };
@@ -542,7 +557,7 @@ export const App: React.FC = () => {
     startNewMatch();
   };
 
-  // Create Online Room
+  // Create Online Room (play as P1 host)
   const handleCreateOnlineRoom = async () => {
     const code = Math.random().toString(36).substring(2, 6).toUpperCase();
     setOnlineRoomId(code);
@@ -554,7 +569,20 @@ export const App: React.FC = () => {
     setOnlineRole('p1');
   };
 
-  // Join Online Room
+  // Create Online Room as a seat-less simulation server (DM mode):
+  // this browser runs the world; two other clients take the seats.
+  const handleCreateServerRoom = async () => {
+    const code = Math.random().toString(36).substring(2, 6).toUpperCase();
+    setOnlineRoomId(code);
+    setPlayMode('ONLINE_SERVER');
+    setInOnlineLobby(true);
+    setInLobby(false);
+
+    await networkManager.connect(code, 'server', displayName.trim() || undefined);
+    setOnlineRole('server');
+  };
+
+  // Join Online Room: claim whichever seat is free (P1 first, then P2).
   const handleJoinOnlineRoom = async (code: string) => {
     const roomCode = code.toUpperCase().trim();
     setOnlineRoomId(roomCode);
@@ -562,6 +590,9 @@ export const App: React.FC = () => {
     setInOnlineLobby(true);
     setInLobby(false);
 
+    await networkManager.connect(roomCode, undefined, displayName.trim() || undefined);
+    const assigned = networkManager.getRole();
+    if (assigned) setOnlineRole(assigned);
     await networkManager.connect(roomCode, 'p2', displayName.trim() || undefined);
     setOnlineRole('p2');
   };
@@ -573,14 +604,14 @@ export const App: React.FC = () => {
   };
 
   const handleRematch = () => {
-    if (playMode === 'ONLINE_HOST' || playMode === 'ONLINE_JOIN') {
+    if (playMode === 'ONLINE_HOST' || playMode === 'ONLINE_JOIN' || playMode === 'ONLINE_SERVER') {
       networkManager.requestRematch();
     }
     startNewMatch();
   };
 
   const handleReturnToLobby = () => {
-    if (playMode === 'ONLINE_HOST' || playMode === 'ONLINE_JOIN') {
+    if (playMode === 'ONLINE_HOST' || playMode === 'ONLINE_JOIN' || playMode === 'ONLINE_SERVER') {
       networkManager.disconnect();
       setSeries({ p1: 0, p2: 0, draws: 0 });
       setPlayerNames({ p1: 'PLAYER 1', p2: 'PLAYER 2' });
@@ -630,6 +661,7 @@ export const App: React.FC = () => {
               onStartSolo={handleStartSolo}
               onStartLocal2P={handleStartLocal2P}
               onCreateOnlineRoom={handleCreateOnlineRoom}
+              onCreateServerRoom={handleCreateServerRoom}
               onJoinOnlineRoom={handleJoinOnlineRoom}
               onOpenSettings={() => setSettingsModalOpen(true)}
               onOpenLatencyHarness={() => setLatencyModalOpen(true)}
@@ -662,6 +694,11 @@ export const App: React.FC = () => {
                 gamepadCount={gamepadCount}
                 locks={replayActive ? undefined : locks}
                 turnClock={replayActive ? undefined : turnClock}
+                viewerSeat={
+                  playMode === 'ONLINE_HOST' ? 'p1'
+                  : playMode === 'ONLINE_JOIN' ? (onlineRole === 'p1' ? 'p1' : onlineRole === 'p2' ? 'p2' : null)
+                  : null
+                }
               />
               <GameBoard gameState={displayState} settings={settings} />
               {!replayActive && <ControlsOverlay onDirection={(dir) => handleDirectionInput(1, dir)} />}

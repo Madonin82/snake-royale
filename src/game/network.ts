@@ -17,7 +17,7 @@ type MessageHandler = (data: any) => void;
 
 export class NetworkManager {
   private roomId: string = '';
-  private role: 'p1' | 'p2' | 'spectator' | null = null;
+  private role: 'p1' | 'p2' | 'spectator' | 'server' | null = null;
   private messageHandlers: Set<MessageHandler> = new Set();
   private isConnected: boolean = false;
   private firestoreUnsubs: Unsubscribe[] = [];
@@ -43,7 +43,7 @@ export class NetworkManager {
   private simulatedDelayMs: number = 0;
   private simulatedJitterMs: number = 0;
 
-  public async connect(roomId: string, requestedRole?: 'p1' | 'p2' | 'spectator', displayName?: string): Promise<boolean> {
+  public async connect(roomId: string, requestedRole?: 'p1' | 'p2' | 'spectator' | 'server', displayName?: string): Promise<boolean> {
     this.disconnect();
     this.roomId = roomId.toUpperCase().trim();
     const cleanName = (displayName || '').trim().slice(0, 14);
@@ -54,12 +54,14 @@ export class NetworkManager {
       const roomSnap = await getDoc(roomRef);
 
       if (!roomSnap.exists()) {
-        // Create new room as Host (P1)
-        this.role = requestedRole === 'p2' ? 'p2' : 'p1';
+        // Create new room. A 'server' host claims NO seat: it runs the
+        // simulation while two other clients play (DM mode).
+        this.role = requestedRole === 'p2' ? 'p2' : requestedRole === 'server' ? 'server' : 'p1';
         await setDoc(roomRef, {
           createdAt: Date.now(),
           p1Uid: this.role === 'p1' ? uid : null,
           p2Uid: this.role === 'p2' ? uid : null,
+          serverUid: this.role === 'server' ? uid : null,
           p1Name: this.role === 'p1' && cleanName ? cleanName : null,
           p2Name: this.role === 'p2' && cleanName ? cleanName : null,
           seriesP1: 0,
@@ -70,6 +72,10 @@ export class NetworkManager {
           status: 'lobby',
           lastActive: Date.now(),
         });
+      } else if (requestedRole === 'server') {
+        // Attach to an existing room as its simulation server.
+        this.role = 'server';
+        await updateDoc(roomRef, { serverUid: uid, lastActive: Date.now() }).catch(() => {});
       } else {
         const data = roomSnap.data();
         if (requestedRole === 'p1' || (!data.hasP1 && data.p1Uid !== uid)) {
@@ -148,23 +154,27 @@ export class NetworkManager {
       });
       this.firestoreUnsubs.push(unsubState);
 
-      // 3. Listen to Inputs (Host listens to P2; Client listens to P1)
-      const inputDocName = this.role === 'p1' ? 'p2' : 'p1';
-      const inputRef = doc(db, 'rooms', this.roomId, 'inputs', inputDocName);
-      const unsubInputs = onSnapshot(inputRef, (snapshot) => {
-        if (!snapshot.exists()) return;
-        const iData = snapshot.data();
-        if (iData && iData.dir && iData.tick !== undefined) {
-          this.notifyHandlers({
-            type: 'INPUT_SYNC',
-            role: inputDocName,
-            dir: iData.dir,
-            tick: iData.tick,
-            clientTime: iData.clientTime,
-          });
-        }
+      // 3. Listen to Inputs. Host hears P2; a server hears BOTH players;
+      // a client hears the opponent (informational only).
+      const inputRolesToHear: Array<'p1' | 'p2'> =
+        this.role === 'server' ? ['p1', 'p2'] : [this.role === 'p1' ? 'p2' : 'p1'];
+      inputRolesToHear.forEach((inputDocName) => {
+        const inputRef = doc(db, 'rooms', this.roomId, 'inputs', inputDocName);
+        const unsubInputs = onSnapshot(inputRef, (snapshot) => {
+          if (!snapshot.exists()) return;
+          const iData = snapshot.data();
+          if (iData && iData.dir && iData.tick !== undefined) {
+            this.notifyHandlers({
+              type: 'INPUT_SYNC',
+              role: inputDocName,
+              dir: iData.dir,
+              tick: iData.tick,
+              clientTime: iData.clientTime,
+            });
+          }
+        });
+        this.firestoreUnsubs.push(unsubInputs);
       });
-      this.firestoreUnsubs.push(unsubInputs);
 
       // 4. Listen to Pings (for Latency Harness)
       const pingsCol = collection(db, 'rooms', this.roomId, 'pings');
@@ -226,7 +236,7 @@ export class NetworkManager {
     this.roomId = '';
   }
 
-  public getRole(): 'p1' | 'p2' | 'spectator' | null {
+  public getRole(): 'p1' | 'p2' | 'spectator' | 'server' | null {
     return this.role;
   }
 
@@ -257,7 +267,8 @@ export class NetworkManager {
   }
 
   public broadcastState(state: GameState) {
-    if (!this.isConnected || this.role !== 'p1') return;
+    // The P1 host and the seat-less server are the two simulation authorities.
+    if (!this.isConnected || (this.role !== 'p1' && this.role !== 'server')) return;
 
     this.withSimulation(() => {
       const stateRef = doc(db, 'rooms', this.roomId, 'state', 'current');
@@ -292,9 +303,9 @@ export class NetworkManager {
     }).catch(() => {});
   }
 
-  // Host records a finished match in the room's running series score.
+  // Simulation authority records a finished match in the room's series score.
   public recordSeriesResult(winner: 'p1' | 'p2' | 'DRAW') {
-    if (!this.isConnected || !this.roomId || this.role !== 'p1') return;
+    if (!this.isConnected || !this.roomId || (this.role !== 'p1' && this.role !== 'server')) return;
     const roomRef = doc(db, 'rooms', this.roomId);
     const field = winner === 'p1' ? 'seriesP1' : winner === 'p2' ? 'seriesP2' : 'seriesDraws';
     updateDoc(roomRef, { [field]: increment(1), lastActive: Date.now() }).catch(() => {});

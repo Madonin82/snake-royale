@@ -6,6 +6,7 @@ interface LobbyViewProps {
   onStartSolo: (difficulty: 'EASY' | 'MEDIUM' | 'HARD') => void;
   onStartLocal2P: () => void;
   onCreateOnlineRoom: () => void;
+  onCreateServerRoom: () => void;
   onJoinOnlineRoom: (roomCode: string) => void;
   onOpenSettings: () => void;
   onOpenLatencyHarness: () => void;
@@ -19,6 +20,7 @@ export const LobbyView: React.FC<LobbyViewProps> = ({
   onStartSolo,
   onStartLocal2P,
   onCreateOnlineRoom,
+  onCreateServerRoom,
   onJoinOnlineRoom,
   onOpenSettings,
   onOpenLatencyHarness,
@@ -200,6 +202,15 @@ export const LobbyView: React.FC<LobbyViewProps> = ({
                 </button>
               </form>
             </div>
+
+            <button
+              onClick={onCreateServerRoom}
+              className="w-full bg-[#8BAC0F] hover:bg-[#306230] hover:text-[#9BBC0F] text-[#0F380F] py-2 px-2 border-2 border-dashed border-[#0F380F] font-bold text-xs flex items-center justify-center gap-2 cursor-pointer transition-all"
+              title="Run the simulation for two other players without taking a seat"
+            >
+              <Globe className="w-4 h-4" />
+              <span>HOST AS SERVER (DM MODE) — RUN THE WORLD, DON'T PLAY</span>
+            </button>
           </div>
         )}
       </div>

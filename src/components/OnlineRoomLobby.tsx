@@ -3,7 +3,7 @@ import { Copy, Check, Play, Users, ArrowLeft, Activity } from 'lucide-react';
 
 interface OnlineRoomLobbyProps {
   roomId: string;
-  role: 'p1' | 'p2' | 'spectator' | null;
+  role: 'p1' | 'p2' | 'spectator' | 'server' | null;
   hasP1: boolean;
   hasP2: boolean;
   spectatorsCount: number;
@@ -35,6 +35,8 @@ export const OnlineRoomLobby: React.FC<OnlineRoomLobbyProps> = ({
   };
 
   const isHost = role === 'p1';
+  const isServer = role === 'server';
+  const canStart = isHost || isServer;
   const bothPlayersReady = hasP1 && hasP2;
 
   return (
@@ -74,6 +76,13 @@ export const OnlineRoomLobby: React.FC<OnlineRoomLobbyProps> = ({
         </div>
         {copied && <span className="text-[10px] font-bold">COPIED TO CLIPBOARD!</span>}
       </div>
+
+      {/* DM banner */}
+      {isServer && (
+        <div className="bg-[#0F380F] text-[#9BBC0F] p-2 border-2 border-[#0F380F] text-center text-[11px] font-black">
+          🐉 DM MODE — YOU RUN THE WORLD. TWO PLAYERS TAKE THE SEATS.
+        </div>
+      )}
 
       {/* Seat Roster */}
       <div className="grid grid-cols-2 gap-2">
@@ -118,7 +127,7 @@ export const OnlineRoomLobby: React.FC<OnlineRoomLobbyProps> = ({
       )}
 
       {/* Start Button */}
-      {isHost ? (
+      {canStart ? (
         <button
           onClick={onStartMatch}
           disabled={!bothPlayersReady}
@@ -129,7 +138,7 @@ export const OnlineRoomLobby: React.FC<OnlineRoomLobbyProps> = ({
           }`}
         >
           <Play className="w-4 h-4 fill-current" />
-          <span>{bothPlayersReady ? 'LAUNCH MATCH NOW' : 'WAITING FOR PLAYER 2 TO JOIN...'}</span>
+          <span>{bothPlayersReady ? 'LAUNCH MATCH NOW' : `WAITING FOR ${hasP1 ? 'PLAYER 2' : 'PLAYER 1'} TO JOIN...`}</span>
         </button>
       ) : (
         <div className="bg-[#8BAC0F] p-2.5 border border-[#0F380F] text-center text-xs font-bold">
