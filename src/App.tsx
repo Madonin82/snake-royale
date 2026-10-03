@@ -3,11 +3,12 @@ import { Direction, GameSettings, GameState, LatencyReport, PlayMode } from './t
 import {
   createInitialState,
   DEFAULT_SETTINGS,
+  isOppositeDirection,
   processGameTick,
   queueSnakeDirection,
 } from './game/engine';
 import { calculateAIMove } from './game/ai';
-import { gamepadController } from './game/gamepad';
+import { gamepadController, GamepadMenuAction } from './game/gamepad';
 import { networkManager } from './game/network';
 import { soundEngine } from './audio/soundEngine';
 import { GameBoard } from './components/GameBoard';
@@ -19,7 +20,7 @@ import { SettingsModal } from './components/SettingsModal';
 import { MatchEndModal } from './components/MatchEndModal';
 import { ControlsOverlay } from './components/ControlsOverlay';
 import { ReplayControls } from './components/ReplayControls';
-import { ArrowLeft, Gamepad, RefreshCw, Volume2, VolumeX } from 'lucide-react';
+import { ArrowLeft, Volume2, VolumeX } from 'lucide-react';
 
 export const App: React.FC = () => {
   const [settings, setSettings] = useState<GameSettings>(DEFAULT_SETTINGS);
@@ -37,8 +38,9 @@ export const App: React.FC = () => {
   const [settingsModalOpen, setSettingsModalOpen] = useState<boolean>(false);
   const [latencyReport, setLatencyReport] = useState<LatencyReport>(() => networkManager.getLatencyReport());
   const [gamepadCount, setGamepadCount] = useState<number>(0);
+  const [isNintendoController, setIsNintendoController] = useState<boolean>(false);
 
-  // Optional display name (persisted locally) + room seat names + series score
+  // Optional display name + room seat names + series score
   const [displayName, setDisplayName] = useState<string>(() => {
     try { return localStorage.getItem('snake-royale-name') || ''; } catch { return ''; }
   });
@@ -48,8 +50,7 @@ export const App: React.FC = () => {
   const [series, setSeries] = useState<{ p1: number; p2: number; draws: number }>({ p1: 0, p2: 0, draws: 0 });
   const seriesCountedRef = useRef<boolean>(false);
 
-  // MATCH REPLAY: every completed turn's state is recorded; the replay viewer
-  // plays them back at a steady pace (thinking pauses edited out).
+  // MATCH REPLAY: recorded states
   const [matchHistory, setMatchHistory] = useState<GameState[]>([]);
   const [replayActive, setReplayActive] = useState<boolean>(false);
   const [replayIdx, setReplayIdx] = useState<number>(0);
@@ -76,7 +77,6 @@ export const App: React.FC = () => {
     return () => clearInterval(id);
   }, [replayActive, replayPlaying, replaySpeed, matchHistory.length]);
 
-  // What the board + HUD render: live state, or the replayed turn while replaying.
   const displayState = replayActive ? (matchHistory[replayIdx] ?? gameState) : gameState;
 
   const stateRef = useRef<GameState>(gameState);
@@ -91,15 +91,15 @@ export const App: React.FC = () => {
   const onlineRoleRef = useRef<'p1' | 'p2' | 'spectator' | 'server' | null>(onlineRole);
   onlineRoleRef.current = onlineRole;
 
+  // Active menu handler ref for zero-re-render gamepad/keyboard dispatch
+  const activeHandlerRef = useRef<((action: GamepadMenuAction) => void) | null>(null);
+
   // TURN-BASED MOVE LOCKS
-  // The board steps only when BOTH players have locked a direction for the
-  // current turn. Locks reset after every step. (refs for sync logic, state for HUD)
   const locksRef = useRef<{ p1: boolean; p2: boolean }>({ p1: false, p2: false });
   const [locks, setLocks] = useState<{ p1: boolean; p2: boolean }>({ p1: false, p2: false });
-  const sentTickRef = useRef<number>(-1); // ONLINE_JOIN: tick we already sent a move for
+  const sentTickRef = useRef<number>(-1);
 
-  // TURN CLOCK: when this turn started and when each player locked (ms epoch),
-  // so the HUD can show per-player thinking time. State mirror for rendering.
+  // TURN CLOCK
   interface TurnClock { startedAt: number; p1At: number | null; p2At: number | null }
   const turnClockRef = useRef<TurnClock>({ startedAt: Date.now(), p1At: null, p2At: null });
   const [turnClock, setTurnClock] = useState<TurnClock>(turnClockRef.current);
@@ -129,7 +129,6 @@ export const App: React.FC = () => {
     resetTurnClock();
   }, [resetTurnClock]);
 
-  // Sound effects for a completed step (shared by real-time loop + turn steps)
   const playTickEvents = useCallback((events: {
     tokenEatenP1: boolean;
     tokenEatenP2: boolean;
@@ -145,24 +144,21 @@ export const App: React.FC = () => {
     if (events.matchEnded) soundEngine.playVictory();
   }, []);
 
-  // Advance exactly one turn if both players have locked a move.
   const maybeAdvanceTurn = useCallback(() => {
     const current = stateRef.current;
     const s = settingsRef.current;
     if (!s.turnBased || current.phase === 'OVER') return;
 
-    // Solo vs bot: the bot locks the instant the human does.
     if (playModeRef.current === 'SOLO_AI' && !locksRef.current.p2) {
       const aiDir = calculateAIMove(current, s.gridSize, 'p2', s.botDifficulty);
       if (aiDir) queueSnakeDirection(current.snakes.p2, aiDir);
       locksRef.current = { ...locksRef.current, p2: true };
       setLocks(locksRef.current);
-      stampLockTime('p2', turnClockRef.current.startedAt); // bot thinks in 0.0s
+      stampLockTime('p2', turnClockRef.current.startedAt);
     }
 
     if (!locksRef.current.p1 || !locksRef.current.p2) return;
 
-    // Record how long each player took to lock this turn (seconds, 0.1 precision).
     const now = Date.now();
     const clock = turnClockRef.current;
     const secs = (at: number | null) => parseFloat((((at ?? now) - clock.startedAt) / 1000).toFixed(1));
@@ -184,90 +180,189 @@ export const App: React.FC = () => {
     clearLocks();
   }, [clearLocks, playTickEvents, stampLockTime]);
 
-  // Handle Input routing
   const handleDirectionInput = useCallback((playerSlot: 1 | 2, dir: Direction) => {
     const current = stateRef.current;
     if (current.phase === 'OVER' || inLobby || inOnlineLobby) return;
-
-    // The server and spectators have no snake: ignore local steering.
     if (playModeRef.current === 'ONLINE_SERVER' || playModeRef.current === 'ONLINE_SPECTATOR') return;
+
+    let targetKey: 'p1' | 'p2';
+    if (playModeRef.current === 'SOLO_AI') {
+      targetKey = 'p1';
+    } else if (playModeRef.current === 'ONLINE_HOST') {
+      targetKey = 'p1';
+    } else if (playModeRef.current === 'ONLINE_JOIN') {
+      targetKey = onlineRoleRef.current === 'p1' ? 'p1' : 'p2';
+    } else if (playModeRef.current === 'LOCAL_2P') {
+      targetKey = playerSlot === 2 ? 'p2' : 'p1';
+    } else {
+      targetKey = 'p1';
+    }
+
+    const currentSnake = current.snakes[targetKey];
+    if (!currentSnake || !currentSnake.isAlive) return;
+
+    const effectiveDir = currentSnake.queuedDirection || currentSnake.direction;
+    if (isOppositeDirection(effectiveDir, dir)) {
+      return;
+    }
 
     soundEngine.playTick();
 
-    // TURN-BASED: an input locks that player's move for this turn.
     if (settingsRef.current.turnBased) {
       if (playModeRef.current === 'ONLINE_JOIN') {
-        // One locked move per turn: ignore extra presses until state advances.
         if (sentTickRef.current === current.tick) return;
         sentTickRef.current = current.tick;
         networkManager.sendInput(dir, current.tick);
-        setLock(onlineRoleRef.current === 'p1' ? 'p1' : 'p2');
+        setLock(targetKey);
         return;
       }
 
-      if (playerSlot === 1) {
-        if (locksRef.current.p1) return; // already locked this turn
-        queueSnakeDirection(stateRef.current.snakes.p1, dir);
-        const p1 = { ...current.snakes.p1 };
-        queueSnakeDirection(p1, dir);
-        setGameState(prev => ({
-          ...prev,
-          snakes: { ...prev.snakes, p1 }
-        }));
-        setLock('p1');
-        maybeAdvanceTurn();
-      } else if (playerSlot === 2 && playModeRef.current === 'LOCAL_2P') {
-        if (locksRef.current.p2) return; // already locked this turn
-        queueSnakeDirection(stateRef.current.snakes.p2, dir);
-        const p2 = { ...current.snakes.p2 };
-        queueSnakeDirection(p2, dir);
-        setGameState(prev => ({
-          ...prev,
-          snakes: { ...prev.snakes, p2 }
-        }));
-        setLock('p2');
-        maybeAdvanceTurn();
-      }
+      if (locksRef.current[targetKey]) return;
+
+      queueSnakeDirection(stateRef.current.snakes[targetKey], dir);
+      const snakeCopy = { ...current.snakes[targetKey], queuedDirection: dir };
+      setGameState(prev => ({
+        ...prev,
+        snakes: { ...prev.snakes, [targetKey]: snakeCopy }
+      }));
+      setLock(targetKey);
+      maybeAdvanceTurn();
       return;
     }
 
     if (playModeRef.current === 'ONLINE_JOIN') {
-      // Client (either seat) sending input to the simulation authority.
       networkManager.sendInput(dir, current.tick);
-      // Optimistic local queued direction for instant responsive render
-      const myKey = onlineRoleRef.current === 'p1' ? 'p1' : 'p2';
-      const mine = { ...current.snakes[myKey] };
-      queueSnakeDirection(mine, dir);
+      const snakeCopy = { ...current.snakes[targetKey], queuedDirection: dir };
       setGameState(prev => ({
         ...prev,
-        snakes: { ...prev.snakes, [myKey]: mine }
+        snakes: { ...prev.snakes, [targetKey]: snakeCopy }
       }));
       return;
     }
 
-    if (playerSlot === 1) {
-      queueSnakeDirection(stateRef.current.snakes.p1, dir);
-      const p1 = { ...current.snakes.p1 };
-      queueSnakeDirection(p1, dir);
-      setGameState(prev => ({
-        ...prev,
-        snakes: { ...prev.snakes, p1 }
-      }));
-    } else if (playerSlot === 2 && playModeRef.current === 'LOCAL_2P') {
-      queueSnakeDirection(stateRef.current.snakes.p2, dir);
-      const p2 = { ...current.snakes.p2 };
-      queueSnakeDirection(p2, dir);
-      setGameState(prev => ({
-        ...prev,
-        snakes: { ...prev.snakes, p2 }
-      }));
+    queueSnakeDirection(stateRef.current.snakes[targetKey], dir);
+    const snakeCopy = { ...current.snakes[targetKey], queuedDirection: dir };
+    setGameState(prev => ({
+      ...prev,
+      snakes: { ...prev.snakes, [targetKey]: snakeCopy }
+    }));
+  }, [inLobby, inOnlineLobby, maybeAdvanceTurn, setLock]);
+
+  const handleReturnToLobby = useCallback(() => {
+    if (playModeRef.current === 'ONLINE_HOST' || playModeRef.current === 'ONLINE_JOIN' || playModeRef.current === 'ONLINE_SERVER' || playModeRef.current === 'ONLINE_SPECTATOR') {
+      networkManager.disconnect();
+      setSeries({ p1: 0, p2: 0, draws: 0 });
+      setPlayerNames({ p1: 'PLAYER 1', p2: 'PLAYER 2' });
     }
-  }, [inLobby, inOnlineLobby]);
+    setGameState(createInitialState(settingsRef.current));
+    setInLobby(true);
+    setInOnlineLobby(false);
+    setReplayActive(false);
+    setSettingsModalOpen(false);
+    setLatencyModalOpen(false);
+  }, []);
+
+  const handleMenuAction = useCallback((action: GamepadMenuAction, _slot: 1 | 2) => {
+    if (activeHandlerRef.current) {
+      activeHandlerRef.current(action);
+    }
+  }, []);
+
+  // Gamepad controller listener setup (run once)
+  useEffect(() => {
+    gamepadController.setCallback((slot, dir) => {
+      handleDirectionInput(slot, dir);
+    });
+
+    gamepadController.setMenuCallback((action, slot) => {
+      handleMenuAction(action, slot);
+    });
+
+    setGamepadCount(gamepadController.getConnectedGamepads().length);
+    setIsNintendoController(gamepadController.isNintendoSwitchController());
+
+    const checkPads = setInterval(() => {
+      const pads = gamepadController.getConnectedGamepads();
+      setGamepadCount(pads.length);
+      setIsNintendoController(gamepadController.isNintendoSwitchController());
+    }, 500);
+
+    return () => {
+      clearInterval(checkPads);
+      gamepadController.cleanup();
+    };
+  }, [handleDirectionInput, handleMenuAction]);
 
   // Keyboard controls listener
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
-      // Player 1 controls (WASD & Arrow Keys if in solo/online)
+      const activeEl = document.activeElement;
+      const isInputFocused = activeEl instanceof HTMLInputElement || activeEl instanceof HTMLTextAreaElement;
+
+      const isInMenuOrModal =
+        inLobby ||
+        inOnlineLobby ||
+        settingsModalOpen ||
+        latencyModalOpen ||
+        gameState.phase === 'OVER' ||
+        replayActive;
+
+      if (isInMenuOrModal) {
+        if (e.key === 'Escape') {
+          handleMenuAction('CANCEL', 1);
+          return;
+        }
+
+        if (isInputFocused) {
+          if (e.key === 'Enter') {
+            handleMenuAction('CONFIRM', 1);
+          }
+          return;
+        }
+
+        switch (e.key) {
+          case 'ArrowUp':
+          case 'KeyW':
+          case 'w':
+          case 'W':
+            handleMenuAction('UP', 1);
+            e.preventDefault();
+            break;
+          case 'ArrowDown':
+          case 'KeyS':
+          case 's':
+          case 'S':
+            handleMenuAction('DOWN', 1);
+            e.preventDefault();
+            break;
+          case 'ArrowLeft':
+          case 'KeyA':
+          case 'a':
+          case 'A':
+            handleMenuAction('LEFT', 1);
+            e.preventDefault();
+            break;
+          case 'ArrowRight':
+          case 'KeyD':
+          case 'd':
+          case 'D':
+            handleMenuAction('RIGHT', 1);
+            e.preventDefault();
+            break;
+          case 'Enter':
+          case ' ':
+            handleMenuAction('CONFIRM', 1);
+            e.preventDefault();
+            break;
+          case 'Tab':
+            handleMenuAction(e.shiftKey ? 'PREV_TAB' : 'NEXT_TAB', 1);
+            e.preventDefault();
+            break;
+        }
+        return;
+      }
+
+      // In-Game snake controls
       switch (e.code) {
         case 'KeyW':
           handleDirectionInput(1, 'UP');
@@ -282,7 +377,6 @@ export const App: React.FC = () => {
           handleDirectionInput(1, 'RIGHT');
           break;
 
-        // Player 2 controls in Local 2P (IJKL & Arrows)
         case 'KeyI':
           handleDirectionInput(2, 'UP');
           break;
@@ -317,24 +411,16 @@ export const App: React.FC = () => {
 
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [handleDirectionInput]);
-
-  // Gamepad controller listener
-  useEffect(() => {
-    gamepadController.setCallback((slot, dir) => {
-      handleDirectionInput(slot, dir);
-    });
-
-    const checkPads = setInterval(() => {
-      const pads = gamepadController.getConnectedGamepads();
-      setGamepadCount(pads.length);
-    }, 1000);
-
-    return () => {
-      clearInterval(checkPads);
-      gamepadController.cleanup();
-    };
-  }, [handleDirectionInput]);
+  }, [
+    handleDirectionInput,
+    handleMenuAction,
+    inLobby,
+    inOnlineLobby,
+    settingsModalOpen,
+    latencyModalOpen,
+    gameState.phase,
+    replayActive,
+  ]);
 
   // Network message handling
   useEffect(() => {
@@ -363,7 +449,6 @@ export const App: React.FC = () => {
         }
 
         case 'STATE_SYNC': {
-          // Client received authoritative state from Host
           if ((playModeRef.current === 'ONLINE_JOIN' || playModeRef.current === 'ONLINE_SPECTATOR') && msg.state) {
             setGameState(msg.state);
             setMatchHistory(prev =>
@@ -371,7 +456,7 @@ export const App: React.FC = () => {
                 ? [...prev, msg.state]
                 : prev
             );
-            if (settingsRef.current.turnBased) clearLocks(); // new turn: moves unlocked
+            if (settingsRef.current.turnBased) clearLocks();
             if (inOnlineLobby) {
               setInOnlineLobby(false);
               setInLobby(false);
@@ -381,8 +466,6 @@ export const App: React.FC = () => {
         }
 
         case 'INPUT_SYNC': {
-          // Simulation authority received a player's input.
-          // Host (plays P1): only P2's stream matters. Server: both streams.
           const isAuthority =
             (playModeRef.current === 'ONLINE_HOST' && msg.role === 'p2') ||
             (playModeRef.current === 'ONLINE_SERVER' && (msg.role === 'p1' || msg.role === 'p2'));
@@ -397,7 +480,6 @@ export const App: React.FC = () => {
               ...prev,
               snakes: { ...prev.snakes, [key]: snakeCopy }
             }));
-            // Turn-based: this input locks that player's move.
             if (settingsRef.current.turnBased) {
               setLock(key);
               maybeAdvanceTurn();
@@ -413,7 +495,6 @@ export const App: React.FC = () => {
 
         case 'RESTART_MATCH': {
           if (playModeRef.current === 'ONLINE_SPECTATOR') {
-            // Spectators just reset their recording; the host re-deals the match.
             setMatchHistory([]);
             setReplayActive(false);
             setReplayIdx(0);
@@ -431,7 +512,7 @@ export const App: React.FC = () => {
     return () => {
       unsubscribe();
     };
-  }, [inOnlineLobby]);
+  }, [inOnlineLobby, clearLocks, maybeAdvanceTurn, setLock]);
 
   // Latency Report Polling
   useEffect(() => {
@@ -441,12 +522,52 @@ export const App: React.FC = () => {
     return () => clearInterval(interval);
   }, []);
 
-  // Main Simulation Loop (Runs on Host / Local — real-time mode only;
-  // turn-based matches step event-driven from maybeAdvanceTurn instead)
+  // Agent JSON State Blob synchronization (window.__SNAKE_ROYALE_STATE & <script id="snake-state">)
+  useEffect(() => {
+    const agentState = {
+      turn: gameState.tick,
+      phase: gameState.phase,
+      round: gameState.round,
+      gridSize: settings.gridSize,
+      snakes: {
+        p1: {
+          head: gameState.snakes.p1.body[0] || { x: 0, y: 0 },
+          body: gameState.snakes.p1.body,
+          facing: gameState.snakes.p1.direction,
+          score: gameState.snakes.p1.score,
+          length: gameState.snakes.p1.body.length,
+          locked: locks.p1,
+          isAlive: gameState.snakes.p1.isAlive,
+        },
+        p2: {
+          head: gameState.snakes.p2.body[0] || { x: 0, y: 0 },
+          body: gameState.snakes.p2.body,
+          facing: gameState.snakes.p2.direction,
+          score: gameState.snakes.p2.score,
+          length: gameState.snakes.p2.body.length,
+          locked: locks.p2,
+          isAlive: gameState.snakes.p2.isAlive,
+        }
+      },
+      tokens: gameState.tokens,
+      ringInset: gameState.ringInset,
+      gameOver: gameState.phase === 'OVER',
+      winner: gameState.winner,
+      turnLocks: locks,
+    };
+
+    (window as any).__SNAKE_ROYALE_STATE = agentState;
+    const scriptEl = document.getElementById('snake-state');
+    if (scriptEl) {
+      scriptEl.textContent = JSON.stringify(agentState, null, 2);
+    }
+  }, [gameState, locks, settings.gridSize]);
+
+  // Main Simulation Loop for Real-time mode
   useEffect(() => {
     if (inLobby || inOnlineLobby) return;
-    if (playMode === 'ONLINE_JOIN' || playMode === 'ONLINE_SPECTATOR') return; // Clients/spectators only listen to state updates
-    if (settings.turnBased) return; // No wall-clock loop in turn-based mode
+    if (playMode === 'ONLINE_JOIN' || playMode === 'ONLINE_SPECTATOR') return;
+    if (settings.turnBased) return;
 
     const tickIntervalMs = 1000 / settings.tickRate;
 
@@ -454,7 +575,6 @@ export const App: React.FC = () => {
       const current = stateRef.current;
       if (current.phase === 'OVER') return;
 
-      // If Solo AI mode, compute AI move for Player 2
       if (playModeRef.current === 'SOLO_AI') {
         const aiDir = calculateAIMove(
           current,
@@ -467,30 +587,17 @@ export const App: React.FC = () => {
         }
       }
 
-      // Process Game Tick
       const { nextState, events } = processGameTick(current, settingsRef.current, tickIntervalMs);
 
-      // Play sound effects for events
-      if (events.tokenEatenP1 || events.tokenEatenP2) {
-        soundEngine.playTokenEat();
-      }
-      if (events.shrinkTelegraphStarted) {
-        soundEngine.playShrinkWarning();
-      }
-      if (events.ringShrunk) {
-        soundEngine.playRingShrunk();
-      }
-      if (events.deathOccurred) {
-        soundEngine.playCrash();
-      }
-      if (events.matchEnded) {
-        soundEngine.playVictory();
-      }
+      if (events.tokenEatenP1 || events.tokenEatenP2) soundEngine.playTokenEat();
+      if (events.shrinkTelegraphStarted) soundEngine.playShrinkWarning();
+      if (events.ringShrunk) soundEngine.playRingShrunk();
+      if (events.deathOccurred) soundEngine.playCrash();
+      if (events.matchEnded) soundEngine.playVictory();
 
       setGameState(nextState);
       setMatchHistory(prev => [...prev, nextState]);
 
-      // If online host/server, broadcast state to connected clients
       if (playModeRef.current === 'ONLINE_HOST' || playModeRef.current === 'ONLINE_SERVER') {
         networkManager.broadcastState(nextState);
       }
@@ -499,9 +606,7 @@ export const App: React.FC = () => {
     return () => clearInterval(intervalId);
   }, [inLobby, inOnlineLobby, playMode, settings.tickRate, settings.turnBased]);
 
-  // Series scorebook: count each finished match exactly once.
-  // Online: only the host writes, to the room doc (the joining client reads it
-  // back via ROOM_MEMBERS_CHANGED). Solo/local: counted in local state.
+  // Series scorebook
   useEffect(() => {
     if (gameState.phase !== 'OVER' || seriesCountedRef.current) return;
     if (playMode === 'ONLINE_JOIN' || playMode === 'ONLINE_SPECTATOR') return;
@@ -519,7 +624,6 @@ export const App: React.FC = () => {
     }
   }, [gameState.phase, gameState.winner, playMode]);
 
-  // Start match helper
   const startNewMatch = () => {
     const me = displayName.trim();
     let matchNames = { p1: 'PLAYER 1', p2: 'PLAYER 2' };
@@ -555,20 +659,17 @@ export const App: React.FC = () => {
     }
   };
 
-  // Solo Start
   const handleStartSolo = (diff: 'EASY' | 'MEDIUM' | 'HARD') => {
     setSettings(prev => ({ ...prev, botDifficulty: diff }));
     setPlayMode('SOLO_AI');
     startNewMatch();
   };
 
-  // Local 2P Start
   const handleStartLocal2P = () => {
     setPlayMode('LOCAL_2P');
     startNewMatch();
   };
 
-  // Create Online Room (play as P1 host)
   const handleCreateOnlineRoom = async () => {
     const code = Math.random().toString(36).substring(2, 6).toUpperCase();
     setOnlineRoomId(code);
@@ -580,8 +681,6 @@ export const App: React.FC = () => {
     setOnlineRole('p1');
   };
 
-  // Create Online Room as a seat-less simulation server (DM mode):
-  // this browser runs the world; two other clients take the seats.
   const handleCreateServerRoom = async () => {
     const code = Math.random().toString(36).substring(2, 6).toUpperCase();
     setOnlineRoomId(code);
@@ -593,7 +692,6 @@ export const App: React.FC = () => {
     setOnlineRole('server');
   };
 
-  // Join Online Room: claim whichever seat is free (P1 first, then P2).
   const handleJoinOnlineRoom = async (code: string) => {
     const roomCode = code.toUpperCase().trim();
     setOnlineRoomId(roomCode);
@@ -606,7 +704,6 @@ export const App: React.FC = () => {
     if (assigned) setOnlineRole(assigned);
   };
 
-  // Watch a room as a public spectator (no seat, no input).
   const handleSpectateRoom = async (code: string) => {
     const roomCode = code.toUpperCase().trim();
     if (!roomCode) return;
@@ -632,17 +729,6 @@ export const App: React.FC = () => {
       networkManager.requestRematch();
     }
     startNewMatch();
-  };
-
-  const handleReturnToLobby = () => {
-    if (playMode === 'ONLINE_HOST' || playMode === 'ONLINE_JOIN' || playMode === 'ONLINE_SERVER' || playMode === 'ONLINE_SPECTATOR') {
-      networkManager.disconnect();
-      setSeries({ p1: 0, p2: 0, draws: 0 });
-      setPlayerNames({ p1: 'PLAYER 1', p2: 'PLAYER 2' });
-    }
-    setGameState(createInitialState(settingsRef.current));
-    setInLobby(true);
-    setInOnlineLobby(false);
   };
 
   return (
@@ -694,6 +780,8 @@ export const App: React.FC = () => {
               settings={settings}
               displayName={displayName}
               onDisplayNameChange={handleDisplayNameChange}
+              onRegisterHandler={(h) => { activeHandlerRef.current = h; }}
+              isNintendoController={isNintendoController}
             />
           ) : inOnlineLobby ? (
             <OnlineRoomLobby
@@ -707,6 +795,7 @@ export const App: React.FC = () => {
               onStartMatch={startNewMatch}
               onLeaveRoom={handleLeaveRoom}
               onOpenLatencyHarness={() => setLatencyModalOpen(true)}
+              onRegisterHandler={(h) => { activeHandlerRef.current = h; }}
             />
           ) : (
             <div className="flex flex-col items-center gap-2">
@@ -737,6 +826,7 @@ export const App: React.FC = () => {
                   onSeek={(i) => setReplayIdx(i)}
                   onSpeedChange={setReplaySpeed}
                   onExit={() => { setReplayActive(false); setReplayPlaying(false); }}
+                  onRegisterHandler={(h) => { activeHandlerRef.current = h; }}
                 />
               )}
             </div>
@@ -757,6 +847,7 @@ export const App: React.FC = () => {
         isConnected={networkManager.getIsConnected()}
         roomId={onlineRoomId}
         role={onlineRole}
+        onRegisterHandler={(h) => { activeHandlerRef.current = h; }}
       />
 
       <SettingsModal
@@ -764,6 +855,7 @@ export const App: React.FC = () => {
         onClose={() => setSettingsModalOpen(false)}
         settings={settings}
         onUpdateSettings={(newVals) => setSettings(s => ({ ...s, ...newVals }))}
+        onRegisterHandler={(h) => { activeHandlerRef.current = h; }}
       />
 
       {!inLobby && !inOnlineLobby && !replayActive && (
@@ -780,6 +872,7 @@ export const App: React.FC = () => {
           }}
           onRematch={handleRematch}
           onReturnToLobby={handleReturnToLobby}
+          onRegisterHandler={(h) => { activeHandlerRef.current = h; }}
         />
       )}
     </main>

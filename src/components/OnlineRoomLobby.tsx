@@ -1,5 +1,7 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { Copy, Check, Play, Users, ArrowLeft, Activity } from 'lucide-react';
+import { GamepadMenuAction } from '../game/gamepad';
+import { soundEngine } from '../audio/soundEngine';
 
 interface OnlineRoomLobbyProps {
   roomId: string;
@@ -12,6 +14,7 @@ interface OnlineRoomLobbyProps {
   onStartMatch: () => void;
   onLeaveRoom: () => void;
   onOpenLatencyHarness: () => void;
+  onRegisterHandler?: (handler: ((action: GamepadMenuAction) => void) | null) => void;
 }
 
 export const OnlineRoomLobby: React.FC<OnlineRoomLobbyProps> = ({
@@ -25,43 +28,125 @@ export const OnlineRoomLobby: React.FC<OnlineRoomLobbyProps> = ({
   onStartMatch,
   onLeaveRoom,
   onOpenLatencyHarness,
+  onRegisterHandler,
 }) => {
   const [copied, setCopied] = useState(false);
-
-  const handleCopy = () => {
-    navigator.clipboard.writeText(roomId);
-    setCopied(true);
-    setTimeout(() => setCopied(false), 2000);
-  };
 
   const isHost = role === 'p1';
   const isServer = role === 'server';
   const canStart = isHost || isServer;
   const bothPlayersReady = hasP1 && hasP2;
 
+  const buttons: ('START' | 'COPY' | 'HARNESS' | 'LEAVE')[] = canStart
+    ? ['START', 'COPY', 'HARNESS', 'LEAVE']
+    : ['COPY', 'HARNESS', 'LEAVE'];
+
+  const [focusIndex, setFocusIndex] = useState<number>(0);
+  const currentBtn = buttons[focusIndex] || buttons[0];
+
+  const handleCopy = () => {
+    soundEngine.playMenuSelect();
+    navigator.clipboard.writeText(roomId);
+    setCopied(true);
+    setTimeout(() => setCopied(false), 2000);
+  };
+
+  useEffect(() => {
+    const handleAction = (action: GamepadMenuAction) => {
+      if (action === 'CANCEL') {
+        soundEngine.playMenuBack();
+        onLeaveRoom();
+        return;
+      }
+
+      if (action === 'UP') {
+        soundEngine.playMenuMove();
+        setFocusIndex((prev) => (prev > 0 ? prev - 1 : buttons.length - 1));
+        return;
+      }
+
+      if (action === 'DOWN') {
+        soundEngine.playMenuMove();
+        setFocusIndex((prev) => (prev < buttons.length - 1 ? prev + 1 : 0));
+        return;
+      }
+
+      if (action === 'CONFIRM' || action === 'START') {
+        if (currentBtn === 'START' && canStart) {
+          if (bothPlayersReady) {
+            soundEngine.playMenuSelect();
+            onStartMatch();
+          }
+        } else if (currentBtn === 'COPY') {
+          handleCopy();
+        } else if (currentBtn === 'HARNESS') {
+          soundEngine.playMenuSelect();
+          onOpenLatencyHarness();
+        } else if (currentBtn === 'LEAVE') {
+          soundEngine.playMenuBack();
+          onLeaveRoom();
+        }
+      }
+    };
+
+    onRegisterHandler?.(handleAction);
+    return () => {
+      onRegisterHandler?.(null);
+    };
+  }, [currentBtn, canStart, bothPlayersReady, onStartMatch, onOpenLatencyHarness, onLeaveRoom, buttons.length, onRegisterHandler]);
+
   return (
     <div className="w-full max-w-[440px] bg-[#9BBC0F] border-4 border-[#0F380F] shadow-[8px_8px_0px_#0F380F] text-[#0F380F] p-4 font-mono select-none flex flex-col gap-4">
       {/* Top bar */}
       <div className="flex items-center justify-between border-b-2 border-[#0F380F] pb-2">
         <button
-          onClick={onLeaveRoom}
-          className="flex items-center gap-1 bg-[#8BAC0F] hover:bg-[#0F380F] hover:text-[#9BBC0F] text-xs font-bold px-2 py-1 border border-[#0F380F] cursor-pointer"
+          onClick={() => {
+            soundEngine.playMenuBack();
+            onLeaveRoom();
+          }}
+          onMouseEnter={() => setFocusIndex(buttons.indexOf('LEAVE'))}
+          className={`flex items-center gap-1 px-2 py-1 border border-[#0F380F] text-xs font-bold cursor-pointer transition-colors ${
+            currentBtn === 'LEAVE'
+              ? 'bg-[#0F380F] text-[#9BBC0F] ring-2 ring-[#0F380F]'
+              : 'bg-[#8BAC0F] hover:bg-[#0F380F] hover:text-[#9BBC0F]'
+          }`}
         >
+          {currentBtn === 'LEAVE' && <span className="animate-pulse">►</span>}
           <ArrowLeft className="w-3.5 h-3.5" />
           <span>LEAVE ROOM</span>
         </button>
+
         <button
-          onClick={onOpenLatencyHarness}
-          className="flex items-center gap-1 bg-[#8BAC0F] hover:bg-[#0F380F] hover:text-[#9BBC0F] text-xs font-bold px-2 py-1 border border-[#0F380F] cursor-pointer"
+          onClick={() => {
+            soundEngine.playMenuSelect();
+            onOpenLatencyHarness();
+          }}
+          onMouseEnter={() => setFocusIndex(buttons.indexOf('HARNESS'))}
+          className={`flex items-center gap-1 px-2 py-1 border border-[#0F380F] text-xs font-bold cursor-pointer transition-colors ${
+            currentBtn === 'HARNESS'
+              ? 'bg-[#0F380F] text-[#9BBC0F] ring-2 ring-[#0F380F]'
+              : 'bg-[#8BAC0F] hover:bg-[#0F380F] hover:text-[#9BBC0F]'
+          }`}
         >
+          {currentBtn === 'HARNESS' && <span className="animate-pulse">►</span>}
           <Activity className="w-3.5 h-3.5" />
           <span>NET HARNESS</span>
         </button>
       </div>
 
       {/* Room Code Display */}
-      <div className="bg-[#8BAC0F] p-3 border-2 border-[#0F380F] text-center flex flex-col items-center gap-2">
-        <div className="text-[11px] font-bold uppercase tracking-wider">ROOM CODE (SHARE WITH OPPONENT):</div>
+      <div
+        className={`p-3 border-2 transition-all text-center flex flex-col items-center gap-2 ${
+          currentBtn === 'COPY'
+            ? 'bg-[#8BAC0F] border-[#0F380F] ring-2 ring-[#0F380F]'
+            : 'bg-[#8BAC0F] border-[#0F380F]'
+        }`}
+        onClick={handleCopy}
+      >
+        <div className="text-[11px] font-bold uppercase tracking-wider flex items-center gap-1">
+          {currentBtn === 'COPY' && <span className="animate-pulse">►</span>}
+          ROOM CODE (SHARE WITH OPPONENT):
+        </div>
         <div className="flex items-center gap-2">
           <span className="text-3xl font-black tracking-widest bg-[#9BBC0F] px-4 py-1 border-2 border-[#0F380F]">
             {roomId}
@@ -75,6 +160,9 @@ export const OnlineRoomLobby: React.FC<OnlineRoomLobbyProps> = ({
           </button>
         </div>
         {copied && <span className="text-[10px] font-bold">COPIED TO CLIPBOARD!</span>}
+        {currentBtn === 'COPY' && (
+          <span className="text-[9px] bg-[#0F380F] text-[#9BBC0F] px-1 font-bold">[A] COPY</span>
+        )}
       </div>
 
       {/* DM banner */}
@@ -136,16 +224,34 @@ export const OnlineRoomLobby: React.FC<OnlineRoomLobbyProps> = ({
       {/* Start Button */}
       {canStart ? (
         <button
-          onClick={onStartMatch}
+          onClick={() => {
+            if (bothPlayersReady) {
+              soundEngine.playMenuSelect();
+              onStartMatch();
+            }
+          }}
           disabled={!bothPlayersReady}
+          onMouseEnter={() => setFocusIndex(buttons.indexOf('START'))}
           className={`w-full py-3 border-2 border-[#0F380F] font-black text-sm flex items-center justify-center gap-2 transition-all ${
             bothPlayersReady
-              ? 'bg-[#0F380F] hover:bg-[#306230] text-[#9BBC0F] cursor-pointer shadow-[3px_3px_0px_#0F380F]'
+              ? currentBtn === 'START'
+                ? 'bg-[#0F380F] text-[#9BBC0F] ring-4 ring-[#0F380F] scale-[1.02] cursor-pointer shadow-[3px_3px_0px_#0F380F]'
+                : 'bg-[#0F380F] hover:bg-[#306230] text-[#9BBC0F] cursor-pointer shadow-[3px_3px_0px_#0F380F]'
               : 'bg-[#8BAC0F] text-[#0F380F]/50 border-dashed cursor-not-allowed'
           }`}
         >
+          {currentBtn === 'START' && <span className="animate-pulse">►</span>}
           <Play className="w-4 h-4 fill-current" />
-          <span>{bothPlayersReady ? 'LAUNCH MATCH NOW' : `WAITING FOR ${hasP1 ? 'PLAYER 2' : 'PLAYER 1'} TO JOIN...`}</span>
+          <span>
+            {bothPlayersReady
+              ? 'LAUNCH MATCH NOW'
+              : `WAITING FOR ${hasP1 ? 'PLAYER 2' : 'PLAYER 1'} TO JOIN...`}
+          </span>
+          {bothPlayersReady && currentBtn === 'START' && (
+            <span className="text-[10px] bg-[#9BBC0F] text-[#0F380F] px-1.5 py-0.5 ml-2 font-bold">
+              [A / START]
+            </span>
+          )}
         </button>
       ) : (
         <div className="bg-[#8BAC0F] p-2.5 border border-[#0F380F] text-center text-xs font-bold">
@@ -154,6 +260,13 @@ export const OnlineRoomLobby: React.FC<OnlineRoomLobbyProps> = ({
             : '⏳ Connecting to match host...'}
         </div>
       )}
+
+      {/* Gamepad Helper Bar */}
+      <div className="text-center text-[9px] font-bold bg-[#8BAC0F] border border-[#0F380F] py-0.5 px-1 flex items-center justify-around">
+        <span>🎮 [D-PAD] NAVIGATE</span>
+        <span>[A / START] SELECT</span>
+        <span>[B] LEAVE</span>
+      </div>
     </div>
   );
 };

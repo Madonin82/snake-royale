@@ -1,6 +1,7 @@
 import { initializeApp } from 'firebase/app';
 import { getAuth, signInAnonymously } from 'firebase/auth';
 import { getFirestore } from 'firebase/firestore';
+import { getDatabase } from 'firebase/database';
 
 export const firebaseConfig = {
   apiKey: "AIzaSyC6r7A9Hv72DW2umzxQYWLmlU7m515TQ1U",
@@ -15,6 +16,7 @@ export const firebaseConfig = {
 export const app = initializeApp(firebaseConfig);
 export const auth = getAuth(app);
 export const db = getFirestore(app);
+export const rtdb = getDatabase(app);
 
 // Initialize anonymous auth session
 export async function initAuth(): Promise<string | null> {

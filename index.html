@@ -14,6 +14,19 @@
   </head>
   <body class="bg-[#8f9b73] text-[#0F380F] select-none antialiased overflow-x-hidden">
     <div id="root"></div>
+    <script type="application/json" id="snake-state">
+      {
+        "turn": 0,
+        "phase": "RACE",
+        "round": 0,
+        "gridSize": 8,
+        "snakes": {},
+        "tokens": [],
+        "gameOver": false,
+        "winner": null,
+        "turnLocks": { "p1": false, "p2": false }
+      }
+    </script>
     <script type="module" src="/src/main.tsx"></script>
   </body>
 </html>

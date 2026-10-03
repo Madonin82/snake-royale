@@ -1,18 +1,16 @@
 import { Direction, GameState, LatencyReport, LatencySample } from '../types/game';
-import { db, initAuth, auth } from '../firebase';
+import { rtdb, initAuth } from '../firebase';
 import {
-  doc,
-  setDoc,
-  getDoc,
-  updateDoc,
-  deleteDoc,
-  onSnapshot,
-  collection,
-  addDoc,
-  Unsubscribe,
-  serverTimestamp,
-  increment,
-} from 'firebase/firestore';
+  ref,
+  set,
+  get,
+  update,
+  remove,
+  onValue,
+  off,
+  push,
+  DatabaseReference,
+} from 'firebase/database';
 
 type MessageHandler = (data: any) => void;
 
@@ -22,7 +20,12 @@ export class NetworkManager {
   private uid: string | null = null;
   private messageHandlers: Set<MessageHandler> = new Set();
   private isConnected: boolean = false;
-  private firestoreUnsubs: Unsubscribe[] = [];
+  private rtdbListeners: { ref: DatabaseReference; callback: (snap: any) => void }[] = [];
+
+  // WebRTC P2P state
+  private pc: RTCPeerConnection | null = null;
+  private dataChannel: RTCDataChannel | null = null;
+  private isWebRtcConnected: boolean = false;
 
   // Latency Harness state
   private pendingPings: Map<string, number> = new Map();
@@ -41,9 +44,9 @@ export class NetworkManager {
     lastTestedAt: Date.now(),
   };
 
-  // Simulated latency for testing
   private simulatedDelayMs: number = 0;
   private simulatedJitterMs: number = 0;
+  private lastRestartTrigger: number = 0;
 
   public async connect(roomId: string, requestedRole?: 'p1' | 'p2' | 'spectator' | 'server', displayName?: string): Promise<boolean> {
     this.disconnect();
@@ -53,19 +56,16 @@ export class NetworkManager {
     try {
       const uid = await initAuth();
       this.uid = uid;
-      const roomRef = doc(db, 'rooms', this.roomId);
-      const roomSnap = await getDoc(roomRef);
+      const roomRef = ref(rtdb, `rooms/${this.roomId}`);
+      const roomSnap = await get(roomRef);
 
       if (!roomSnap.exists()) {
-        // Spectators never create rooms: there must be a room to watch.
         if (requestedRole === 'spectator') {
           this.isConnected = false;
           return false;
         }
-        // Create new room. A 'server' host claims NO seat: it runs the
-        // simulation while two other clients play (DM mode).
         this.role = requestedRole === 'p2' ? 'p2' : requestedRole === 'server' ? 'server' : 'p1';
-        await setDoc(roomRef, {
+        await set(roomRef, {
           createdAt: Date.now(),
           p1Uid: this.role === 'p1' ? uid : null,
           p2Uid: this.role === 'p2' ? uid : null,
@@ -81,28 +81,26 @@ export class NetworkManager {
           lastActive: Date.now(),
         });
       } else if (requestedRole === 'server') {
-        // Attach to an existing room as its simulation server.
         this.role = 'server';
-        await updateDoc(roomRef, { serverUid: uid, lastActive: Date.now() }).catch(() => {});
+        await update(roomRef, { serverUid: uid, lastActive: Date.now() }).catch(() => {});
       } else {
-        const data = roomSnap.data();
+        const data = roomSnap.val() || {};
         if (requestedRole === 'p1' || (!data.hasP1 && data.p1Uid !== uid)) {
           this.role = 'p1';
-          await updateDoc(roomRef, {
+          await update(roomRef, {
             hasP1: true, p1Uid: uid, lastActive: Date.now(),
             ...(cleanName ? { p1Name: cleanName } : {}),
           });
         } else if (requestedRole === 'p2' || (!data.hasP2 && data.p2Uid !== uid)) {
           this.role = 'p2';
-          await updateDoc(roomRef, {
+          await update(roomRef, {
             hasP2: true, p2Uid: uid, lastActive: Date.now(),
             ...(cleanName ? { p2Name: cleanName } : {}),
           });
         } else {
           this.role = (data.p1Uid === uid) ? 'p1' : (data.p2Uid === uid ? 'p2' : 'spectator');
-          // Reclaiming our own seat: refresh our display name too.
           if (cleanName && (this.role === 'p1' || this.role === 'p2')) {
-            await updateDoc(roomRef, {
+            await update(roomRef, {
               [this.role === 'p1' ? 'p1Name' : 'p2Name']: cleanName,
               lastActive: Date.now(),
             }).catch(() => {});
@@ -112,13 +110,11 @@ export class NetworkManager {
 
       this.isConnected = true;
 
-      // Spectators register a presence doc (drives the watcher count).
       if (this.role === 'spectator' && this.roomId && uid) {
-        const presenceRef = doc(db, 'rooms', this.roomId, 'spectators', uid);
-        setDoc(presenceRef, { joinedAt: Date.now() }).catch(() => {});
+        const presenceRef = ref(rtdb, `rooms/${this.roomId}/spectators/${uid}`);
+        set(presenceRef, { joinedAt: Date.now() }).catch(() => {});
       }
 
-      // Broadcast room joined to local subscribers
       this.notifyHandlers({
         type: 'ROOM_JOINED',
         roomId: this.roomId,
@@ -127,10 +123,10 @@ export class NetworkManager {
         hasP2: false,
       });
 
-      // 1. Listen to Room document (membership, restart, names, series)
-      const unsubRoom = onSnapshot(roomRef, (snapshot) => {
+      // 1. Listen to Room metadata
+      const unsubRoom = onValue(roomRef, (snapshot) => {
         if (!snapshot.exists()) return;
-        const rData = snapshot.data();
+        const rData = snapshot.val() || {};
         this.notifyHandlers({
           type: 'ROOM_MEMBERS_CHANGED',
           roomId: this.roomId,
@@ -151,21 +147,28 @@ export class NetworkManager {
           this.notifyHandlers({ type: 'RESTART_MATCH', sender: rData.restartSender });
         }
       });
-      this.firestoreUnsubs.push(unsubRoom);
+      this.rtdbListeners.push({ ref: roomRef, callback: unsubRoom });
 
-      // 1b. Live spectator count for everyone in the room
-      const spectatorsCol = collection(db, 'rooms', this.roomId, 'spectators');
-      const unsubSpectators = onSnapshot(spectatorsCol, (snap) => {
-        this.notifyHandlers({ type: 'SPECTATORS_CHANGED', count: snap.size });
+      // 1b. Spectator count
+      const specsRef = ref(rtdb, `rooms/${this.roomId}/spectators`);
+      const unsubSpecs = onValue(specsRef, (snapshot) => {
+        const val = snapshot.val() || {};
+        const count = Object.keys(val).length;
+        this.notifyHandlers({ type: 'SPECTATORS_CHANGED', count });
       });
-      this.firestoreUnsubs.push(unsubSpectators);
+      this.rtdbListeners.push({ ref: specsRef, callback: unsubSpecs });
 
-      // 2. Listen to Game State (Client/Spectator listens to Host)
-      const stateRef = doc(db, 'rooms', this.roomId, 'state', 'current');
-      const unsubState = onSnapshot(stateRef, (snapshot) => {
+      // 2. Initialize WebRTC P2P Signaling if playing as P1 or P2
+      if (this.role === 'p1' || this.role === 'p2') {
+        this.setupWebRtcSignaling();
+      }
+
+      // 3. Fallback / RTDB state listeners
+      const stateRef = ref(rtdb, `rooms/${this.roomId}/state/current`);
+      const unsubState = onValue(stateRef, (snapshot) => {
         if (!snapshot.exists()) return;
-        const sData = snapshot.data();
-        if (sData.state && this.role !== 'p1') {
+        const sData = snapshot.val() || {};
+        if (sData.state && this.role !== 'p1' && !this.isWebRtcConnected) {
           this.notifyHandlers({
             type: 'STATE_SYNC',
             state: sData.state,
@@ -173,18 +176,16 @@ export class NetworkManager {
           });
         }
       });
-      this.firestoreUnsubs.push(unsubState);
+      this.rtdbListeners.push({ ref: stateRef, callback: unsubState });
 
-      // 3. Listen to Inputs. Host hears P2; a server hears BOTH players;
-      // a client hears the opponent (informational only).
       const inputRolesToHear: Array<'p1' | 'p2'> =
         this.role === 'server' ? ['p1', 'p2'] : [this.role === 'p1' ? 'p2' : 'p1'];
       inputRolesToHear.forEach((inputDocName) => {
-        const inputRef = doc(db, 'rooms', this.roomId, 'inputs', inputDocName);
-        const unsubInputs = onSnapshot(inputRef, (snapshot) => {
+        const inputRef = ref(rtdb, `rooms/${this.roomId}/inputs/${inputDocName}`);
+        const unsubInput = onValue(inputRef, (snapshot) => {
           if (!snapshot.exists()) return;
-          const iData = snapshot.data();
-          if (iData && iData.dir && iData.tick !== undefined) {
+          const iData = snapshot.val() || {};
+          if (iData && iData.dir && iData.tick !== undefined && !this.isWebRtcConnected) {
             this.notifyHandlers({
               type: 'INPUT_SYNC',
               role: inputDocName,
@@ -194,66 +195,167 @@ export class NetworkManager {
             });
           }
         });
-        this.firestoreUnsubs.push(unsubInputs);
+        this.rtdbListeners.push({ ref: inputRef, callback: unsubInput });
       });
 
-      // 4. Listen to Pings (for Latency Harness)
-      const pingsCol = collection(db, 'rooms', this.roomId, 'pings');
-      const unsubPings = onSnapshot(pingsCol, (snapshot) => {
-        snapshot.docChanges().forEach(change => {
-          if (change.type === 'added' || change.type === 'modified') {
-            const pData = change.doc.data();
-            // If incoming ping from opponent and not yet acked
-            if (pData.fromRole !== this.role && !pData.ack) {
-              // Echo back ack immediately
-              updateDoc(change.doc.ref, {
-                ack: true,
-                t1: Date.now(),
-              }).catch(() => {});
-            } else if (pData.fromRole === this.role && pData.ack) {
-              // Received ack from peer
-              const sendTimePerf = this.pendingPings.get(pData.pingId);
-              if (sendTimePerf !== undefined) {
-                const rtt = performance.now() - sendTimePerf;
-                this.pendingPings.delete(pData.pingId);
-                this.recordLatencySample(pData.pingId, rtt, false);
-              }
+      // 4. Pings listener
+      const pingsRef = ref(rtdb, `rooms/${this.roomId}/pings`);
+      const unsubPings = onValue(pingsRef, (snapshot) => {
+        if (!snapshot.exists()) return;
+        const pingsObj = snapshot.val() || {};
+        Object.keys(pingsObj).forEach(key => {
+          const pData = pingsObj[key];
+          if (!pData) return;
+          if (pData.fromRole !== this.role && !pData.ack) {
+            const pTarget = ref(rtdb, `rooms/${this.roomId}/pings/${key}`);
+            update(pTarget, { ack: true, t1: Date.now() }).catch(() => {});
+          } else if (pData.fromRole === this.role && pData.ack) {
+            const sendTimePerf = this.pendingPings.get(pData.pingId);
+            if (sendTimePerf !== undefined) {
+              const rtt = performance.now() - sendTimePerf;
+              this.pendingPings.delete(pData.pingId);
+              this.recordLatencySample(pData.pingId, rtt, false);
             }
           }
         });
       });
-      this.firestoreUnsubs.push(unsubPings);
+      this.rtdbListeners.push({ ref: pingsRef, callback: unsubPings });
 
-      // Auto-run 20-burst latency test on room join per spec
       setTimeout(() => {
         this.runLatencyBurst(20);
-      }, 600);
+      }, 400);
 
       return true;
     } catch (err) {
-      console.warn('Firebase connection error:', err);
+      console.warn('Firebase RTDB / WebRTC connection error:', err);
       this.isConnected = false;
       return false;
     }
   }
 
-  private lastRestartTrigger: number = 0;
+  // WebRTC P2P Signaling & Data Channel Setup
+  private setupWebRtcSignaling() {
+    const iceServers = [{ urls: ['stun:stun.l.google.com:19302', 'stun:stun1.l.google.com:19302'] }];
+    this.pc = new RTCPeerConnection({ iceServers });
+
+    this.pc.onicecandidate = (event) => {
+      if (event.candidate && this.roomId && this.role) {
+        const candRef = ref(rtdb, `rooms/${this.roomId}/signals/${this.role}Candidates`);
+        push(candRef, event.candidate.toJSON()).catch(() => {});
+      }
+    };
+
+    if (this.role === 'p1') {
+      // P1 (Host) creates data channel and offer
+      this.dataChannel = this.pc.createDataChannel('snakeGameData', { ordered: false });
+      this.setupDataChannel();
+
+      this.pc.createOffer().then(offer => {
+        this.pc!.setLocalDescription(offer);
+        set(ref(rtdb, `rooms/${this.roomId}/signals/offer`), offer).catch(() => {});
+      }).catch(() => {});
+
+      // Listen for P2 answer
+      const ansRef = ref(rtdb, `rooms/${this.roomId}/signals/answer`);
+      onValue(ansRef, snap => {
+        const ans = snap.val();
+        if (ans && this.pc && !this.pc.remoteDescription) {
+          this.pc.setRemoteDescription(new RTCSessionDescription(ans)).catch(() => {});
+        }
+      });
+
+      // Listen for P2 ICE candidates
+      const candRef = ref(rtdb, `rooms/${this.roomId}/signals/p2Candidates`);
+      onValue(candRef, snap => {
+        const cands = snap.val();
+        if (cands && this.pc) {
+          Object.values(cands).forEach((c: any) => {
+            this.pc!.addIceCandidate(new RTCIceCandidate(c)).catch(() => {});
+          });
+        }
+      });
+    } else if (this.role === 'p2') {
+      // P2 (Joiner) listens for data channel and offer
+      this.pc.ondatachannel = (event) => {
+        this.dataChannel = event.channel;
+        this.setupDataChannel();
+      };
+
+      const offerRef = ref(rtdb, `rooms/${this.roomId}/signals/offer`);
+      onValue(offerRef, async (snap) => {
+        const offer = snap.val();
+        if (offer && this.pc && !this.pc.remoteDescription) {
+          await this.pc.setRemoteDescription(new RTCSessionDescription(offer));
+          const answer = await this.pc.createAnswer();
+          await this.pc.setLocalDescription(answer);
+          set(ref(rtdb, `rooms/${this.roomId}/signals/answer`), answer).catch(() => {});
+        }
+      });
+
+      // Listen for P1 ICE candidates
+      const candRef = ref(rtdb, `rooms/${this.roomId}/signals/p1Candidates`);
+      onValue(candRef, snap => {
+        const cands = snap.val();
+        if (cands && this.pc) {
+          Object.values(cands).forEach((c: any) => {
+            this.pc!.addIceCandidate(new RTCIceCandidate(c)).catch(() => {});
+          });
+        }
+      });
+    }
+  }
+
+  private setupDataChannel() {
+    if (!this.dataChannel) return;
+
+    this.dataChannel.onopen = () => {
+      this.isWebRtcConnected = true;
+      console.log('WebRTC P2P DataChannel Connected!');
+    };
+
+    this.dataChannel.onclose = () => {
+      this.isWebRtcConnected = false;
+      console.log('WebRTC P2P DataChannel Closed');
+    };
+
+    this.dataChannel.onmessage = (event) => {
+      try {
+        const msg = JSON.parse(event.data);
+        if (msg.type) {
+          this.notifyHandlers(msg);
+        }
+      } catch {
+        // Ignore parse error
+      }
+    };
+  }
 
   public disconnect() {
-    this.firestoreUnsubs.forEach(unsub => unsub());
-    this.firestoreUnsubs = [];
+    if (this.dataChannel) {
+      this.dataChannel.close();
+      this.dataChannel = null;
+    }
+    if (this.pc) {
+      this.pc.close();
+      this.pc = null;
+    }
+    this.isWebRtcConnected = false;
+
+    this.rtdbListeners.forEach(item => {
+      off(item.ref, 'value', item.callback);
+    });
+    this.rtdbListeners = [];
 
     if (this.roomId && this.role) {
-      const roomRef = doc(db, 'rooms', this.roomId);
+      const roomRef = ref(rtdb, `rooms/${this.roomId}`);
       const updatePayload: Record<string, boolean> = {};
       if (this.role === 'p1') updatePayload.hasP1 = false;
       if (this.role === 'p2') updatePayload.hasP2 = false;
 
       if (this.role === 'spectator' && this.uid) {
-        // Remove our spectator presence doc.
-        deleteDoc(doc(db, 'rooms', this.roomId, 'spectators', this.uid)).catch(() => {});
+        remove(ref(rtdb, `rooms/${this.roomId}/spectators/${this.uid}`)).catch(() => {});
       } else if (Object.keys(updatePayload).length > 0) {
-        updateDoc(roomRef, updatePayload).catch(() => {});
+        update(roomRef, updatePayload).catch(() => {});
       }
     }
 
@@ -279,6 +381,63 @@ export class NetworkManager {
     return this.currentLatencyReport;
   }
 
+  public async getWebRtcStats(): Promise<{
+    connected: boolean;
+    state: string;
+    bytesSent: number;
+    bytesReceived: number;
+    packetsLost: number;
+    packetsSent: number;
+    packetLossPercent: number;
+  }> {
+    if (!this.pc) {
+      return {
+        connected: this.isWebRtcConnected,
+        state: 'DISCONNECTED',
+        bytesSent: 0,
+        bytesReceived: 0,
+        packetsLost: 0,
+        packetsSent: 0,
+        packetLossPercent: 0,
+      };
+    }
+
+    let bytesSent = 0;
+    let bytesReceived = 0;
+    let packetsLost = 0;
+    let packetsSent = 0;
+
+    try {
+      const stats = await this.pc.getStats();
+      stats.forEach(report => {
+        if (report.type === 'outbound-rtp') {
+          bytesSent += report.bytesSent || 0;
+          packetsSent += report.packetsSent || 0;
+        }
+        if (report.type === 'inbound-rtp') {
+          bytesReceived += report.bytesReceived || 0;
+          packetsLost += report.packetsLost || 0;
+          packetsSent += report.packetsSent || 0;
+        }
+      });
+    } catch {
+      // Ignore if stats fail
+    }
+
+    const totalPackets = packetsSent + packetsLost;
+    const packetLossPercent = totalPackets > 0 ? parseFloat(((packetsLost / totalPackets) * 100).toFixed(1)) : 0;
+
+    return {
+      connected: this.isWebRtcConnected,
+      state: this.pc.connectionState || 'UNKNOWN',
+      bytesSent,
+      bytesReceived,
+      packetsLost,
+      packetsSent,
+      packetLossPercent,
+    };
+  }
+
   public setSimulatedConditions(delayMs: number, jitterMs: number) {
     this.simulatedDelayMs = delayMs;
     this.simulatedJitterMs = jitterMs;
@@ -294,12 +453,23 @@ export class NetworkManager {
   }
 
   public broadcastState(state: GameState) {
-    // The P1 host and the seat-less server are the two simulation authorities.
     if (!this.isConnected || (this.role !== 'p1' && this.role !== 'server')) return;
 
     this.withSimulation(() => {
-      const stateRef = doc(db, 'rooms', this.roomId, 'state', 'current');
-      setDoc(stateRef, {
+      const payload = {
+        type: 'STATE_SYNC',
+        state,
+        tick: state.tick,
+      };
+
+      // Send via WebRTC P2P DataChannel if connected for ultra-low latency
+      if (this.isWebRtcConnected && this.dataChannel && this.dataChannel.readyState === 'open') {
+        this.dataChannel.send(JSON.stringify(payload));
+      }
+
+      // Also persist to RTDB as fallback/sync backup
+      const stateRef = ref(rtdb, `rooms/${this.roomId}/state/current`);
+      set(stateRef, {
         state,
         tick: state.tick,
         updatedAt: Date.now(),
@@ -311,8 +481,22 @@ export class NetworkManager {
     if (!this.isConnected || !this.role) return;
 
     this.withSimulation(() => {
-      const inputRef = doc(db, 'rooms', this.roomId, 'inputs', this.role!);
-      setDoc(inputRef, {
+      const payload = {
+        type: 'INPUT_SYNC',
+        role: this.role,
+        dir,
+        tick: currentTick,
+        clientTime: Date.now(),
+      };
+
+      // Send via WebRTC P2P DataChannel if connected
+      if (this.isWebRtcConnected && this.dataChannel && this.dataChannel.readyState === 'open') {
+        this.dataChannel.send(JSON.stringify(payload));
+      }
+
+      // Also persist to RTDB as backup
+      const inputRef = ref(rtdb, `rooms/${this.roomId}/inputs/${this.role}`);
+      set(inputRef, {
         dir,
         tick: currentTick,
         clientTime: Date.now(),
@@ -322,23 +506,31 @@ export class NetworkManager {
 
   public requestRematch() {
     if (!this.isConnected || !this.roomId) return;
-    const roomRef = doc(db, 'rooms', this.roomId);
-    updateDoc(roomRef, {
+    const roomRef = ref(rtdb, `rooms/${this.roomId}`);
+    update(roomRef, {
       restartTrigger: Date.now(),
       restartSender: this.role,
       status: 'racing',
     }).catch(() => {});
   }
 
-  // Simulation authority records a finished match in the room's series score.
   public recordSeriesResult(winner: 'p1' | 'p2' | 'DRAW') {
     if (!this.isConnected || !this.roomId || (this.role !== 'p1' && this.role !== 'server')) return;
-    const roomRef = doc(db, 'rooms', this.roomId);
-    const field = winner === 'p1' ? 'seriesP1' : winner === 'p2' ? 'seriesP2' : 'seriesDraws';
-    updateDoc(roomRef, { [field]: increment(1), lastActive: Date.now() }).catch(() => {});
+    const roomRef = ref(rtdb, `rooms/${this.roomId}`);
+    get(roomRef).then((snap) => {
+      const data = snap.val() || {};
+      const curP1 = data.seriesP1 || 0;
+      const curP2 = data.seriesP2 || 0;
+      const curDraws = data.seriesDraws || 0;
+      update(roomRef, {
+        seriesP1: curP1 + (winner === 'p1' ? 1 : 0),
+        seriesP2: curP2 + (winner === 'p2' ? 1 : 0),
+        seriesDraws: curDraws + (winner === 'DRAW' ? 1 : 0),
+        lastActive: Date.now(),
+      }).catch(() => {});
+    }).catch(() => {});
   }
 
-  // Latency Probe Trigger (auto 20-burst on join and on demand)
   public runLatencyBurst(count: number = 20) {
     if (!this.isConnected || !this.roomId) return;
     this.latencySamples = [];
@@ -353,8 +545,8 @@ export class NetworkManager {
       const t0 = performance.now();
       this.pendingPings.set(pingId, t0);
 
-      const pingsCol = collection(db, 'rooms', this.roomId, 'pings');
-      addDoc(pingsCol, {
+      const pingsRef = ref(rtdb, `rooms/${this.roomId}/pings`);
+      push(pingsRef, {
         pingId,
         t0: Date.now(),
         fromRole: this.role,
@@ -362,7 +554,7 @@ export class NetworkManager {
       }).catch(() => {});
 
       sent++;
-    }, 100);
+    }, 80);
   }
 
   public recordTickLag(inputTick: number, currentHostTick: number) {

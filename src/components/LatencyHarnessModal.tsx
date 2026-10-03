@@ -1,7 +1,10 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { LatencyReport } from '../types/game';
 import { networkManager } from '../game/network';
+import { GamepadMenuAction } from '../game/gamepad';
+import { soundEngine } from '../audio/soundEngine';
 import { Activity, Play, RefreshCw, X, Sliders, ShieldCheck } from 'lucide-react';
+import { WebRtcStatsCard } from './WebRtcStatsCard';
 
 interface LatencyHarnessModalProps {
   isOpen: boolean;
@@ -10,6 +13,7 @@ interface LatencyHarnessModalProps {
   isConnected: boolean;
   roomId: string;
   role: string | null;
+  onRegisterHandler?: (handler: ((action: GamepadMenuAction) => void) | null) => void;
 }
 
 export const LatencyHarnessModal: React.FC<LatencyHarnessModalProps> = ({
@@ -19,13 +23,18 @@ export const LatencyHarnessModal: React.FC<LatencyHarnessModalProps> = ({
   isConnected,
   roomId,
   role,
+  onRegisterHandler,
 }) => {
   const [isRunningTest, setIsRunningTest] = useState(false);
   const [simPreset, setSimPreset] = useState<'NONE' | 'WIFI_JITTER' | 'SLOW_4G' | 'HIGH_LAG'>('NONE');
+  const [focusIndex, setFocusIndex] = useState<number>(0);
 
-  if (!isOpen) return null;
+  const presets = ['NONE', 'WIFI_JITTER', 'SLOW_4G', 'HIGH_LAG'] as const;
+  const items = ['PROBE', 'PRESETS', 'CLOSE'] as const;
+  const currentItem = items[focusIndex] || 'PROBE';
 
   const handleRunBurst = () => {
+    soundEngine.playMenuSelect();
     setIsRunningTest(true);
     networkManager.runLatencyBurst(25);
     setTimeout(() => {
@@ -34,6 +43,7 @@ export const LatencyHarnessModal: React.FC<LatencyHarnessModalProps> = ({
   };
 
   const handleApplySimulation = (preset: 'NONE' | 'WIFI_JITTER' | 'SLOW_4G' | 'HIGH_LAG') => {
+    soundEngine.playMenuSelect();
     setSimPreset(preset);
     switch (preset) {
       case 'NONE':
@@ -51,9 +61,63 @@ export const LatencyHarnessModal: React.FC<LatencyHarnessModalProps> = ({
     }
   };
 
+  useEffect(() => {
+    if (!isOpen) return;
+
+    const handleAction = (action: GamepadMenuAction) => {
+      if (action === 'CANCEL' || action === 'START') {
+        soundEngine.playMenuBack();
+        onClose();
+        return;
+      }
+
+      if (action === 'UP') {
+        soundEngine.playMenuMove();
+        setFocusIndex((prev) => (prev > 0 ? prev - 1 : items.length - 1));
+        return;
+      }
+
+      if (action === 'DOWN') {
+        soundEngine.playMenuMove();
+        setFocusIndex((prev) => (prev < items.length - 1 ? prev + 1 : 0));
+        return;
+      }
+
+      if (action === 'CONFIRM') {
+        if (currentItem === 'PROBE') {
+          if (!isRunningTest) handleRunBurst();
+        } else if (currentItem === 'CLOSE') {
+          soundEngine.playMenuBack();
+          onClose();
+        } else if (currentItem === 'PRESETS') {
+          const next = presets[(presets.indexOf(simPreset) + 1) % presets.length];
+          handleApplySimulation(next);
+        }
+        return;
+      }
+
+      if (action === 'LEFT' || action === 'RIGHT') {
+        if (currentItem === 'PRESETS') {
+          const dir = action === 'RIGHT' ? 1 : -1;
+          let idx = presets.indexOf(simPreset) + dir;
+          if (idx < 0) idx = presets.length - 1;
+          if (idx >= presets.length) idx = 0;
+          handleApplySimulation(presets[idx]);
+        }
+      }
+    };
+
+    onRegisterHandler?.(handleAction);
+    return () => {
+      onRegisterHandler?.(null);
+    };
+  }, [isOpen, currentItem, simPreset, isRunningTest, onClose, onRegisterHandler, items.length, presets]);
+
+  if (!isOpen) return null;
+
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/75 backdrop-blur-xs font-mono select-none">
-      <div className="w-full max-w-lg bg-[#9BBC0F] border-4 border-[#0F380F] shadow-[6px_6px_0px_#0F380F] text-[#0F380F] p-4 flex flex-col gap-4">
+      <div className="w-full max-w-lg bg-[#9BBC0F] border-4 border-[#0F380F] shadow-[6px_6px_0px_#0F380F] text-[#0F380F] p-4 flex flex-col gap-3">
         {/* Header */}
         <div className="flex items-center justify-between border-b-2 border-[#0F380F] pb-2">
           <div className="flex items-center gap-2 font-black text-sm uppercase tracking-wider">
@@ -61,7 +125,10 @@ export const LatencyHarnessModal: React.FC<LatencyHarnessModalProps> = ({
             <span>NET Latency Diagnostic Harness</span>
           </div>
           <button
-            onClick={onClose}
+            onClick={() => {
+              soundEngine.playMenuBack();
+              onClose();
+            }}
             className="p-1 hover:bg-[#0F380F] hover:text-[#9BBC0F] border border-[#0F380F] cursor-pointer transition-colors"
           >
             <X className="w-4 h-4" />
@@ -119,7 +186,7 @@ export const LatencyHarnessModal: React.FC<LatencyHarnessModalProps> = ({
         </div>
 
         {/* Tail Analysis & Historical Samples Sparkline */}
-        <div className="bg-[#8BAC0F] p-3 border-2 border-[#0F380F] flex flex-col gap-2">
+        <div className="bg-[#8BAC0F] p-2.5 border-2 border-[#0F380F] flex flex-col gap-1.5">
           <div className="flex items-center justify-between text-xs font-bold">
             <span>RECENT PING SAMPLES (BURST 25)</span>
             <span className="text-[10px]">
@@ -127,11 +194,10 @@ export const LatencyHarnessModal: React.FC<LatencyHarnessModalProps> = ({
             </span>
           </div>
 
-          {/* Chunky Pixel Bar Graph of Pings */}
-          <div className="h-16 bg-[#9BBC0F] border border-[#0F380F] p-1 flex items-end gap-1 overflow-hidden">
+          <div className="h-14 bg-[#9BBC0F] border border-[#0F380F] p-1 flex items-end gap-1 overflow-hidden">
             {report.samples.length === 0 ? (
               <div className="w-full h-full flex items-center justify-center text-[10px] opacity-70">
-                Click "Run Latency Probe Burst" to collect round-trip telemetry
+                Click "Run Latency Probe Burst" to collect telemetry
               </div>
             ) : (
               report.samples.slice(-25).map((sample, idx) => {
@@ -150,11 +216,27 @@ export const LatencyHarnessModal: React.FC<LatencyHarnessModalProps> = ({
           </div>
         </div>
 
+        {/* WebRTC P2P Connection Stats */}
+        <WebRtcStatsCard />
+
         {/* Network Conditions Simulator */}
-        <div className="border border-[#0F380F] bg-[#8BAC0F] p-2.5 flex flex-col gap-2">
-          <div className="flex items-center gap-1.5 text-xs font-bold">
-            <Sliders className="w-3.5 h-3.5" />
-            <span>SIMULATED NETWORK TEST MATRIX</span>
+        <div
+          className={`border p-2 flex flex-col gap-1.5 transition-all ${
+            currentItem === 'PRESETS'
+              ? 'bg-[#8BAC0F] border-[#0F380F] ring-2 ring-[#0F380F]'
+              : 'border-[#0F380F] bg-[#8BAC0F]'
+          }`}
+          onClick={() => setFocusIndex(items.indexOf('PRESETS'))}
+        >
+          <div className="flex items-center justify-between text-xs font-bold">
+            <div className="flex items-center gap-1.5">
+              {currentItem === 'PRESETS' && <span className="animate-pulse">►</span>}
+              <Sliders className="w-3.5 h-3.5" />
+              <span>SIMULATED NETWORK TEST MATRIX</span>
+            </div>
+            {currentItem === 'PRESETS' && (
+              <span className="text-[9px] bg-[#0F380F] text-[#9BBC0F] px-1 font-bold">[◄ ►] CYCLE</span>
+            )}
           </div>
           <div className="grid grid-cols-2 sm:grid-cols-4 gap-1.5 text-xs">
             <button
@@ -203,8 +285,14 @@ export const LatencyHarnessModal: React.FC<LatencyHarnessModalProps> = ({
             <button
               onClick={handleRunBurst}
               disabled={isRunningTest}
-              className="flex items-center gap-1.5 bg-[#0F380F] hover:bg-[#306230] text-[#9BBC0F] px-3 py-1.5 border-2 border-[#0F380F] text-xs font-bold cursor-pointer disabled:opacity-50 transition-colors shadow-[2px_2px_0px_#0F380F]"
+              onMouseEnter={() => setFocusIndex(items.indexOf('PROBE'))}
+              className={`flex items-center gap-1.5 px-3 py-1.5 border-2 border-[#0F380F] text-xs font-bold cursor-pointer disabled:opacity-50 transition-colors shadow-[2px_2px_0px_#0F380F] ${
+                currentItem === 'PROBE'
+                  ? 'bg-[#0F380F] text-[#9BBC0F] ring-3 ring-[#0F380F]'
+                  : 'bg-[#0F380F] hover:bg-[#306230] text-[#9BBC0F]'
+              }`}
             >
+              {currentItem === 'PROBE' && <span className="animate-pulse">►</span>}
               {isRunningTest ? (
                 <>
                   <RefreshCw className="w-3.5 h-3.5 animate-spin" />
@@ -214,10 +302,20 @@ export const LatencyHarnessModal: React.FC<LatencyHarnessModalProps> = ({
                 <>
                   <Play className="w-3.5 h-3.5 fill-current" />
                   <span>TEST LATENCY NOW</span>
+                  {currentItem === 'PROBE' && (
+                    <span className="text-[9px] bg-[#9BBC0F] text-[#0F380F] px-1 font-bold">[A]</span>
+                  )}
                 </>
               )}
             </button>
           </div>
+        </div>
+
+        {/* Gamepad Helper Bar */}
+        <div className="text-center text-[9px] font-bold bg-[#8BAC0F] border border-[#0F380F] py-0.5 px-1 flex items-center justify-around">
+          <span>🎮 [D-PAD] NAVIGATE</span>
+          <span>[A] SELECT</span>
+          <span>[B] CLOSE</span>
         </div>
       </div>
     </div>

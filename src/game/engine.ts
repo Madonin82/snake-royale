@@ -162,12 +162,14 @@ export function isCellInArena(pos: Position, gridSize: number, ringInset: number
   return pos.x >= minBound && pos.x <= maxBound && pos.y >= minBound && pos.y <= maxBound;
 }
 
-export function queueSnakeDirection(snake: Snake, newDir: Direction): void {
+export function queueSnakeDirection(snake: Snake, newDir: Direction): boolean {
   // Disallow 180 reverse against current active direction or already queued direction
   const effectiveCurrentDir = snake.queuedDirection || snake.direction;
   if (!isOppositeDirection(effectiveCurrentDir, newDir)) {
     snake.queuedDirection = newDir;
+    return true;
   }
+  return false;
 }
 
 export interface TickResult {
