@@ -9,7 +9,8 @@ export const firebaseConfig = {
   projectId: "snake-royale-f596d",
   storageBucket: "snake-royale-f596d.firebasestorage.app",
   messagingSenderId: "1053251139928",
-  appId: "1:1053251139928:web:5e22e37855de47a93e0d2d"
+  appId: "1:1053251139928:web:5e22e37855de47a93e0d2d",
+  databaseURL: "https://snake-royale-f596d-default-rtdb.firebaseio.com/"
 };
 
 // Initialize Firebase SDK
