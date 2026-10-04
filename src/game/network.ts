@@ -190,6 +190,7 @@ export class NetworkManager {
             type: 'STATE_SYNC',
             state: sData.state,
             tick: sData.tick,
+            locks: sData.locks,
           });
         }
       });
