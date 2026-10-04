@@ -12,7 +12,8 @@ interface ControlsOverlayProps {
 export const ControlsOverlay: React.FC<ControlsOverlayProps> = ({ onDirection, onLock, onUndo, onClear }) => {
   return (
     <div className="w-full max-w-[340px] sm:hidden flex flex-col items-center py-2 select-none">
-      <div className="relative w-36 h-36 bg-[#8BAC0F] border-2 border-[#0F380F] p-1 shadow-[2px_2px_0px_#0F380F]">
+      <div className="flex items-center justify-center gap-4">
+        <div className="relative w-36 h-36 bg-[#8BAC0F] border-2 border-[#0F380F] p-1 shadow-[2px_2px_0px_#0F380F] shrink-0">
         {/* Center pivot */}
         <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-10 h-10 bg-[#306230] border border-[#0F380F]" />
 
@@ -48,29 +49,30 @@ export const ControlsOverlay: React.FC<ControlsOverlayProps> = ({ onDirection, o
           <ArrowRight className="w-6 h-6" />
         </button>
       </div>
-      {/* Touch A/B/Y buttons — Nintendo layout: B on the left, A on the right */}
-      <div className="flex items-center justify-center gap-3 mt-2">
-        <button
-          onClick={onUndo}
-          className="w-11 h-11 rounded-full bg-[#306230] active:bg-[#0F380F] text-[#9BBC0F] flex items-center justify-center border-2 border-[#0F380F] cursor-pointer font-black text-sm shadow-[2px_2px_0px_#0F380F]"
-          title="Undo last queued move"
-        >
-          B
-        </button>
-        <button
-          onClick={onClear}
-          className="w-11 h-11 rounded-full bg-[#306230] active:bg-[#0F380F] text-[#9BBC0F] flex items-center justify-center border-2 border-[#0F380F] cursor-pointer font-black text-sm shadow-[2px_2px_0px_#0F380F]"
-          title="Clear queued moves"
-        >
-          Y
-        </button>
-        <button
-          onClick={onLock}
-          className="w-14 h-14 rounded-full bg-[#0F380F] active:bg-[#306230] text-[#9BBC0F] flex items-center justify-center border-2 border-[#0F380F] cursor-pointer font-black text-lg shadow-[2px_2px_0px_#306230]"
-          title="Lock in queued moves"
-        >
-          A
-        </button>
+        {/* Touch A/B/Y buttons to the right of the D-pad — Nintendo layout: B left, A right */}
+        <div className="flex items-center justify-center gap-2.5 shrink-0">
+          <button
+            onClick={onUndo}
+            className="w-11 h-11 rounded-full bg-[#306230] active:bg-[#0F380F] text-[#9BBC0F] flex items-center justify-center border-2 border-[#0F380F] cursor-pointer font-black text-sm shadow-[2px_2px_0px_#0F380F]"
+            title="Undo last queued move"
+          >
+            B
+          </button>
+          <button
+            onClick={onClear}
+            className="w-11 h-11 rounded-full bg-[#306230] active:bg-[#0F380F] text-[#9BBC0F] flex items-center justify-center border-2 border-[#0F380F] cursor-pointer font-black text-sm shadow-[2px_2px_0px_#0F380F]"
+            title="Clear queued moves"
+          >
+            Y
+          </button>
+          <button
+            onClick={onLock}
+            className="w-14 h-14 rounded-full bg-[#0F380F] active:bg-[#306230] text-[#9BBC0F] flex items-center justify-center border-2 border-[#0F380F] cursor-pointer font-black text-lg shadow-[2px_2px_0px_#306230]"
+            title="Lock in queued moves"
+          >
+            A
+          </button>
+        </div>
       </div>
       <div className="text-[9px] font-mono font-bold text-center mt-1.5 opacity-90 tracking-tight">
         Plan: D-pad queue • B undo • Y clear • A lock
