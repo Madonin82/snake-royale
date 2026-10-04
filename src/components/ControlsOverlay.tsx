@@ -49,28 +49,28 @@ export const ControlsOverlay: React.FC<ControlsOverlayProps> = ({ onDirection, o
           <ArrowRight className="w-6 h-6" />
         </button>
       </div>
-        {/* Touch A/B/Y buttons to the right of the D-pad — Nintendo layout: B left, A right */}
-        <div className="flex items-center justify-center gap-2.5 shrink-0">
-          <button
-            onClick={onUndo}
-            className="w-11 h-11 rounded-full bg-[#306230] active:bg-[#0F380F] text-[#9BBC0F] flex items-center justify-center border-2 border-[#0F380F] cursor-pointer font-black text-sm shadow-[2px_2px_0px_#0F380F]"
-            title="Undo last queued move"
-          >
-            B
-          </button>
+        {/* Touch buttons in a diamond cluster (SNES layout): Y left, A right, B bottom */}
+        <div className="relative w-36 h-36 shrink-0">
           <button
             onClick={onClear}
-            className="w-11 h-11 rounded-full bg-[#306230] active:bg-[#0F380F] text-[#9BBC0F] flex items-center justify-center border-2 border-[#0F380F] cursor-pointer font-black text-sm shadow-[2px_2px_0px_#0F380F]"
+            className="absolute left-1 top-1/2 -translate-y-1/2 w-11 h-11 rounded-full bg-[#306230] active:bg-[#0F380F] text-[#9BBC0F] flex items-center justify-center border-2 border-[#0F380F] cursor-pointer font-black text-sm shadow-[2px_2px_0px_#0F380F]"
             title="Clear queued moves"
           >
             Y
           </button>
           <button
             onClick={onLock}
-            className="w-14 h-14 rounded-full bg-[#0F380F] active:bg-[#306230] text-[#9BBC0F] flex items-center justify-center border-2 border-[#0F380F] cursor-pointer font-black text-lg shadow-[2px_2px_0px_#306230]"
+            className="absolute right-1 top-1/2 -translate-y-1/2 w-14 h-14 rounded-full bg-[#0F380F] active:bg-[#306230] text-[#9BBC0F] flex items-center justify-center border-2 border-[#0F380F] cursor-pointer font-black text-lg shadow-[2px_2px_0px_#306230]"
             title="Lock in queued moves"
           >
             A
+          </button>
+          <button
+            onClick={onUndo}
+            className="absolute bottom-1 left-1/2 -translate-x-1/2 w-11 h-11 rounded-full bg-[#306230] active:bg-[#0F380F] text-[#9BBC0F] flex items-center justify-center border-2 border-[#0F380F] cursor-pointer font-black text-sm shadow-[2px_2px_0px_#0F380F]"
+            title="Undo last queued move"
+          >
+            B
           </button>
         </div>
       </div>
