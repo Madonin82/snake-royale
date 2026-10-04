@@ -12,6 +12,7 @@ import { calculateAIMove } from './game/ai';
 import { gamepadController, GamepadMenuAction } from './game/gamepad';
 import { networkManager } from './game/network';
 import { normalizeGameState } from './game/normalize';
+import { exportReplayToFile, parseAndValidateReplayData } from './game/replayFile';
 import { soundEngine } from './audio/soundEngine';
 import { GameBoard } from './components/GameBoard';
 import { Hud } from './components/Hud';
@@ -981,6 +982,40 @@ export const App: React.FC = () => {
     startNewMatch();
   };
 
+  const [importError, setImportError] = useState<string | null>(null);
+
+  const handleExportReplay = () => {
+    exportReplayToFile(matchHistory, settings);
+  };
+
+  const handleImportReplay = async (file: File) => {
+    setImportError(null);
+    try {
+      const text = await file.text();
+      const parsed = parseAndValidateReplayData(text);
+      if (parsed.settings) {
+        setSettings(s => ({
+          ...s,
+          gridSize: parsed.settings!.gridSize ?? s.gridSize,
+          turnBased: parsed.settings!.turnBased ?? s.turnBased,
+          raceTurns: parsed.settings!.raceTurns ?? s.raceTurns,
+          tickRate: parsed.settings!.tickRate ?? s.tickRate,
+        }));
+      }
+      setMatchHistory(parsed.states);
+      setGameState(parsed.states[0]);
+      setReplayActive(true);
+      setReplayIdx(0);
+      setReplayPlaying(true);
+      setInLobby(false);
+      setInOnlineLobby(false);
+      soundEngine.playMenuSelect();
+    } catch (err: any) {
+      setImportError(err.message || "That file isn't a Snake Royale replay");
+      soundEngine.playCrash();
+    }
+  };
+
   return (
     <main className={`min-h-screen flex flex-col items-center justify-between p-2 sm:p-4 ${settings.crtFilterEnabled ? 'crt-overlay' : ''}`}>
       {/* Top Header Navbar */}
@@ -1032,6 +1067,8 @@ export const App: React.FC = () => {
               onDisplayNameChange={handleDisplayNameChange}
               onRegisterHandler={(h) => { activeHandlerRef.current = h; }}
               isNintendoController={isNintendoController}
+              onImportReplay={handleImportReplay}
+              importError={importError}
             />
           ) : inOnlineLobby ? (
             <OnlineRoomLobby
@@ -1080,6 +1117,7 @@ export const App: React.FC = () => {
                     onSeek={(i) => setReplayIdx(i)}
                     onSpeedChange={setReplaySpeed}
                     onExit={() => { setReplayActive(false); setReplayPlaying(false); }}
+                    onExportReplay={handleExportReplay}
                     onRegisterHandler={(h) => { activeHandlerRef.current = h; }}
                   />
                 )}
@@ -1127,6 +1165,7 @@ export const App: React.FC = () => {
           }}
           onRematch={handleRematch}
           onReturnToLobby={handleReturnToLobby}
+          onExportReplay={handleExportReplay}
           onRegisterHandler={(h) => { activeHandlerRef.current = h; }}
         />
       )}

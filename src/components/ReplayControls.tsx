@@ -12,6 +12,7 @@ interface ReplayControlsProps {
   onSeek: (index: number) => void;
   onSpeedChange: (speed: number) => void;
   onExit: () => void;
+  onExportReplay?: () => void;
   onRegisterHandler?: (handler: ((action: GamepadMenuAction) => void) | null) => void;
 }
 
@@ -24,6 +25,7 @@ export const ReplayControls: React.FC<ReplayControlsProps> = ({
   onSeek,
   onSpeedChange,
   onExit,
+  onExportReplay,
   onRegisterHandler,
 }) => {
   const max = Math.max(0, total - 1);
@@ -78,16 +80,30 @@ export const ReplayControls: React.FC<ReplayControlsProps> = ({
         <span>
           Turn {Math.min(index, max)} / {max}
         </span>
-        <button
-          onClick={() => {
-            soundEngine.playMenuBack();
-            onExit();
-          }}
-          className="flex items-center gap-1 bg-[#9BBC0F] hover:bg-[#0F380F] hover:text-[#9BBC0F] px-1.5 py-0.5 border border-[#0F380F] cursor-pointer"
-        >
-          <X className="w-3 h-3" />
-          <span>EXIT [B]</span>
-        </button>
+        <div className="flex items-center gap-1.5">
+          {onExportReplay && (
+            <button
+              onClick={() => {
+                soundEngine.playMenuSelect();
+                onExportReplay();
+              }}
+              className="flex items-center gap-1 bg-[#9BBC0F] hover:bg-[#0F380F] hover:text-[#9BBC0F] px-1.5 py-0.5 border border-[#0F380F] cursor-pointer"
+              title="Export Replay JSON"
+            >
+              <span>EXPORT ⬇</span>
+            </button>
+          )}
+          <button
+            onClick={() => {
+              soundEngine.playMenuBack();
+              onExit();
+            }}
+            className="flex items-center gap-1 bg-[#9BBC0F] hover:bg-[#0F380F] hover:text-[#9BBC0F] px-1.5 py-0.5 border border-[#0F380F] cursor-pointer"
+          >
+            <X className="w-3 h-3" />
+            <span>EXIT [B]</span>
+          </button>
+        </div>
       </div>
 
       <div className="flex items-center gap-2">

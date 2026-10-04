@@ -13,6 +13,7 @@ interface MatchEndModalProps {
   onWatchReplay?: () => void;
   onRematch: () => void;
   onReturnToLobby: () => void;
+  onExportReplay?: () => void;
   onRegisterHandler?: (handler: ((action: GamepadMenuAction) => void) | null) => void;
 }
 
@@ -25,6 +26,7 @@ export const MatchEndModal: React.FC<MatchEndModalProps> = ({
   onWatchReplay,
   onRematch,
   onReturnToLobby,
+  onExportReplay,
   onRegisterHandler,
 }) => {
   const { p1, p2 } = gameState.snakes;
@@ -42,8 +44,9 @@ export const MatchEndModal: React.FC<MatchEndModalProps> = ({
     }
   }
 
-  const buttons: ('REPLAY' | 'REMATCH' | 'LOBBY')[] = [];
+  const buttons: ('REPLAY' | 'EXPORT' | 'REMATCH' | 'LOBBY')[] = [];
   if (canReplay && onWatchReplay) buttons.push('REPLAY');
+  if (canReplay && onExportReplay) buttons.push('EXPORT');
   if (!isSpectator) buttons.push('REMATCH');
   buttons.push('LOBBY');
 
@@ -81,6 +84,8 @@ export const MatchEndModal: React.FC<MatchEndModalProps> = ({
         soundEngine.playMenuSelect();
         if (currentBtn === 'REPLAY' && onWatchReplay) {
           onWatchReplay();
+        } else if (currentBtn === 'EXPORT' && onExportReplay) {
+          onExportReplay();
         } else if (currentBtn === 'REMATCH') {
           onRematch();
         } else if (currentBtn === 'LOBBY') {
@@ -93,7 +98,7 @@ export const MatchEndModal: React.FC<MatchEndModalProps> = ({
     return () => {
       onRegisterHandler?.(null);
     };
-  }, [gameState.phase, currentBtn, onWatchReplay, onRematch, onReturnToLobby, buttons.length, onRegisterHandler]);
+  }, [gameState.phase, currentBtn, onWatchReplay, onExportReplay, onRematch, onReturnToLobby, buttons.length, onRegisterHandler]);
 
   if (gameState.phase !== 'OVER') return null;
 
@@ -174,6 +179,27 @@ export const MatchEndModal: React.FC<MatchEndModalProps> = ({
               <Play className="w-4 h-4 fill-current" />
               <span>WATCH REPLAY</span>
               {currentBtn === 'REPLAY' && (
+                <span className="text-[9px] bg-[#9BBC0F] text-[#0F380F] px-1 font-bold">[A]</span>
+              )}
+            </button>
+          )}
+
+          {canReplay && onExportReplay && (
+            <button
+              onClick={() => {
+                soundEngine.playMenuSelect();
+                onExportReplay();
+              }}
+              onMouseEnter={() => setFocusIndex(buttons.indexOf('EXPORT'))}
+              className={`w-full py-2.5 border-2 border-[#0F380F] font-black text-sm flex items-center justify-center gap-2 cursor-pointer transition-all shadow-[2px_2px_0px_#0F380F] ${
+                currentBtn === 'EXPORT'
+                  ? 'bg-[#306230] text-[#9BBC0F] ring-4 ring-[#0F380F] scale-[1.02]'
+                  : 'bg-[#8BAC0F] hover:bg-[#306230] text-[#0F380F]'
+              }`}
+            >
+              {currentBtn === 'EXPORT' && <span className="animate-pulse">►</span>}
+              <span>EXPORT REPLAY ⬇</span>
+              {currentBtn === 'EXPORT' && (
                 <span className="text-[9px] bg-[#9BBC0F] text-[#0F380F] px-1 font-bold">[A]</span>
               )}
             </button>

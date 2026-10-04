@@ -19,6 +19,8 @@ interface LobbyViewProps {
   onDisplayNameChange: (value: string) => void;
   onRegisterHandler?: (handler: ((action: GamepadMenuAction) => void) | null) => void;
   isNintendoController?: boolean;
+  onImportReplay: (file: File) => void;
+  importError: string | null;
 }
 
 export const LobbyView: React.FC<LobbyViewProps> = ({
@@ -36,6 +38,8 @@ export const LobbyView: React.FC<LobbyViewProps> = ({
   onDisplayNameChange,
   onRegisterHandler,
   isNintendoController = false,
+  onImportReplay,
+  importError,
 }) => {
   const [roomInput, setRoomInput] = useState('');
   const [difficulty, setDifficulty] = useState<'EASY' | 'MEDIUM' | 'HARD'>('MEDIUM');
@@ -45,6 +49,7 @@ export const LobbyView: React.FC<LobbyViewProps> = ({
 
   const nameInputRef = useRef<HTMLInputElement>(null);
   const roomInputRef = useRef<HTMLInputElement>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   const confirmKeyLabel = isNintendoController ? '[A] SELECT' : '[A] SELECT';
   const startKeyLabel = isNintendoController ? '[A / START]' : '[A / START]';
@@ -597,6 +602,25 @@ export const LobbyView: React.FC<LobbyViewProps> = ({
       </div>
 
       {/* Rules Summary Box */}
+      <input
+        ref={fileInputRef}
+        type="file"
+        accept=".json,application/json"
+        className="hidden"
+        onChange={(e) => {
+          if (e.target.files && e.target.files[0]) {
+            onImportReplay(e.target.files[0]);
+            e.target.value = '';
+          }
+        }}
+      />
+
+      {importError && (
+        <div className="bg-[#0F380F] text-[#9BBC0F] p-2 border-2 border-[#9BBC0F] text-xs font-bold text-center animate-bounce">
+          ⚠️ {importError}
+        </div>
+      )}
+
       <div className="bg-[#9BBC0F] p-2 border-2 border-[#0F380F] text-[10px] leading-relaxed">
         <div className="font-bold border-b border-[#0F380F] pb-1 mb-1">RULES BRIEFING:</div>
         <ul className="list-disc pl-4 space-y-0.5">
@@ -617,7 +641,7 @@ export const LobbyView: React.FC<LobbyViewProps> = ({
       </div>
 
       {/* Footer Controls & Diagnostics */}
-      <div className="flex items-center justify-between border-t-2 border-[#0F380F] pt-2 text-xs">
+      <div className="flex items-center justify-between border-t-2 border-[#0F380F] pt-2 text-xs flex-wrap gap-1">
         <button
           onClick={() => {
             soundEngine.playMenuSelect();
@@ -636,6 +660,17 @@ export const LobbyView: React.FC<LobbyViewProps> = ({
           {currentItem === 'SETTINGS' && (
             <span className="text-[9px] bg-[#9BBC0F] text-[#0F380F] px-1 font-bold">{confirmKeyLabel}</span>
           )}
+        </button>
+
+        <button
+          onClick={() => {
+            soundEngine.playMenuSelect();
+            fileInputRef.current?.click();
+          }}
+          className="flex items-center gap-1 px-2 py-1 border border-[#0F380F] font-bold cursor-pointer transition-colors bg-[#8BAC0F] hover:bg-[#0F380F] hover:text-[#9BBC0F] text-[#0F380F]"
+          title="Import Replay JSON"
+        >
+          <span>IMPORT REPLAY 📂</span>
         </button>
 
         <button
