@@ -117,6 +117,10 @@ export const App: React.FC = () => {
   const locksRef = useRef<{ p1: boolean; p2: boolean }>({ p1: false, p2: false });
   const [locks, setLocks] = useState<{ p1: boolean; p2: boolean }>({ p1: false, p2: false });
   const sentTickRef = useRef<number>(-1);
+  // BUGFIX 7: tracks the last STATE_SYNC tick processed on the guest so the
+  // buffer drain runs exactly once per completed step. Duplicate, stale, or
+  // re-delivered states must never consume buffered moves.
+  const lastStateTickRef = useRef<number>(-1);
 
   const displayState = useMemo(() => {
     if (replayActive) return matchHistory[replayIdx] ?? gameState;
@@ -656,51 +660,70 @@ export const App: React.FC = () => {
             // Wire states (RTDB / WebRTC) can arrive with array fields
             // dropped or object-shaped; normalize before anything reads them.
             const safeState = normalizeGameState(msg.state);
-            setGameState(safeState);
-            setMatchHistory(prev =>
-              prev.length === 0 || safeState.tick > prev[prev.length - 1].tick
-                ? [...prev, safeState]
-                : prev
-            );
 
-            if (msg.locks) {
-              const myRole = onlineRoleRef.current;
-              setLocks(prevLocks => ({
-                p1: myRole === 'p1' ? (moveBuffersRef.current.p1.length > 0 ? prevLocks.p1 : msg.locks.p1) : msg.locks.p1,
-                p2: myRole === 'p2' ? (moveBuffersRef.current.p2.length > 0 ? prevLocks.p2 : msg.locks.p2) : msg.locks.p2,
-              }));
-              locksRef.current = {
-                p1: myRole === 'p1' ? (moveBuffersRef.current.p1.length > 0 ? locksRef.current.p1 : msg.locks.p1) : msg.locks.p1,
-                p2: myRole === 'p2' ? (moveBuffersRef.current.p2.length > 0 ? locksRef.current.p2 : msg.locks.p2) : msg.locks.p2,
-              };
+            // BUGFIX 7: STATE_SYNC can fire multiple times per step — RTDB
+            // listeners re-fire on unrelated room writes, both transports can
+            // deliver, and lag reorders arrivals. Key the guest buffer drain
+            // (and board updates) on the state tick so each completed step is
+            // processed exactly once.
+            const isNewTick = safeState.tick > lastStateTickRef.current;
+            const isStaleTick = safeState.tick < lastStateTickRef.current;
+            if (isNewTick) {
+              lastStateTickRef.current = safeState.tick;
             }
 
-            if (settingsRef.current.turnBased && playModeRef.current === 'ONLINE_JOIN' && onlineRoleRef.current) {
-              const myRole = onlineRoleRef.current === 'p1' ? 'p1' : onlineRoleRef.current === 'p2' ? 'p2' : null;
-              if (myRole) {
-                const buf = [...moveBuffersRef.current[myRole]];
-                if (buf.length > 0) {
-                  buf.shift();
-                  moveBuffersRef.current = { ...moveBuffersRef.current, [myRole]: buf };
-                  setMoveBuffers({ ...moveBuffersRef.current });
+            // Stale states are ignored for game purposes (no board snap-back,
+            // no buffer drain, no lock updates). Equal-tick states may still
+            // refresh display metadata (locks) but never touch board/buffer.
+            if (!isStaleTick) {
+              if (isNewTick) {
+                setGameState(safeState);
+                setMatchHistory(prev =>
+                  prev.length === 0 || safeState.tick > prev[prev.length - 1].tick
+                    ? [...prev, safeState]
+                    : prev
+                );
+              }
 
+              if (msg.locks) {
+                const myRole = onlineRoleRef.current;
+                setLocks(prevLocks => ({
+                  p1: myRole === 'p1' ? (moveBuffersRef.current.p1.length > 0 ? prevLocks.p1 : msg.locks.p1) : msg.locks.p1,
+                  p2: myRole === 'p2' ? (moveBuffersRef.current.p2.length > 0 ? prevLocks.p2 : msg.locks.p2) : msg.locks.p2,
+                }));
+                locksRef.current = {
+                  p1: myRole === 'p1' ? (moveBuffersRef.current.p1.length > 0 ? locksRef.current.p1 : msg.locks.p1) : msg.locks.p1,
+                  p2: myRole === 'p2' ? (moveBuffersRef.current.p2.length > 0 ? locksRef.current.p2 : msg.locks.p2) : msg.locks.p2,
+                };
+              }
+
+              if (isNewTick && settingsRef.current.turnBased && playModeRef.current === 'ONLINE_JOIN' && onlineRoleRef.current) {
+                const myRole = onlineRoleRef.current === 'p1' ? 'p1' : onlineRoleRef.current === 'p2' ? 'p2' : null;
+                if (myRole) {
+                  const buf = [...moveBuffersRef.current[myRole]];
                   if (buf.length > 0) {
-                    if (sentTickRef.current !== safeState.tick) {
-                      sentTickRef.current = safeState.tick;
-                      networkManager.sendInput(buf[0], safeState.tick);
+                    buf.shift();
+                    moveBuffersRef.current = { ...moveBuffersRef.current, [myRole]: buf };
+                    setMoveBuffers({ ...moveBuffersRef.current });
+
+                    if (buf.length > 0) {
+                      if (sentTickRef.current !== safeState.tick) {
+                        sentTickRef.current = safeState.tick;
+                        networkManager.sendInput(buf[0], safeState.tick);
+                      }
+                    } else {
+                      locksRef.current = { ...locksRef.current, [myRole]: false };
+                      setLocks({ ...locksRef.current });
                     }
-                  } else {
-                    locksRef.current = { ...locksRef.current, [myRole]: false };
-                    setLocks({ ...locksRef.current });
                   }
                 }
               }
-            }
 
-            if (settingsRef.current.turnBased && playModeRef.current === 'ONLINE_SPECTATOR') {
-              if (msg.locks) {
-                setLocks(msg.locks);
-                locksRef.current = msg.locks;
+              if (settingsRef.current.turnBased && playModeRef.current === 'ONLINE_SPECTATOR') {
+                if (msg.locks) {
+                  setLocks(msg.locks);
+                  locksRef.current = msg.locks;
+                }
               }
             }
 
@@ -900,6 +923,7 @@ export const App: React.FC = () => {
     setGameState(initial);
     clearLocks();
     sentTickRef.current = -1;
+    lastStateTickRef.current = -1;
     setInLobby(false);
     setInOnlineLobby(false);
 
@@ -949,6 +973,8 @@ export const App: React.FC = () => {
     setPlayMode('ONLINE_JOIN');
     setInOnlineLobby(true);
     setInLobby(false);
+    // BUGFIX 7: fresh tick tracking for the incoming state stream.
+    lastStateTickRef.current = -1;
 
     await networkManager.connect(roomCode, undefined, displayName.trim() || undefined);
     const assigned = networkManager.getRole();
