@@ -452,13 +452,14 @@ export class NetworkManager {
     this.messageHandlers.forEach(h => h(data));
   }
 
-  public broadcastState(state: GameState) {
+  public broadcastState(state: GameState, locks?: { p1: boolean; p2: boolean }) {
     if (!this.isConnected || (this.role !== 'p1' && this.role !== 'server')) return;
 
     this.withSimulation(() => {
       const payload = {
         type: 'STATE_SYNC',
         state,
+        locks,
         tick: state.tick,
       };
 
@@ -471,6 +472,7 @@ export class NetworkManager {
       const stateRef = ref(rtdb, `rooms/${this.roomId}/state/current`);
       set(stateRef, {
         state,
+        locks,
         tick: state.tick,
         updatedAt: Date.now(),
       }).catch(() => {});

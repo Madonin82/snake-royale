@@ -176,10 +176,21 @@ export const App: React.FC = () => {
     setTurnClock(turnClockRef.current);
   }, []);
 
+  const getTargetKey = useCallback((playerSlot: 1 | 2): 'p1' | 'p2' => {
+    if (playModeRef.current === 'SOLO_AI') return 'p1';
+    if (playModeRef.current === 'ONLINE_HOST' || playModeRef.current === 'ONLINE_SERVER') return 'p1';
+    if (playModeRef.current === 'ONLINE_JOIN') return onlineRoleRef.current === 'p1' ? 'p1' : 'p2';
+    if (playModeRef.current === 'LOCAL_2P') return playerSlot === 2 ? 'p2' : 'p1';
+    return 'p1';
+  }, []);
+
   const setLock = useCallback((who: 'p1' | 'p2') => {
     locksRef.current = { ...locksRef.current, [who]: true };
     setLocks(locksRef.current);
     stampLockTime(who);
+    if (playModeRef.current === 'ONLINE_HOST' || playModeRef.current === 'ONLINE_SERVER') {
+      networkManager.broadcastState(stateRef.current, locksRef.current);
+    }
   }, [stampLockTime]);
 
   const clearLocks = useCallback(() => {
@@ -296,7 +307,7 @@ export const App: React.FC = () => {
     setMatchHistory(prev => [...prev, nextState]);
 
     if (playModeRef.current === 'ONLINE_HOST' || playModeRef.current === 'ONLINE_SERVER') {
-      networkManager.broadcastState(nextState);
+      networkManager.broadcastState(nextState, locksRef.current);
     }
 
     const canProgress =
@@ -315,7 +326,7 @@ export const App: React.FC = () => {
   const handleBufferUndo = useCallback((playerSlot: 1 | 2) => {
     const current = stateRef.current;
     if (current.phase === 'OVER' || inLobby || inOnlineLobby || !settingsRef.current.turnBased) return;
-    const targetKey = playModeRef.current === 'LOCAL_2P' ? (playerSlot === 2 ? 'p2' : 'p1') : 'p1';
+    const targetKey = getTargetKey(playerSlot);
     if (locksRef.current[targetKey]) return;
 
     const buf = [...moveBuffersRef.current[targetKey]];
@@ -324,23 +335,23 @@ export const App: React.FC = () => {
     moveBuffersRef.current = { ...moveBuffersRef.current, [targetKey]: buf };
     setMoveBuffers({ ...moveBuffersRef.current });
     soundEngine.playTick();
-  }, [inLobby, inOnlineLobby]);
+  }, [inLobby, inOnlineLobby, getTargetKey]);
 
   const handleBufferClear = useCallback((playerSlot: 1 | 2) => {
     const current = stateRef.current;
     if (current.phase === 'OVER' || inLobby || inOnlineLobby || !settingsRef.current.turnBased) return;
-    const targetKey = playModeRef.current === 'LOCAL_2P' ? (playerSlot === 2 ? 'p2' : 'p1') : 'p1';
+    const targetKey = getTargetKey(playerSlot);
     if (locksRef.current[targetKey]) return;
 
     moveBuffersRef.current = { ...moveBuffersRef.current, [targetKey]: [] };
     setMoveBuffers({ ...moveBuffersRef.current });
     soundEngine.playTick();
-  }, [inLobby, inOnlineLobby]);
+  }, [inLobby, inOnlineLobby, getTargetKey]);
 
   const handleBufferLock = useCallback((playerSlot: 1 | 2) => {
     const current = stateRef.current;
     if (current.phase === 'OVER' || inLobby || inOnlineLobby || !settingsRef.current.turnBased) return;
-    const targetKey = playModeRef.current === 'LOCAL_2P' ? (playerSlot === 2 ? 'p2' : 'p1') : 'p1';
+    const targetKey = getTargetKey(playerSlot);
     const buf = moveBuffersRef.current[targetKey];
     if (buf.length === 0 || locksRef.current[targetKey]) return;
 
@@ -356,25 +367,14 @@ export const App: React.FC = () => {
     }
 
     maybeAdvanceTurn();
-  }, [inLobby, inOnlineLobby, maybeAdvanceTurn, setLock]);
+  }, [inLobby, inOnlineLobby, maybeAdvanceTurn, setLock, getTargetKey]);
 
   const handleDirectionInput = useCallback((playerSlot: 1 | 2, dir: Direction) => {
     const current = stateRef.current;
     if (current.phase === 'OVER' || inLobby || inOnlineLobby) return;
     if (playModeRef.current === 'ONLINE_SERVER' || playModeRef.current === 'ONLINE_SPECTATOR') return;
 
-    let targetKey: 'p1' | 'p2';
-    if (playModeRef.current === 'SOLO_AI') {
-      targetKey = 'p1';
-    } else if (playModeRef.current === 'ONLINE_HOST') {
-      targetKey = 'p1';
-    } else if (playModeRef.current === 'ONLINE_JOIN') {
-      targetKey = onlineRoleRef.current === 'p1' ? 'p1' : 'p2';
-    } else if (playModeRef.current === 'LOCAL_2P') {
-      targetKey = playerSlot === 2 ? 'p2' : 'p1';
-    } else {
-      targetKey = 'p1';
-    }
+    const targetKey = getTargetKey(playerSlot);
 
     const currentSnake = current.snakes[targetKey];
     if (!currentSnake || !currentSnake.isAlive) return;
@@ -654,6 +654,18 @@ export const App: React.FC = () => {
                 : prev
             );
 
+            if (msg.locks) {
+              const myRole = onlineRoleRef.current;
+              setLocks(prevLocks => ({
+                p1: myRole === 'p1' ? (moveBuffersRef.current.p1.length > 0 ? prevLocks.p1 : msg.locks.p1) : msg.locks.p1,
+                p2: myRole === 'p2' ? (moveBuffersRef.current.p2.length > 0 ? prevLocks.p2 : msg.locks.p2) : msg.locks.p2,
+              }));
+              locksRef.current = {
+                p1: myRole === 'p1' ? (moveBuffersRef.current.p1.length > 0 ? locksRef.current.p1 : msg.locks.p1) : msg.locks.p1,
+                p2: myRole === 'p2' ? (moveBuffersRef.current.p2.length > 0 ? locksRef.current.p2 : msg.locks.p2) : msg.locks.p2,
+              };
+            }
+
             if (settingsRef.current.turnBased && playModeRef.current === 'ONLINE_JOIN' && onlineRoleRef.current) {
               const myRole = onlineRoleRef.current === 'p1' ? 'p1' : onlineRoleRef.current === 'p2' ? 'p2' : null;
               if (myRole) {
@@ -676,7 +688,13 @@ export const App: React.FC = () => {
               }
             }
 
-            if (settingsRef.current.turnBased && playModeRef.current !== 'ONLINE_JOIN') clearLocks();
+            if (settingsRef.current.turnBased && playModeRef.current === 'ONLINE_SPECTATOR') {
+              if (msg.locks) {
+                setLocks(msg.locks);
+                locksRef.current = msg.locks;
+              }
+            }
+
             if (inOnlineLobby) {
               setInOnlineLobby(false);
               setInLobby(false);
