@@ -382,14 +382,6 @@ export const App: React.FC = () => {
     soundEngine.playTick();
 
     if (settingsRef.current.turnBased) {
-      if (playModeRef.current === 'ONLINE_JOIN') {
-        if (sentTickRef.current === current.tick) return;
-        sentTickRef.current = current.tick;
-        networkManager.sendInput(dir, current.tick);
-        setLock(targetKey);
-        return;
-      }
-
       if (locksRef.current[targetKey]) return;
 
       const buf = [...moveBuffersRef.current[targetKey]];
