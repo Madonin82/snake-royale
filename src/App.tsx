@@ -10,6 +10,7 @@ import {
 import { calculateAIMove } from './game/ai';
 import { gamepadController, GamepadMenuAction } from './game/gamepad';
 import { networkManager } from './game/network';
+import { normalizeGameState } from './game/normalize';
 import { soundEngine } from './audio/soundEngine';
 import { GameBoard } from './components/GameBoard';
 import { Hud } from './components/Hud';
@@ -450,10 +451,13 @@ export const App: React.FC = () => {
 
         case 'STATE_SYNC': {
           if ((playModeRef.current === 'ONLINE_JOIN' || playModeRef.current === 'ONLINE_SPECTATOR') && msg.state) {
-            setGameState(msg.state);
+            // Wire states (RTDB / WebRTC) can arrive with array fields
+            // dropped or object-shaped; normalize before anything reads them.
+            const safeState = normalizeGameState(msg.state);
+            setGameState(safeState);
             setMatchHistory(prev =>
-              prev.length === 0 || msg.state.tick > prev[prev.length - 1].tick
-                ? [...prev, msg.state]
+              prev.length === 0 || safeState.tick > prev[prev.length - 1].tick
+                ? [...prev, safeState]
                 : prev
             );
             if (settingsRef.current.turnBased) clearLocks();
