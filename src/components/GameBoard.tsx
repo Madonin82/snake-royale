@@ -5,9 +5,10 @@ import { GAMEBOY_COLORS } from '../game/engine';
 interface GameBoardProps {
   gameState: GameState;
   settings: GameSettings;
+  lockedPaths?: { p1?: Position[]; p2?: Position[] };
 }
 
-export const GameBoard: React.FC<GameBoardProps> = ({ gameState, settings }) => {
+export const GameBoard: React.FC<GameBoardProps> = ({ gameState, settings, lockedPaths }) => {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
 
   useEffect(() => {
@@ -82,16 +83,32 @@ export const GameBoard: React.FC<GameBoardProps> = ({ gameState, settings }) => 
       renderToken(ctx, token.x * cellSize, token.y * cellSize, cellSize, tokenBlink);
     }
 
-    // 6. Render Snakes
+    // 6. Render Stamped Locked Paths (Subtle planned path shading)
+    if (lockedPaths) {
+      if (lockedPaths.p1) {
+        ctx.fillStyle = 'rgba(15, 56, 15, 0.22)';
+        for (const pos of lockedPaths.p1) {
+          ctx.fillRect(pos.x * cellSize + 6, pos.y * cellSize + 6, cellSize - 12, cellSize - 12);
+        }
+      }
+      if (lockedPaths.p2) {
+        ctx.fillStyle = 'rgba(48, 98, 48, 0.28)';
+        for (const pos of lockedPaths.p2) {
+          ctx.fillRect(pos.x * cellSize + 6, pos.y * cellSize + 6, cellSize - 12, cellSize - 12);
+        }
+      }
+    }
+
+    // 7. Render Snakes
     renderSnake(ctx, gameState.snakes.p1, cellSize, '#0F380F', '#8BAC0F', 'P1');
     renderSnake(ctx, gameState.snakes.p2, cellSize, '#306230', '#9BBC0F', 'P2');
 
-    // 7. Outer Frame Border
+    // 8. Outer Frame Border
     ctx.strokeStyle = GAMEBOY_COLORS.DARKEST;
     ctx.lineWidth = 4;
     ctx.strokeRect(2, 2, boardPixelSize - 4, boardPixelSize - 4);
 
-  }, [gameState, settings]);
+  }, [gameState, settings, lockedPaths]);
 
   return (
     <div className="relative flex flex-col items-center justify-center p-2 bg-[#9BBC0F] border-4 border-[#0F380F] shadow-[inset_0_0_12px_rgba(15,56,15,0.4)]">
@@ -128,149 +145,59 @@ function renderSnake(
     // Subtle scale pattern / inner block
     ctx.fillStyle = accentColor;
     ctx.fillRect(px + 6, py + 6, cellSize - 12, cellSize - 12);
-    ctx.fillStyle = bodyColor;
-    ctx.fillRect(px + 10, py + 10, cellSize - 20, cellSize - 20);
 
-    // Bridge connector to adjacent segment for continuous snake feel
+    // Connection seam / bridge
     if (prevSeg) {
-      const dx = prevSeg.x - seg.x;
-      const dy = prevSeg.y - seg.y;
-      if (dx === 1) ctx.fillRect(px + cellSize - 3, py + 2, 4, cellSize - 4);
-      if (dx === -1) ctx.fillRect(px - 1, py + 2, 4, cellSize - 4);
-      if (dy === 1) ctx.fillRect(px + 2, py + cellSize - 3, cellSize - 4, 4);
-      if (dy === -1) ctx.fillRect(px + 2, py - 1, cellSize - 4, 4);
+      if (seg.x !== prevSeg.x) {
+        const minX = Math.min(seg.x, prevSeg.x);
+        ctx.fillRect((minX + 1) * cellSize - 2, py + 6, 4, cellSize - 12);
+      } else if (seg.y !== prevSeg.y) {
+        const minY = Math.min(seg.y, prevSeg.y);
+        ctx.fillRect(px + 6, (minY + 1) * cellSize - 2, cellSize - 12, 4);
+      }
     }
   }
 
-  // Render Head Segment
+  // Render Head
   const head = snake.body[0];
   const hx = head.x * cellSize;
   const hy = head.y * cellSize;
-
   ctx.fillStyle = bodyColor;
   ctx.fillRect(hx + 1, hy + 1, cellSize - 2, cellSize - 2);
 
-  // Directional Eyes
-  renderEyes(ctx, hx, hy, cellSize, snake.direction, accentColor, bodyColor);
-
-  // If snake died, draw small X mark on head
-  if (!snake.isAlive) {
-    ctx.strokeStyle = accentColor;
-    ctx.lineWidth = 2;
-    ctx.beginPath();
-    ctx.moveTo(hx + 6, hy + 6);
-    ctx.lineTo(hx + cellSize - 6, hy + cellSize - 6);
-    ctx.moveTo(hx + cellSize - 6, hy + 6);
-    ctx.lineTo(hx + 6, hy + cellSize - 6);
-    ctx.stroke();
-  }
+  // Accent eyes / center
+  ctx.fillStyle = accentColor;
+  ctx.fillRect(hx + 8, hy + 8, cellSize - 16, cellSize - 16);
 }
 
-function renderEyes(
-  ctx: CanvasRenderingContext2D,
-  x: number,
-  y: number,
-  size: number,
-  dir: Direction,
-  eyeWhite: string,
-  eyePupil: string
-) {
-  const eyeSize = 6;
-  const pupilSize = 3;
-  let e1: Position = { x: 0, y: 0 };
-  let e2: Position = { x: 0, y: 0 };
-  let p1: Position = { x: 0, y: 0 };
-  let p2: Position = { x: 0, y: 0 };
+function renderToken(ctx: CanvasRenderingContext2D, x: number, y: number, cellSize: number, blink: boolean) {
+  ctx.fillStyle = blink ? GAMEBOY_COLORS.DARKEST : GAMEBOY_COLORS.DARK;
+  // Diamond shape token
+  ctx.beginPath();
+  ctx.moveTo(x + cellSize / 2, y + 4);
+  ctx.lineTo(x + cellSize - 4, y + cellSize / 2);
+  ctx.lineTo(x + cellSize / 2, y + cellSize - 4);
+  ctx.lineTo(x + 4, y + cellSize / 2);
+  ctx.closePath();
+  ctx.fill();
 
-  switch (dir) {
-    case 'UP':
-      e1 = { x: x + 4, y: y + 4 };
-      e2 = { x: x + size - 4 - eyeSize, y: y + 4 };
-      p1 = { x: e1.x + 1, y: e1.y };
-      p2 = { x: e2.x + 2, y: e2.y };
-      break;
-    case 'DOWN':
-      e1 = { x: x + 4, y: y + size - 4 - eyeSize };
-      e2 = { x: x + size - 4 - eyeSize, y: y + size - 4 - eyeSize };
-      p1 = { x: e1.x + 1, y: e1.y + 3 };
-      p2 = { x: e2.x + 2, y: e2.y + 3 };
-      break;
-    case 'LEFT':
-      e1 = { x: x + 4, y: y + 4 };
-      e2 = { x: x + 4, y: y + size - 4 - eyeSize };
-      p1 = { x: e1.x, y: e1.y + 1 };
-      p2 = { x: e2.x, y: e2.y + 2 };
-      break;
-    case 'RIGHT':
-      e1 = { x: x + size - 4 - eyeSize, y: y + 4 };
-      e2 = { x: x + size - 4 - eyeSize, y: y + size - 4 - eyeSize };
-      p1 = { x: e1.x + 3, y: e1.y + 1 };
-      p2 = { x: e2.x + 3, y: e2.y + 2 };
-      break;
-  }
-
-  // Draw eye bases
-  ctx.fillStyle = eyeWhite;
-  ctx.fillRect(e1.x, e1.y, eyeSize, eyeSize);
-  ctx.fillRect(e2.x, e2.y, eyeSize, eyeSize);
-
-  // Draw pupils
-  ctx.fillStyle = eyePupil;
-  ctx.fillRect(p1.x, p1.y, pupilSize, pupilSize);
-  ctx.fillRect(p2.x, p2.y, pupilSize, pupilSize);
+  ctx.strokeStyle = GAMEBOY_COLORS.LIGHTEST;
+  ctx.lineWidth = 2;
+  ctx.stroke();
 }
 
-// Helper: Render Token (Coin / Gem)
-function renderToken(
-  ctx: CanvasRenderingContext2D,
-  x: number,
-  y: number,
-  size: number,
-  isAltBlink: boolean
-) {
-  const primary = isAltBlink ? GAMEBOY_COLORS.DARKEST : GAMEBOY_COLORS.DARK;
-  const highlight = isAltBlink ? GAMEBOY_COLORS.LIGHT : GAMEBOY_COLORS.LIGHTEST;
-
-  // Diamond / Coin pixel sprite
-  ctx.fillStyle = primary;
-  ctx.fillRect(x + 6, y + 2, size - 12, size - 4);
-  ctx.fillRect(x + 2, y + 6, size - 4, size - 12);
-
-  // Inner sparkle
-  ctx.fillStyle = highlight;
-  ctx.fillRect(x + 8, y + 8, size - 16, size - 16);
-  ctx.fillStyle = primary;
-  ctx.fillRect(x + 12, y + 12, size - 24, size - 24);
-}
-
-// Helper: Shrunk Wall cell with chunky brick crosshatch pattern
-function renderShrunkWallCell(
-  ctx: CanvasRenderingContext2D,
-  x: number,
-  y: number,
-  size: number
-) {
+function renderShrunkWallCell(ctx: CanvasRenderingContext2D, x: number, y: number, cellSize: number) {
   ctx.fillStyle = GAMEBOY_COLORS.DARKEST;
-  ctx.fillRect(x, y, size, size);
-
-  // Brick lines in DARK
+  ctx.fillRect(x, y, cellSize, cellSize);
   ctx.fillStyle = GAMEBOY_COLORS.DARK;
-  ctx.fillRect(x + 1, y + 1, size - 2, 2);
-  ctx.fillRect(x + 1, y + Math.floor(size / 2), size - 2, 2);
-  ctx.fillRect(x + Math.floor(size / 2), y + 3, 2, Math.floor(size / 2) - 3);
-  ctx.fillRect(x + 2, y + Math.floor(size / 2) + 2, 2, Math.floor(size / 2) - 3);
+  ctx.fillRect(x + 4, y + 4, cellSize - 8, cellSize - 8);
+  ctx.fillStyle = GAMEBOY_COLORS.LIGHTEST;
+  ctx.fillRect(x + 12, y + 12, cellSize - 24, cellSize - 24);
 }
 
-// Helper: Telegraph Warning Cell
-function renderTelegraphCell(
-  ctx: CanvasRenderingContext2D,
-  x: number,
-  y: number,
-  size: number
-) {
+function renderTelegraphCell(ctx: CanvasRenderingContext2D, x: number, y: number, cellSize: number) {
   ctx.fillStyle = GAMEBOY_COLORS.DARK;
-  // Diagonal warning hash
-  ctx.fillRect(x + 2, y + 2, size - 4, size - 4);
-  ctx.fillStyle = GAMEBOY_COLORS.LIGHT;
-  ctx.fillRect(x + 6, y + 6, size - 12, size - 12);
+  ctx.fillRect(x, y, cellSize, cellSize);
+  ctx.fillStyle = GAMEBOY_COLORS.LIGHTEST;
+  ctx.fillRect(x + 6, y + 6, cellSize - 12, cellSize - 12);
 }

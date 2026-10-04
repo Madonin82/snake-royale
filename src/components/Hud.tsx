@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { GameState, LatencyReport, PlayMode } from '../types/game';
+import { Direction, GameState, LatencyReport, PlayMode } from '../types/game';
 import { Activity, Gamepad, Wifi } from 'lucide-react';
 
 interface HudProps {
@@ -12,6 +12,7 @@ interface HudProps {
   locks?: { p1: boolean; p2: boolean };
   turnClock?: { startedAt: number; p1At: number | null; p2At: number | null };
   viewerSeat?: 'p1' | 'p2' | null;
+  moveBuffers?: { p1: Direction[]; p2: Direction[] };
 }
 
 export const Hud: React.FC<HudProps> = ({
@@ -23,6 +24,7 @@ export const Hud: React.FC<HudProps> = ({
   locks,
   turnClock,
   viewerSeat,
+  moveBuffers,
 }) => {
   const { p1, p2 } = gameState.snakes;
 
@@ -134,6 +136,7 @@ export const Hud: React.FC<HudProps> = ({
     const locked = isLocked(who);
     const lastTurn = gameState.lastTurnTimes ? (who === 'p1' ? gameState.lastTurnTimes.p1 : gameState.lastTurnTimes.p2) : null;
     const totalThink = gameState.totalThinkTime ? (who === 'p1' ? gameState.totalThinkTime.p1 : gameState.totalThinkTime.p2) : 0;
+    const buffer = moveBuffers ? (who === 'p1' ? moveBuffers.p1 : moveBuffers.p2) : [];
 
     return (
       <div className="bg-[#9BBC0F] p-3 border-2 border-[#0F380F] flex flex-col justify-between h-full shadow-[2px_2px_0px_#0F380F] w-full font-mono text-[#0F380F]">
@@ -155,8 +158,8 @@ export const Hud: React.FC<HudProps> = ({
 
           {gameState.turnBased && gameState.phase !== 'OVER' && (
             <div className="mb-3 p-2 bg-[#8BAC0F]/40 border border-[#0F380F] text-xs font-bold">
-              <div className={`truncate ${locked ? 'text-[#0F380F] opacity-100 font-extrabold' : 'opacity-60'}`}>
-                {thinkLabel(who)}
+              <div className={`truncate ${locked ? 'text-[#0F380F] opacity-100 font-extrabold' : 'opacity-70'}`}>
+                {thinkLabel(who)} {locked ? '🔒 (LOCKED)' : '✏️ (PLANNING)'}
               </div>
               {lastTurn !== null && (
                 <div className="text-[10px] opacity-80 mt-1.5 flex justify-between">
@@ -168,9 +171,26 @@ export const Hud: React.FC<HudProps> = ({
           )}
         </div>
 
-        {/* Empty reserved placeholder section at bottom (min-height, no content) */}
-        <div className="min-h-[80px] flex-1 bg-[#8BAC0F]/20 border border-dashed border-[#0F380F]/40 flex items-center justify-center text-[10px] opacity-50 tracking-wider">
-          {/* Queued moves reserved slot */}
+        {/* Queued move arrows list in the reserved bottom slot */}
+        <div className="min-h-[80px] flex-1 bg-[#8BAC0F]/20 border border-dashed border-[#0F380F]/40 p-1.5 flex flex-col justify-start">
+          <div className="text-[9px] font-bold opacity-75 mb-1 flex justify-between items-center">
+            <span>QUEUE ({buffer.length}/{snake.body.length})</span>
+            {locked && <span className="text-[8px] px-1 bg-[#0F380F] text-[#9BBC0F]">LOCKED</span>}
+          </div>
+          <div className="flex flex-wrap gap-1">
+            {buffer.length === 0 ? (
+              <span className="text-[10px] opacity-40 italic">Empty (plan moves)</span>
+            ) : (
+              buffer.map((dir, idx) => {
+                const arrow = dir === 'UP' ? '↑' : dir === 'DOWN' ? '↓' : dir === 'LEFT' ? '←' : '→';
+                return (
+                  <span key={idx} className="px-1 py-0.5 bg-[#0F380F] text-[#9BBC0F] text-[10px] font-bold border border-[#0F380F]">
+                    {arrow}
+                  </span>
+                );
+              })
+            )}
+          </div>
         </div>
       </div>
     );
@@ -181,6 +201,7 @@ export const Hud: React.FC<HudProps> = ({
       {(['p1', 'p2'] as const).map((who) => {
         const snake = who === 'p1' ? p1 : p2;
         const locked = isLocked(who);
+        const buffer = moveBuffers ? (who === 'p1' ? moveBuffers.p1 : moveBuffers.p2) : [];
         return (
           <div key={who} className="bg-[#9BBC0F] p-2 border-2 border-[#0F380F] flex flex-col justify-between shadow-[2px_2px_0px_#0F380F]">
             <div className="flex items-center justify-between text-[11px] font-bold">
@@ -196,7 +217,7 @@ export const Hud: React.FC<HudProps> = ({
             </div>
             {gameState.turnBased && gameState.phase !== 'OVER' && (
               <div className={`text-[10px] mt-1 truncate ${locked ? 'opacity-100 font-bold' : 'opacity-60'}`}>
-                {thinkLabel(who)}
+                {thinkLabel(who)} {locked ? '🔒' : `(${buffer.length})`}
               </div>
             )}
           </div>

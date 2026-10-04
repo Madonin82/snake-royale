@@ -1,8 +1,9 @@
-import React, { useState, useEffect, useRef, useCallback } from 'react';
-import { Direction, GameSettings, GameState, LatencyReport, PlayMode } from './types/game';
+import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
+import { Direction, GameSettings, GameState, LatencyReport, PlayMode, Position } from './types/game';
 import {
   createInitialState,
   DEFAULT_SETTINGS,
+  getNextHeadPosition,
   isOppositeDirection,
   processGameTick,
   queueSnakeDirection,
@@ -22,6 +23,30 @@ import { MatchEndModal } from './components/MatchEndModal';
 import { ControlsOverlay } from './components/ControlsOverlay';
 import { ReplayControls } from './components/ReplayControls';
 import { ArrowLeft, Volume2, VolumeX } from 'lucide-react';
+
+function computePreviewSnake(snake: any, buffer: Direction[]): Position[] {
+  if (buffer.length === 0) return snake.body;
+  let body = [...snake.body.map((seg: any) => ({ ...seg }))];
+  for (const dir of buffer) {
+    const nextHead = getNextHeadPosition(body[0], dir);
+    body.unshift(nextHead);
+    body.pop();
+  }
+  return body;
+}
+
+function computeCommittedPath(snake: any, buffer: Direction[]): Position[] {
+  if (buffer.length === 0) return [];
+  let body = [...snake.body.map((seg: any) => ({ ...seg }))];
+  const path: Position[] = [];
+  for (const dir of buffer) {
+    const nextHead = getNextHeadPosition(body[0], dir);
+    path.push(nextHead);
+    body.unshift(nextHead);
+    body.pop();
+  }
+  return path;
+}
 
 export const App: React.FC = () => {
   const [settings, setSettings] = useState<GameSettings>(DEFAULT_SETTINGS);
@@ -78,7 +103,45 @@ export const App: React.FC = () => {
     return () => clearInterval(id);
   }, [replayActive, replayPlaying, replaySpeed, matchHistory.length]);
 
-  const displayState = replayActive ? (matchHistory[replayIdx] ?? gameState) : gameState;
+  const [moveBuffers, setMoveBuffers] = useState<{ p1: Direction[]; p2: Direction[] }>({ p1: [], p2: [] });
+  const moveBuffersRef = useRef<{ p1: Direction[]; p2: Direction[] }>({ p1: [], p2: [] });
+  moveBuffersRef.current = moveBuffers;
+
+  const clearMoveBuffers = useCallback(() => {
+    moveBuffersRef.current = { p1: [], p2: [] };
+    setMoveBuffers({ p1: [], p2: [] });
+  }, []);
+
+  // TURN-BASED MOVE LOCKS
+  const locksRef = useRef<{ p1: boolean; p2: boolean }>({ p1: false, p2: false });
+  const [locks, setLocks] = useState<{ p1: boolean; p2: boolean }>({ p1: false, p2: false });
+  const sentTickRef = useRef<number>(-1);
+
+  const displayState = useMemo(() => {
+    if (replayActive) return matchHistory[replayIdx] ?? gameState;
+    const stateCopy: GameState = {
+      ...gameState,
+      snakes: {
+        p1: { ...gameState.snakes.p1, body: [...gameState.snakes.p1.body] },
+        p2: { ...gameState.snakes.p2, body: [...gameState.snakes.p2.body] },
+      },
+    };
+    if (settings.turnBased && !locks.p1 && moveBuffers.p1.length > 0) {
+      stateCopy.snakes.p1.body = computePreviewSnake(gameState.snakes.p1, moveBuffers.p1);
+    }
+    if (settings.turnBased && !locks.p2 && moveBuffers.p2.length > 0) {
+      stateCopy.snakes.p2.body = computePreviewSnake(gameState.snakes.p2, moveBuffers.p2);
+    }
+    return stateCopy;
+  }, [replayActive, matchHistory, replayIdx, gameState, moveBuffers, locks, settings.turnBased]);
+
+  const lockedPaths = useMemo(() => {
+    if (!settings.turnBased) return undefined;
+    return {
+      p1: locks.p1 && moveBuffers.p1.length > 0 ? computeCommittedPath(gameState.snakes.p1, moveBuffers.p1) : undefined,
+      p2: locks.p2 && moveBuffers.p2.length > 0 ? computeCommittedPath(gameState.snakes.p2, moveBuffers.p2) : undefined,
+    };
+  }, [settings.turnBased, locks, moveBuffers, gameState.snakes]);
 
   const stateRef = useRef<GameState>(gameState);
   stateRef.current = gameState;
@@ -94,11 +157,6 @@ export const App: React.FC = () => {
 
   // Active menu handler ref for zero-re-render gamepad/keyboard dispatch
   const activeHandlerRef = useRef<((action: GamepadMenuAction) => void) | null>(null);
-
-  // TURN-BASED MOVE LOCKS
-  const locksRef = useRef<{ p1: boolean; p2: boolean }>({ p1: false, p2: false });
-  const [locks, setLocks] = useState<{ p1: boolean; p2: boolean }>({ p1: false, p2: false });
-  const sentTickRef = useRef<number>(-1);
 
   // TURN CLOCK
   interface TurnClock { startedAt: number; p1At: number | null; p2At: number | null }
@@ -128,7 +186,8 @@ export const App: React.FC = () => {
     locksRef.current = { p1: false, p2: false };
     setLocks(locksRef.current);
     resetTurnClock();
-  }, [resetTurnClock]);
+    clearMoveBuffers();
+  }, [clearMoveBuffers, resetTurnClock]);
 
   const playTickEvents = useCallback((events: {
     tokenEatenP1: boolean;
@@ -145,20 +204,69 @@ export const App: React.FC = () => {
     if (events.matchEnded) soundEngine.playVictory();
   }, []);
 
+  const turnTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+
+  useEffect(() => {
+    return () => {
+      if (turnTimeoutRef.current) {
+        clearTimeout(turnTimeoutRef.current);
+        turnTimeoutRef.current = null;
+      }
+    };
+  }, []);
+
   const maybeAdvanceTurn = useCallback(() => {
+    if (turnTimeoutRef.current) {
+      clearTimeout(turnTimeoutRef.current);
+      turnTimeoutRef.current = null;
+    }
+
     const current = stateRef.current;
     const s = settingsRef.current;
     if (!s.turnBased || current.phase === 'OVER') return;
 
     if (playModeRef.current === 'SOLO_AI' && !locksRef.current.p2) {
-      const aiDir = calculateAIMove(current, s.gridSize, 'p2', s.botDifficulty);
-      if (aiDir) queueSnakeDirection(current.snakes.p2, aiDir);
+      const p2Buf = [...moveBuffersRef.current.p2];
+      const p2Snake = current.snakes.p2;
+      if (p2Buf.length === 0) {
+        let curDir = p2Snake.direction;
+        let simBody = [...p2Snake.body];
+        const planLen = Math.min(3, p2Snake.body.length);
+        for (let i = 0; i < planLen; i++) {
+          const aiDir = calculateAIMove({ ...current, snakes: { ...current.snakes, p2: { ...p2Snake, body: simBody, direction: curDir } } }, s.gridSize, 'p2', s.botDifficulty);
+          if (aiDir && !isOppositeDirection(curDir, aiDir)) {
+            p2Buf.push(aiDir);
+            curDir = aiDir;
+            const nextHead = getNextHeadPosition(simBody[0], aiDir);
+            simBody.unshift(nextHead);
+            simBody.pop();
+          } else {
+            break;
+          }
+        }
+        if (p2Buf.length === 0) {
+          const fallback = ['UP', 'DOWN', 'LEFT', 'RIGHT'].find(d => !isOppositeDirection(curDir, d as Direction)) as Direction || 'LEFT';
+          p2Buf.push(fallback);
+        }
+      }
+      moveBuffersRef.current = { ...moveBuffersRef.current, p2: p2Buf };
+      setMoveBuffers({ ...moveBuffersRef.current });
       locksRef.current = { ...locksRef.current, p2: true };
       setLocks(locksRef.current);
       stampLockTime('p2', turnClockRef.current.startedAt);
     }
 
+    const p1Buf = moveBuffersRef.current.p1;
+    const p2Buf = moveBuffersRef.current.p2;
+
     if (!locksRef.current.p1 || !locksRef.current.p2) return;
+    if (p1Buf.length === 0 || p2Buf.length === 0) return;
+
+    const nextP1Dir = p1Buf.shift()!;
+    const nextP2Dir = p2Buf.shift()!;
+
+    queueSnakeDirection(current.snakes.p1, nextP1Dir);
+    queueSnakeDirection(current.snakes.p2, nextP2Dir);
 
     const now = Date.now();
     const clock = turnClockRef.current;
@@ -172,14 +280,83 @@ export const App: React.FC = () => {
       p2: parseFloat((stateRef.current.totalThinkTime.p2 + turnTimes.p2).toFixed(1)),
     };
     playTickEvents(events);
+
+    const newP1Buf = [...moveBuffersRef.current.p1];
+    const newP2Buf = [...moveBuffersRef.current.p2];
+    moveBuffersRef.current = { p1: newP1Buf, p2: newP2Buf };
+    setMoveBuffers({ p1: newP1Buf, p2: newP2Buf });
+
+    locksRef.current = {
+      p1: newP1Buf.length > 0 ? locksRef.current.p1 : false,
+      p2: newP2Buf.length > 0 ? locksRef.current.p2 : false,
+    };
+    setLocks(locksRef.current);
+
     setGameState(nextState);
     setMatchHistory(prev => [...prev, nextState]);
 
     if (playModeRef.current === 'ONLINE_HOST' || playModeRef.current === 'ONLINE_SERVER') {
       networkManager.broadcastState(nextState);
     }
-    clearLocks();
-  }, [clearLocks, playTickEvents, stampLockTime]);
+
+    const canProgress =
+      nextState.phase !== 'OVER' &&
+      ((moveBuffersRef.current.p1.length > 0 && moveBuffersRef.current.p2.length > 0) ||
+       (playModeRef.current === 'SOLO_AI' && !locksRef.current.p2));
+
+    if (canProgress) {
+      turnTimeoutRef.current = setTimeout(() => {
+        turnTimeoutRef.current = null;
+        maybeAdvanceTurn();
+      }, 550);
+    }
+  }, [playTickEvents, stampLockTime]);
+
+  const handleBufferUndo = useCallback((playerSlot: 1 | 2) => {
+    const current = stateRef.current;
+    if (current.phase === 'OVER' || inLobby || inOnlineLobby || !settingsRef.current.turnBased) return;
+    const targetKey = playModeRef.current === 'LOCAL_2P' ? (playerSlot === 2 ? 'p2' : 'p1') : 'p1';
+    if (locksRef.current[targetKey]) return;
+
+    const buf = [...moveBuffersRef.current[targetKey]];
+    if (buf.length === 0) return;
+    buf.pop();
+    moveBuffersRef.current = { ...moveBuffersRef.current, [targetKey]: buf };
+    setMoveBuffers({ ...moveBuffersRef.current });
+    soundEngine.playTick();
+  }, [inLobby, inOnlineLobby]);
+
+  const handleBufferClear = useCallback((playerSlot: 1 | 2) => {
+    const current = stateRef.current;
+    if (current.phase === 'OVER' || inLobby || inOnlineLobby || !settingsRef.current.turnBased) return;
+    const targetKey = playModeRef.current === 'LOCAL_2P' ? (playerSlot === 2 ? 'p2' : 'p1') : 'p1';
+    if (locksRef.current[targetKey]) return;
+
+    moveBuffersRef.current = { ...moveBuffersRef.current, [targetKey]: [] };
+    setMoveBuffers({ ...moveBuffersRef.current });
+    soundEngine.playTick();
+  }, [inLobby, inOnlineLobby]);
+
+  const handleBufferLock = useCallback((playerSlot: 1 | 2) => {
+    const current = stateRef.current;
+    if (current.phase === 'OVER' || inLobby || inOnlineLobby || !settingsRef.current.turnBased) return;
+    const targetKey = playModeRef.current === 'LOCAL_2P' ? (playerSlot === 2 ? 'p2' : 'p1') : 'p1';
+    const buf = moveBuffersRef.current[targetKey];
+    if (buf.length === 0 || locksRef.current[targetKey]) return;
+
+    soundEngine.playTick();
+    setLock(targetKey);
+
+    if (playModeRef.current === 'ONLINE_JOIN') {
+      if (sentTickRef.current !== current.tick) {
+        sentTickRef.current = current.tick;
+        networkManager.sendInput(buf[0], current.tick);
+      }
+      return;
+    }
+
+    maybeAdvanceTurn();
+  }, [inLobby, inOnlineLobby, maybeAdvanceTurn, setLock]);
 
   const handleDirectionInput = useCallback((playerSlot: 1 | 2, dir: Direction) => {
     const current = stateRef.current;
@@ -202,11 +379,6 @@ export const App: React.FC = () => {
     const currentSnake = current.snakes[targetKey];
     if (!currentSnake || !currentSnake.isAlive) return;
 
-    const effectiveDir = currentSnake.queuedDirection || currentSnake.direction;
-    if (isOppositeDirection(effectiveDir, dir)) {
-      return;
-    }
-
     soundEngine.playTick();
 
     if (settingsRef.current.turnBased) {
@@ -220,14 +392,15 @@ export const App: React.FC = () => {
 
       if (locksRef.current[targetKey]) return;
 
-      queueSnakeDirection(stateRef.current.snakes[targetKey], dir);
-      const snakeCopy = { ...current.snakes[targetKey], queuedDirection: dir };
-      setGameState(prev => ({
-        ...prev,
-        snakes: { ...prev.snakes, [targetKey]: snakeCopy }
-      }));
-      setLock(targetKey);
-      maybeAdvanceTurn();
+      const buf = [...moveBuffersRef.current[targetKey]];
+      if (buf.length >= currentSnake.body.length) return;
+
+      const lastDir = buf.length > 0 ? buf[buf.length - 1] : currentSnake.direction;
+      if (isOppositeDirection(lastDir, dir)) return;
+
+      buf.push(dir);
+      moveBuffersRef.current = { ...moveBuffersRef.current, [targetKey]: buf };
+      setMoveBuffers({ ...moveBuffersRef.current });
       return;
     }
 
@@ -247,7 +420,7 @@ export const App: React.FC = () => {
       ...prev,
       snakes: { ...prev.snakes, [targetKey]: snakeCopy }
     }));
-  }, [inLobby, inOnlineLobby, maybeAdvanceTurn, setLock]);
+  }, [inLobby, inOnlineLobby]);
 
   const handleReturnToLobby = useCallback(() => {
     if (playModeRef.current === 'ONLINE_HOST' || playModeRef.current === 'ONLINE_JOIN' || playModeRef.current === 'ONLINE_SERVER' || playModeRef.current === 'ONLINE_SPECTATOR') {
@@ -279,6 +452,18 @@ export const App: React.FC = () => {
       handleMenuAction(action, slot);
     });
 
+    gamepadController.setButtonCallback((slot, button, pressed) => {
+      if (!pressed) return;
+      const targetSlot = playModeRef.current === 'LOCAL_2P' && slot === 2 ? 2 : 1;
+      if (button === 'A') {
+        handleBufferLock(targetSlot);
+      } else if (button === 'B') {
+        handleBufferUndo(targetSlot);
+      } else if (button === 'Y') {
+        handleBufferClear(targetSlot);
+      }
+    });
+
     setGamepadCount(gamepadController.getConnectedGamepads().length);
     setIsNintendoController(gamepadController.isNintendoSwitchController());
 
@@ -292,7 +477,7 @@ export const App: React.FC = () => {
       clearInterval(checkPads);
       gamepadController.cleanup();
     };
-  }, [handleDirectionInput, handleMenuAction]);
+  }, [handleDirectionInput, handleMenuAction, handleBufferLock, handleBufferUndo, handleBufferClear]);
 
   // Keyboard controls listener
   useEffect(() => {
@@ -363,7 +548,23 @@ export const App: React.FC = () => {
         return;
       }
 
-      // In-Game snake controls
+      // In-Game buffer / snake controls
+      if (e.key === 'Backspace') {
+        handleBufferUndo(1);
+        e.preventDefault();
+        return;
+      }
+      if (e.key === 'Escape' || e.key === 'c' || e.key === 'C') {
+        handleBufferClear(1);
+        e.preventDefault();
+        return;
+      }
+      if (e.key === 'Enter' || e.key === ' ') {
+        handleBufferLock(1);
+        e.preventDefault();
+        return;
+      }
+
       switch (e.code) {
         case 'KeyW':
           handleDirectionInput(1, 'UP');
@@ -460,7 +661,30 @@ export const App: React.FC = () => {
                 ? [...prev, safeState]
                 : prev
             );
-            if (settingsRef.current.turnBased) clearLocks();
+
+            if (settingsRef.current.turnBased && playModeRef.current === 'ONLINE_JOIN' && onlineRoleRef.current) {
+              const myRole = onlineRoleRef.current === 'p1' ? 'p1' : onlineRoleRef.current === 'p2' ? 'p2' : null;
+              if (myRole) {
+                const buf = [...moveBuffersRef.current[myRole]];
+                if (buf.length > 0) {
+                  buf.shift();
+                  moveBuffersRef.current = { ...moveBuffersRef.current, [myRole]: buf };
+                  setMoveBuffers({ ...moveBuffersRef.current });
+
+                  if (buf.length > 0) {
+                    if (sentTickRef.current !== safeState.tick) {
+                      sentTickRef.current = safeState.tick;
+                      networkManager.sendInput(buf[0], safeState.tick);
+                    }
+                  } else {
+                    locksRef.current = { ...locksRef.current, [myRole]: false };
+                    setLocks({ ...locksRef.current });
+                  }
+                }
+              }
+            }
+
+            if (settingsRef.current.turnBased && playModeRef.current !== 'ONLINE_JOIN') clearLocks();
             if (inOnlineLobby) {
               setInOnlineLobby(false);
               setInLobby(false);
@@ -477,13 +701,16 @@ export const App: React.FC = () => {
             const current = stateRef.current;
             networkManager.recordTickLag(msg.tick, current.tick);
             const key = msg.role === 'p1' ? 'p1' : 'p2';
-            queueSnakeDirection(current.snakes[key], msg.dir);
-            const snakeCopy = { ...current.snakes[key] };
-            queueSnakeDirection(snakeCopy, msg.dir);
-            setGameState(prev => ({
-              ...prev,
-              snakes: { ...prev.snakes, [key]: snakeCopy }
-            }));
+            const snake = current.snakes[key];
+            const buf = [...moveBuffersRef.current[key]];
+            if (buf.length < snake.body.length) {
+              const lastDir = buf.length > 0 ? buf[buf.length - 1] : snake.direction;
+              if (!isOppositeDirection(lastDir, msg.dir)) {
+                buf.push(msg.dir);
+                moveBuffersRef.current = { ...moveBuffersRef.current, [key]: buf };
+                setMoveBuffers({ ...moveBuffersRef.current });
+              }
+            }
             if (settingsRef.current.turnBased) {
               setLock(key);
               maybeAdvanceTurn();
@@ -812,6 +1039,7 @@ export const App: React.FC = () => {
                 gamepadCount={gamepadCount}
                 locks={replayActive ? undefined : locks}
                 turnClock={replayActive ? undefined : turnClock}
+                moveBuffers={moveBuffers}
                 viewerSeat={
                   playMode === 'ONLINE_HOST' ? 'p1'
                   : playMode === 'ONLINE_JOIN' ? (onlineRole === 'p1' ? 'p1' : onlineRole === 'p2' ? 'p2' : null)
@@ -819,7 +1047,7 @@ export const App: React.FC = () => {
                 }
               />
               <div className="gameboard-area my-1">
-                <GameBoard gameState={displayState} settings={settings} />
+                <GameBoard gameState={displayState} settings={settings} lockedPaths={lockedPaths} />
               </div>
               <div className="controls-area">
                 {!replayActive && <ControlsOverlay onDirection={(dir) => handleDirectionInput(1, dir)} />}

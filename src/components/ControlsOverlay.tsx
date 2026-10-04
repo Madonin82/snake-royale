@@ -8,7 +8,7 @@ interface ControlsOverlayProps {
 
 export const ControlsOverlay: React.FC<ControlsOverlayProps> = ({ onDirection }) => {
   return (
-    <div className="w-full max-w-[340px] sm:hidden flex justify-center py-2 select-none">
+    <div className="w-full max-w-[340px] sm:hidden flex flex-col items-center py-2 select-none">
       <div className="relative w-36 h-36 bg-[#8BAC0F] border-2 border-[#0F380F] p-1 shadow-[2px_2px_0px_#0F380F]">
         {/* Center pivot */}
         <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-10 h-10 bg-[#306230] border border-[#0F380F]" />
@@ -44,6 +44,9 @@ export const ControlsOverlay: React.FC<ControlsOverlayProps> = ({ onDirection })
         >
           <ArrowRight className="w-6 h-6" />
         </button>
+      </div>
+      <div className="text-[9px] font-mono font-bold text-center mt-1.5 opacity-90 tracking-tight">
+        Plan: D-pad queue • B undo • Y clear • A lock
       </div>
     </div>
   );
