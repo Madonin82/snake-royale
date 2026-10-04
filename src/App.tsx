@@ -802,7 +802,7 @@ export const App: React.FC = () => {
               onRegisterHandler={(h) => { activeHandlerRef.current = h; }}
             />
           ) : (
-            <div className="flex flex-col items-center gap-2">
+            <div className="match-grid-container gap-2">
               <Hud
                 gameState={displayState}
                 playMode={playMode}
@@ -818,21 +818,25 @@ export const App: React.FC = () => {
                   : null
                 }
               />
-              <GameBoard gameState={displayState} settings={settings} />
-              {!replayActive && <ControlsOverlay onDirection={(dir) => handleDirectionInput(1, dir)} />}
-              {replayActive && (
-                <ReplayControls
-                  index={replayIdx}
-                  total={matchHistory.length}
-                  playing={replayPlaying}
-                  speed={replaySpeed}
-                  onTogglePlay={() => setReplayPlaying(p => !p)}
-                  onSeek={(i) => setReplayIdx(i)}
-                  onSpeedChange={setReplaySpeed}
-                  onExit={() => { setReplayActive(false); setReplayPlaying(false); }}
-                  onRegisterHandler={(h) => { activeHandlerRef.current = h; }}
-                />
-              )}
+              <div className="gameboard-area my-1">
+                <GameBoard gameState={displayState} settings={settings} />
+              </div>
+              <div className="controls-area">
+                {!replayActive && <ControlsOverlay onDirection={(dir) => handleDirectionInput(1, dir)} />}
+                {replayActive && (
+                  <ReplayControls
+                    index={replayIdx}
+                    total={matchHistory.length}
+                    playing={replayPlaying}
+                    speed={replaySpeed}
+                    onTogglePlay={() => setReplayPlaying(p => !p)}
+                    onSeek={(i) => setReplayIdx(i)}
+                    onSpeedChange={setReplaySpeed}
+                    onExit={() => { setReplayActive(false); setReplayPlaying(false); }}
+                    onRegisterHandler={(h) => { activeHandlerRef.current = h; }}
+                  />
+                )}
+              </div>
             </div>
           )}
         </div>

@@ -60,117 +60,62 @@ export const Hud: React.FC<HudProps> = ({
       : `${snake.name} … ${fmtSecs(nowMs - turnClock.startedAt)}`;
   };
 
+  const isLocked = (who: 'p1' | 'p2') => {
+    if (!locks || !turnClock) return false;
+    return who === 'p1' ? locks.p1 : locks.p2;
+  };
+
   // Format seconds mm:ss
   const totalSeconds = Math.ceil(gameState.phaseTimeRemaining / 1000);
   const minutes = Math.floor(totalSeconds / 60);
   const seconds = totalSeconds % 60;
   const formattedTime = `${minutes}:${seconds < 10 ? '0' : ''}${seconds}`;
 
-  return (
-    <div className="w-full max-w-[340px] sm:max-w-[400px] md:max-w-[460px] flex flex-col gap-2 font-mono text-[#0F380F]">
-      {/* Top Banner: Status & Phase Indicator */}
-      <div className="flex items-center justify-between bg-[#8BAC0F] px-3 py-1.5 border-2 border-[#0F380F] text-xs font-bold tracking-wider">
-        <div className="flex items-center gap-2">
-          <span
-            className={`px-1.5 py-0.5 border border-[#0F380F] text-[10px] ${
-              isRacing
-                ? 'bg-[#0F380F] text-[#9BBC0F]'
-                : isShrinking
-                ? 'bg-[#306230] text-[#9BBC0F] animate-pulse'
-                : 'bg-[#8BAC0F] text-[#0F380F]'
-            }`}
-          >
-            {gameState.phase === 'RACING'
-              ? `PHASE 1: TOKEN RACE`
-              : gameState.phase === 'SHRINKING'
-              ? `PHASE 2: SHRINK ARENA`
-              : `MATCH OVER`}
+  const topStripContent = (
+    <div className="flex items-center justify-between bg-[#8BAC0F] px-3 py-1.5 border-2 border-[#0F380F] text-xs font-bold tracking-wider w-full shadow-[2px_2px_0px_#0F380F]">
+      <div className="flex items-center gap-1.5 flex-wrap">
+        <span
+          className={`px-1.5 py-0.5 border border-[#0F380F] text-[10px] ${
+            isRacing
+              ? 'bg-[#0F380F] text-[#9BBC0F]'
+              : isShrinking
+              ? 'bg-[#306230] text-[#9BBC0F] animate-pulse'
+              : 'bg-[#8BAC0F] text-[#0F380F]'
+          }`}
+        >
+          {gameState.phase === 'RACING'
+            ? `PHASE 1: TOKEN RACE`
+            : gameState.phase === 'SHRINKING'
+            ? `PHASE 2: SHRINK ARENA`
+            : `MATCH OVER`}
+        </span>
+        {isRacing && (
+          <span className="text-[10px] bg-[#9BBC0F] px-1 border border-[#0F380F]">
+            RND {gameState.round} ({gameState.tokens.length} 💎)
           </span>
-          {isRacing && (
-            <span className="text-[10px] bg-[#9BBC0F] px-1 border border-[#0F380F]">
-              RND {gameState.round} ({gameState.tokens.length} 💎)
-            </span>
-          )}
-        </div>
+        )}
+      </div>
 
-        {/* Phase Clock / Turn Counter */}
-        <div className="text-sm font-black tracking-widest bg-[#9BBC0F] px-2 py-0.5 border border-[#0F380F]">
+      <div className="flex items-center gap-2">
+        {gameState.turnBased && gameState.phase !== 'OVER' && (
+          <span className="hidden xl:inline text-[9px] opacity-80 whitespace-nowrap">BOTH LOCK → BOARD STEPS</span>
+        )}
+
+        <div className="text-xs md:text-sm font-black tracking-widest bg-[#9BBC0F] px-2 py-0.5 border border-[#0F380F]">
           {gameState.turnBased
             ? `TURN ${gameState.tick} • ${gameState.phase === 'RACING' ? `${gameState.phaseTurnsRemaining} LEFT` : gameState.phase === 'SHRINKING' ? `RING IN ${gameState.phaseTurnsRemaining}` : '—'}`
             : `⏱️ ${formattedTime}`}
         </div>
-      </div>
 
-      {/* Turn-based lock status + per-player thinking time */}
-      {gameState.turnBased && locks && gameState.phase !== 'OVER' && (
-        <div className="flex flex-col gap-0.5 text-[10px] font-bold bg-[#8BAC0F] px-2.5 py-1 border-2 border-[#0F380F]">
-          <div className="flex items-center justify-between gap-2">
-            <span className={`truncate ${locks.p1 ? 'text-[#0F380F]' : 'opacity-60'}`}>
-              {thinkLabel('p1')}
-            </span>
-            <span className="opacity-70 whitespace-nowrap">BOTH LOCK → BOARD STEPS</span>
-            <span className={`truncate text-right ${locks.p2 ? 'text-[#0F380F]' : 'opacity-60'}`}>
-              {thinkLabel('p2')}
-            </span>
-          </div>
-          {gameState.lastTurnTimes && (
-            <div className="text-center opacity-70">
-              LAST TURN — {p1.name} {gameState.lastTurnTimes.p1.toFixed(1)}s · {p2.name} {gameState.lastTurnTimes.p2.toFixed(1)}s
-              {'  |  '}TOTAL — {p1.name} {fmtTotal(gameState.totalThinkTime.p1)} · {p2.name} {fmtTotal(gameState.totalThinkTime.p2)}
-            </div>
-          )}
-        </div>
-      )}
+        {gamepadCount > 0 && (
+          <span className="hidden sm:flex items-center gap-1 text-[10px] text-[#0F380F] font-bold bg-[#9BBC0F] px-1 border border-[#0F380F]">
+            <Gamepad className="w-3 h-3" /> {gamepadCount}
+          </span>
+        )}
 
-      {/* Score Boards: P1 vs P2 */}
-      <div className="grid grid-cols-2 gap-2">
-        {/* Player 1 Card */}
-        <div className="bg-[#9BBC0F] p-2 border-2 border-[#0F380F] flex flex-col justify-between">
-          <div className="flex items-center justify-between text-[11px] font-bold">
-            <span className="flex items-center gap-1 min-w-0">
-              <span className="w-2.5 h-2.5 shrink-0 bg-[#0F380F] inline-block border border-[#0F380F]" />
-              <span className="truncate">{p1.name} {seatTag('p1')}</span>
-            </span>
-            <span className="text-[10px] opacity-80">LEN: {p1.body.length}</span>
-          </div>
-          <div className="flex items-baseline justify-between mt-1">
-            <span className="text-2xl font-black">{p1.score}</span>
-            <span className="text-[10px] font-semibold uppercase tracking-tight">PTS</span>
-          </div>
-        </div>
-
-        {/* Player 2 Card */}
-        <div className="bg-[#9BBC0F] p-2 border-2 border-[#0F380F] flex flex-col justify-between">
-          <div className="flex items-center justify-between text-[11px] font-bold">
-            <span className="flex items-center gap-1 min-w-0">
-              <span className="w-2.5 h-2.5 shrink-0 bg-[#306230] inline-block border border-[#0F380F]" />
-              <span className="truncate">{p2.name} {seatTag('p2')}</span>
-            </span>
-            <span className="text-[10px] opacity-80">LEN: {p2.body.length}</span>
-          </div>
-          <div className="flex items-baseline justify-between mt-1">
-            <span className="text-2xl font-black">{p2.score}</span>
-            <span className="text-[10px] font-semibold uppercase tracking-tight">PTS</span>
-          </div>
-        </div>
-      </div>
-
-      {/* Bottom Bar: Mode + Gamepad Indicator + NET telemetry toggle */}
-      <div className="flex items-center justify-between text-[10px] bg-[#8BAC0F] px-2.5 py-1 border-2 border-[#0F380F]">
-        <div className="flex items-center gap-2">
-          {gamepadCount > 0 ? (
-            <span className="flex items-center gap-1 text-[#0F380F] font-bold bg-[#9BBC0F] px-1 border border-[#0F380F]">
-              <Gamepad className="w-3 h-3" /> GP: {gamepadCount}
-            </span>
-          ) : (
-            <span className="text-[#306230] font-medium">⌨️ WASD/ARROWS</span>
-          )}
-        </div>
-
-        {/* NET Latency Readout Button (First-class feature per spec) */}
         <button
           onClick={onOpenLatencyHarness}
-          className="flex items-center gap-1.5 bg-[#9BBC0F] hover:bg-[#0F380F] hover:text-[#9BBC0F] text-[#0F380F] px-2 py-0.5 border border-[#0F380F] font-bold cursor-pointer transition-colors shadow-[1px_1px_0px_#0F380F]"
+          className="flex items-center gap-1 bg-[#9BBC0F] hover:bg-[#0F380F] hover:text-[#9BBC0F] text-[#0F380F] px-2 py-0.5 border border-[#0F380F] font-bold cursor-pointer transition-colors text-[10px]"
           title="Open Latency Diagnostic Suite & Diagnostics"
         >
           <Activity className="w-3 h-3" />
@@ -182,5 +127,104 @@ export const Hud: React.FC<HudProps> = ({
         </button>
       </div>
     </div>
+  );
+
+  const renderDesktopPlayerPanel = (who: 'p1' | 'p2') => {
+    const snake = who === 'p1' ? p1 : p2;
+    const locked = isLocked(who);
+    const lastTurn = gameState.lastTurnTimes ? (who === 'p1' ? gameState.lastTurnTimes.p1 : gameState.lastTurnTimes.p2) : null;
+    const totalThink = gameState.totalThinkTime ? (who === 'p1' ? gameState.totalThinkTime.p1 : gameState.totalThinkTime.p2) : 0;
+
+    return (
+      <div className="bg-[#9BBC0F] p-3 border-2 border-[#0F380F] flex flex-col justify-between h-full shadow-[2px_2px_0px_#0F380F] w-full font-mono text-[#0F380F]">
+        <div>
+          <div className="flex items-center justify-between text-xs font-bold mb-2">
+            <span className="flex items-center gap-1.5 min-w-0">
+              <span className={`w-3 h-3 shrink-0 ${who === 'p1' ? 'bg-[#0F380F]' : 'bg-[#306230]'} inline-block border border-[#0F380F]`} />
+              <span className="truncate">{snake.name} {seatTag(who)}</span>
+            </span>
+          </div>
+
+          <div className="flex items-baseline justify-between mb-3">
+            <div>
+              <span className="text-3xl font-black">{snake.score}</span>
+              <span className="text-[10px] font-semibold uppercase tracking-tight ml-1">PTS</span>
+            </div>
+            <span className="text-xs font-bold opacity-80">LEN: {snake.body.length}</span>
+          </div>
+
+          {gameState.turnBased && gameState.phase !== 'OVER' && (
+            <div className="mb-3 p-2 bg-[#8BAC0F]/40 border border-[#0F380F] text-xs font-bold">
+              <div className={`truncate ${locked ? 'text-[#0F380F] opacity-100 font-extrabold' : 'opacity-60'}`}>
+                {thinkLabel(who)}
+              </div>
+              {lastTurn !== null && (
+                <div className="text-[10px] opacity-80 mt-1.5 flex justify-between">
+                  <span>LAST: {lastTurn.toFixed(1)}s</span>
+                  <span>TOT: {fmtTotal(totalThink)}</span>
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+
+        {/* Empty reserved placeholder section at bottom (min-height, no content) */}
+        <div className="min-h-[80px] flex-1 bg-[#8BAC0F]/20 border border-dashed border-[#0F380F]/40 flex items-center justify-center text-[10px] opacity-50 tracking-wider">
+          {/* Queued moves reserved slot */}
+        </div>
+      </div>
+    );
+  };
+
+  const renderMobileCards = (
+    <div className="mobile-cards-area grid grid-cols-2 gap-2 w-full max-w-[340px] sm:max-w-[400px] font-mono text-[#0F380F]">
+      {(['p1', 'p2'] as const).map((who) => {
+        const snake = who === 'p1' ? p1 : p2;
+        const locked = isLocked(who);
+        return (
+          <div key={who} className="bg-[#9BBC0F] p-2 border-2 border-[#0F380F] flex flex-col justify-between shadow-[2px_2px_0px_#0F380F]">
+            <div className="flex items-center justify-between text-[11px] font-bold">
+              <span className="flex items-center gap-1 min-w-0">
+                <span className={`w-2.5 h-2.5 shrink-0 ${who === 'p1' ? 'bg-[#0F380F]' : 'bg-[#306230]'} inline-block border border-[#0F380F]`} />
+                <span className="truncate">{snake.name} {seatTag(who)}</span>
+              </span>
+              <span className="text-[10px] opacity-80">LEN: {snake.body.length}</span>
+            </div>
+            <div className="flex items-baseline justify-between mt-1">
+              <span className="text-xl font-black">{snake.score}</span>
+              <span className="text-[10px] font-semibold uppercase tracking-tight">PTS</span>
+            </div>
+            {gameState.turnBased && gameState.phase !== 'OVER' && (
+              <div className={`text-[10px] mt-1 truncate ${locked ? 'opacity-100 font-bold' : 'opacity-60'}`}>
+                {thinkLabel(who)}
+              </div>
+            )}
+          </div>
+        );
+      })}
+    </div>
+  );
+
+  return (
+    <>
+      <div className="top-strip-area w-full flex flex-col items-center">
+        {topStripContent}
+        {gameState.turnBased && gameState.phase !== 'OVER' && (
+          <div className="md:hidden text-center text-[10px] font-bold bg-[#8BAC0F] px-2 py-0.5 border-x-2 border-b-2 border-[#0F380F] w-full">
+            BOTH LOCK → BOARD STEPS
+          </div>
+        )}
+      </div>
+
+      <div className="desktop-panel-left">
+        {renderDesktopPlayerPanel('p1')}
+      </div>
+
+      <div className="desktop-panel-right">
+        {renderDesktopPlayerPanel('p2')}
+      </div>
+
+      {renderMobileCards}
+    </>
   );
 };
