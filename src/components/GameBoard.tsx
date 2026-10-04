@@ -111,7 +111,7 @@ export const GameBoard: React.FC<GameBoardProps> = ({ gameState, settings, locke
   }, [gameState, settings, lockedPaths]);
 
   return (
-    <div className="relative flex flex-col items-center justify-center p-2 bg-[#9BBC0F] border-4 border-[#0F380F] shadow-[inset_0_0_12px_rgba(15,56,15,0.4)]">
+    <div className="match-board relative flex flex-col items-center justify-center p-2 bg-[#9BBC0F] border-4 border-[#0F380F] shadow-[inset_0_0_12px_rgba(15,56,15,0.4)]">
       <canvas
         ref={canvasRef}
         className="w-full h-full max-w-full aspect-square block pixelated border-2 border-[#306230]"

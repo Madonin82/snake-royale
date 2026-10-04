@@ -1069,10 +1069,15 @@ export const App: React.FC = () => {
     }
   };
 
+  // Single-screen match layout: when a match (or replay) is on screen, the
+  // root <main> becomes a locked viewport (100dvh, no scroll). Lobby/menu
+  // views keep their normal min-h-screen flow.
+  const isMatchView = !inLobby && !inOnlineLobby;
+
   return (
-    <main className={`min-h-screen flex flex-col items-center justify-between p-2 sm:p-4 ${settings.crtFilterEnabled ? 'crt-overlay' : ''}`}>
+    <main className={`${isMatchView ? 'h-[100dvh] overflow-hidden' : 'min-h-screen justify-between'} flex flex-col items-center p-2 sm:p-4 ${settings.crtFilterEnabled ? 'crt-overlay' : ''}`}>
       {/* Top Header Navbar */}
-      <header className="w-full max-w-[500px] flex items-center justify-between py-1 px-2 border-b-2 border-[#0F380F] text-xs font-mono font-bold">
+      <header className="w-full max-w-[500px] shrink-0 flex items-center justify-between py-1 px-2 border-b-2 border-[#0F380F] text-xs font-mono font-bold">
         <div className="flex items-center gap-2">
           {!inLobby && (
             <button
@@ -1102,8 +1107,8 @@ export const App: React.FC = () => {
       </header>
 
       {/* Main Container */}
-      <div className="flex-1 flex flex-col items-center justify-center w-full my-2">
-        <div className="w-full flex flex-col items-center">
+      <div className={`flex-1 ${isMatchView ? 'min-h-0 min-w-0 my-1' : 'my-2'} flex flex-col items-center justify-center w-full`}>
+        <div className={`w-full flex flex-col items-center ${isMatchView ? 'flex-1 min-h-0' : ''}`}>
           {inLobby ? (
             <LobbyView
               onStartSolo={handleStartSolo}
@@ -1181,10 +1186,12 @@ export const App: React.FC = () => {
         </div>
       </div>
 
-      {/* Footer info */}
-      <footer className="text-center text-[10px] font-mono opacity-80 py-1">
-        4-shade palette • {settings.gridSize}×{settings.gridSize} grid • {settings.turnBased ? 'Turn-based simultaneous moves' : `Host-authoritative ${settings.tickRate} TPS`} • Gamepad API ready
-      </footer>
+      {/* Footer info — hidden in match view to give the board the full vertical budget */}
+      {!isMatchView && (
+        <footer className="text-center text-[10px] font-mono opacity-80 py-1 shrink-0">
+          4-shade palette • {settings.gridSize}×{settings.gridSize} grid • {settings.turnBased ? 'Turn-based simultaneous moves' : `Host-authoritative ${settings.tickRate} TPS`} • Gamepad API ready
+        </footer>
+      )}
 
       {/* Modals */}
       <LatencyHarnessModal

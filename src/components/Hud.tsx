@@ -82,10 +82,10 @@ export const Hud: React.FC<HudProps> = ({
   const formattedTime = `${minutes}:${seconds < 10 ? '0' : ''}${seconds}`;
 
   const topStripContent = (
-    <div className="flex items-center justify-between bg-[#8BAC0F] px-3 py-1.5 border-2 border-[#0F380F] text-xs font-bold tracking-wider w-full shadow-[2px_2px_0px_#0F380F]">
-      <div className="flex items-center gap-1.5 flex-wrap">
+    <div className="flex items-center justify-between gap-2 bg-[#8BAC0F] px-3 py-1.5 border-2 border-[#0F380F] text-xs font-bold tracking-wider w-full shadow-[2px_2px_0px_#0F380F]">
+      <div className="flex items-center gap-1.5 flex-wrap min-w-0">
         <span
-          className={`px-1.5 py-0.5 border border-[#0F380F] text-[10px] ${
+          className={`whitespace-nowrap px-1.5 py-0.5 border border-[#0F380F] text-[10px] ${
             isRacing
               ? 'bg-[#0F380F] text-[#9BBC0F]'
               : isShrinking
@@ -100,18 +100,18 @@ export const Hud: React.FC<HudProps> = ({
             : `MATCH OVER`}
         </span>
         {isRacing && (
-          <span className="text-[10px] bg-[#9BBC0F] px-1 border border-[#0F380F]">
+          <span className="whitespace-nowrap text-[10px] bg-[#9BBC0F] px-1 border border-[#0F380F]">
             RND {gameState.round} ({gameState.tokens.length} 💎)
           </span>
         )}
       </div>
 
-      <div className="flex items-center gap-2">
+      <div className="flex items-center gap-2 min-w-0">
         {gameState.turnBased && gameState.phase !== 'OVER' && (
-          <span className="hidden md:inline text-[9px] opacity-80 whitespace-nowrap">BOTH LOCK → BOARD STEPS</span>
+          <span className="hidden lg:inline text-[9px] opacity-80 whitespace-nowrap">BOTH LOCK → BOARD STEPS</span>
         )}
 
-        <div className="text-xs md:text-sm font-black tracking-widest bg-[#9BBC0F] px-2 py-0.5 border border-[#0F380F]">
+        <div className="whitespace-nowrap text-xs md:text-sm font-black tracking-widest bg-[#9BBC0F] px-2 py-0.5 border border-[#0F380F]">
           {gameState.turnBased
             ? `TURN ${gameState.tick} • ${gameState.phase === 'RACING' ? `${gameState.phaseTurnsRemaining} LEFT` : gameState.phase === 'SHRINKING' ? `RING IN ${gameState.phaseTurnsRemaining}` : '—'}`
             : `⏱️ ${formattedTime}`}
@@ -125,11 +125,11 @@ export const Hud: React.FC<HudProps> = ({
 
         <button
           onClick={onOpenLatencyHarness}
-          className="flex items-center gap-1 bg-[#9BBC0F] hover:bg-[#0F380F] hover:text-[#9BBC0F] text-[#0F380F] px-2 py-0.5 border border-[#0F380F] font-bold cursor-pointer transition-colors text-[10px]"
+          className="shrink-0 flex items-center gap-1 bg-[#9BBC0F] hover:bg-[#0F380F] hover:text-[#9BBC0F] text-[#0F380F] px-2 py-0.5 border border-[#0F380F] font-bold cursor-pointer transition-colors text-[10px]"
           title="Open Latency Diagnostic Suite & Diagnostics"
         >
           <Activity className="w-3 h-3" />
-          <span>NET: {latencyReport.medianRtt > 0 ? `${latencyReport.medianRtt}ms` : 'DIAG'}</span>
+          <span className="hidden sm:inline">NET: {latencyReport.medianRtt > 0 ? `${latencyReport.medianRtt}ms` : 'DIAG'}</span>
           {latencyReport.inputTickLagAvg > 0 && (
             <span className="text-[9px] opacity-90">({latencyReport.inputTickLagAvg}t lag)</span>
           )}
@@ -147,8 +147,8 @@ export const Hud: React.FC<HudProps> = ({
     const buffer = moveBuffers ? (who === 'p1' ? moveBuffers.p1 : moveBuffers.p2) : [];
 
     return (
-      <div className="bg-[#9BBC0F] p-3 border-2 border-[#0F380F] flex flex-col justify-between h-full shadow-[2px_2px_0px_#0F380F] w-full font-mono text-[#0F380F]">
-        <div>
+      <div className="bg-[#9BBC0F] p-3 border-2 border-[#0F380F] flex flex-col h-full min-h-0 overflow-hidden shadow-[2px_2px_0px_#0F380F] w-full font-mono text-[#0F380F]">
+        <div className="shrink-0">
           <div className="flex items-center justify-between text-xs font-bold mb-2">
             <span className="flex items-center gap-1.5 min-w-0">
               <span className={`w-3 h-3 shrink-0 ${who === 'p1' ? 'bg-[#0F380F]' : 'bg-[#306230]'} inline-block border border-[#0F380F]`} />
@@ -179,20 +179,22 @@ export const Hud: React.FC<HudProps> = ({
           )}
         </div>
 
-        {/* Queued move arrows list in the reserved bottom slot */}
-        <div className="min-h-[80px] flex-1 bg-[#8BAC0F]/20 border border-dashed border-[#0F380F]/40 p-1.5 flex flex-col justify-start">
-          <div className="text-[9px] font-bold opacity-75 mb-1 flex justify-between items-center">
+        {/* Queued move arrows list in the reserved bottom slot — the flexible
+            region: fixed header rows above stay put, this absorbs the rest.
+            Chips wrap; never pushes the layout taller. */}
+        <div className="flex-1 min-h-0 overflow-y-auto bg-[#8BAC0F]/20 border border-dashed border-[#0F380F]/40 p-1.5 flex flex-col justify-start">
+          <div className="text-[9px] font-bold opacity-75 mb-1 flex justify-between items-center shrink-0">
             <span>QUEUE ({buffer.length}/{snake.body.length})</span>
             {locked && <span className="text-[8px] px-1 bg-[#0F380F] text-[#9BBC0F]">LOCKED</span>}
           </div>
-          <div className="flex flex-wrap gap-1">
+          <div className="flex flex-wrap gap-1 content-start">
             {buffer.length === 0 ? (
               <span className="text-[10px] opacity-40 italic">Empty (plan moves)</span>
             ) : (
               buffer.map((dir, idx) => {
                 const arrow = dir === 'UP' ? '↑' : dir === 'DOWN' ? '↓' : dir === 'LEFT' ? '←' : '→';
                 return (
-                  <span key={idx} className="px-1 py-0.5 bg-[#0F380F] text-[#9BBC0F] text-[10px] font-bold border border-[#0F380F]">
+                  <span key={idx} className="px-1 py-0.5 bg-[#0F380F] text-[#9BBC0F] text-[10px] leading-tight font-bold border border-[#0F380F] shrink-0">
                     {arrow}
                   </span>
                 );
