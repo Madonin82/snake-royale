@@ -98,7 +98,7 @@ export const Hud: React.FC<HudProps> = ({
 
       <div className="flex items-center gap-2">
         {gameState.turnBased && gameState.phase !== 'OVER' && (
-          <span className="hidden xl:inline text-[9px] opacity-80 whitespace-nowrap">BOTH LOCK → BOARD STEPS</span>
+          <span className="hidden md:inline text-[9px] opacity-80 whitespace-nowrap">BOTH LOCK → BOARD STEPS</span>
         )}
 
         <div className="text-xs md:text-sm font-black tracking-widest bg-[#9BBC0F] px-2 py-0.5 border border-[#0F380F]">
