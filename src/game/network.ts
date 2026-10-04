@@ -115,12 +115,29 @@ export class NetworkManager {
         set(presenceRef, { joinedAt: Date.now() }).catch(() => {});
       }
 
+      // BUGFIX 8: ROOM_JOINED must carry the REAL member state from the room
+      // data read during connect (after this client's own join write), never
+      // hardcoded values. The guest's lobby depends on this if the first
+      // ROOM_MEMBERS_CHANGED is missed.
+      let joinedHasP1 = true;
+      let joinedHasP2 = false;
+      try {
+        const freshSnap = await get(roomRef);
+        const freshData = freshSnap.val() || {};
+        joinedHasP1 = !!freshData.hasP1;
+        joinedHasP2 = !!freshData.hasP2;
+      } catch {
+        // fall back to role-derived defaults below
+        joinedHasP1 = this.role === 'p1' || this.role === 'server';
+        joinedHasP2 = this.role === 'p2';
+      }
+
       this.notifyHandlers({
         type: 'ROOM_JOINED',
         roomId: this.roomId,
         role: this.role,
-        hasP1: true,
-        hasP2: false,
+        hasP1: joinedHasP1,
+        hasP2: joinedHasP2,
       });
 
       // 1. Listen to Room metadata
@@ -367,6 +384,37 @@ export class NetworkManager {
 
   public getRole(): 'p1' | 'p2' | 'spectator' | 'server' | null {
     return this.role;
+  }
+
+  // BUGFIX 8: one-shot re-read of room membership, used by the guest right
+  // after connect() so the lobby is correct even if a ROOM_MEMBERS_CHANGED
+  // notification was missed. Returns null when the room can't be read.
+  public async getRoomMembers(): Promise<{
+    hasP1: boolean;
+    hasP2: boolean;
+    p1Name: string | null;
+    p2Name: string | null;
+    series: { p1: number; p2: number; draws: number };
+  } | null> {
+    if (!this.roomId) return null;
+    try {
+      const snap = await get(ref(rtdb, `rooms/${this.roomId}`));
+      if (!snap.exists()) return null;
+      const d = snap.val() || {};
+      return {
+        hasP1: !!d.hasP1,
+        hasP2: !!d.hasP2,
+        p1Name: d.p1Name || null,
+        p2Name: d.p2Name || null,
+        series: {
+          p1: d.seriesP1 || 0,
+          p2: d.seriesP2 || 0,
+          draws: d.seriesDraws || 0,
+        },
+      };
+    } catch {
+      return null;
+    }
   }
 
   public getRoomId(): string {

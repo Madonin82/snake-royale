@@ -21,6 +21,7 @@ interface LobbyViewProps {
   isNintendoController?: boolean;
   onImportReplay: (file: File) => void;
   importError: string | null;
+  joinError: string | null;
 }
 
 export const LobbyView: React.FC<LobbyViewProps> = ({
@@ -40,6 +41,7 @@ export const LobbyView: React.FC<LobbyViewProps> = ({
   isNintendoController = false,
   onImportReplay,
   importError,
+  joinError,
 }) => {
   const [roomInput, setRoomInput] = useState('');
   const [difficulty, setDifficulty] = useState<'EASY' | 'MEDIUM' | 'HARD'>('MEDIUM');
@@ -558,6 +560,11 @@ export const LobbyView: React.FC<LobbyViewProps> = ({
                   {currentItem === 'JOIN_BTN' && <span className="animate-pulse mr-1">►</span>}
                   JOIN ROOM
                 </button>
+                {joinError && (
+                  <div className="text-center text-xs font-bold text-red-700 bg-red-100 border border-red-700 px-2 py-1">
+                    ⚠️ {joinError}
+                  </div>
+                )}
               </div>
             </div>
 
