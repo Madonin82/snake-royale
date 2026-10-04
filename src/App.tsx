@@ -969,6 +969,7 @@ export const App: React.FC = () => {
 
   const handleJoinOnlineRoom = async (code: string) => {
     const roomCode = code.toUpperCase().trim();
+    setJoinError(null);
     setOnlineRoomId(roomCode);
     setPlayMode('ONLINE_JOIN');
     setInOnlineLobby(true);
@@ -976,9 +977,32 @@ export const App: React.FC = () => {
     // BUGFIX 7: fresh tick tracking for the incoming state stream.
     lastStateTickRef.current = -1;
 
-    await networkManager.connect(roomCode, undefined, displayName.trim() || undefined);
+    // BUGFIX 8: honor connect()'s result. A failed connect must not leave a
+    // silent stuck lobby — show an error and return to the join form.
+    const ok = await networkManager.connect(roomCode, undefined, displayName.trim() || undefined);
     const assigned = networkManager.getRole();
-    if (assigned) setOnlineRole(assigned);
+    if (!ok || !assigned) {
+      networkManager.disconnect();
+      setJoinError("Couldn't join room — check the code");
+      setInOnlineLobby(false);
+      setInLobby(true);
+      return;
+    }
+    setOnlineRole(assigned);
+
+    // BUGFIX 8: one explicit member-state sync after connect, so the lobby
+    // is correct even if the first ROOM_MEMBERS_CHANGED was missed (handler
+    // re-registration race / onValue only fires on changes).
+    const members = await networkManager.getRoomMembers();
+    if (members) {
+      setHasP1(members.hasP1);
+      setHasP2(members.hasP2);
+      setPlayerNames({
+        p1: members.p1Name || 'PLAYER 1',
+        p2: members.p2Name || 'PLAYER 2',
+      });
+      setSeries(members.series);
+    }
   };
 
   const handleSpectateRoom = async (code: string) => {
@@ -1009,6 +1033,9 @@ export const App: React.FC = () => {
   };
 
   const [importError, setImportError] = useState<string | null>(null);
+
+  // BUGFIX 8: join failure message shown in the lobby join form.
+  const [joinError, setJoinError] = useState<string | null>(null);
 
   const handleExportReplay = () => {
     exportReplayToFile(matchHistory, settings);
@@ -1095,6 +1122,7 @@ export const App: React.FC = () => {
               isNintendoController={isNintendoController}
               onImportReplay={handleImportReplay}
               importError={importError}
+              joinError={joinError}
             />
           ) : inOnlineLobby ? (
             <OnlineRoomLobby
