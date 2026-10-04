@@ -67,6 +67,14 @@ export const Hud: React.FC<HudProps> = ({
     return who === 'p1' ? locks.p1 : locks.p2;
   };
 
+  const isLocalSeat = (seat: 'p1' | 'p2'): boolean => {
+    if (playMode === 'LOCAL_2P') return true;
+    if (playMode === 'SOLO_AI') return seat === 'p1';
+    if (playMode === 'ONLINE_HOST' || playMode === 'ONLINE_SERVER') return seat === 'p1';
+    if (playMode === 'ONLINE_JOIN') return viewerSeat ? viewerSeat === seat : seat === 'p1';
+    return seat === 'p1';
+  };
+
   // Format seconds mm:ss
   const totalSeconds = Math.ceil(gameState.phaseTimeRemaining / 1000);
   const minutes = Math.floor(totalSeconds / 60);
@@ -202,23 +210,46 @@ export const Hud: React.FC<HudProps> = ({
         const snake = who === 'p1' ? p1 : p2;
         const locked = isLocked(who);
         const buffer = moveBuffers ? (who === 'p1' ? moveBuffers.p1 : moveBuffers.p2) : [];
+        const local = isLocalSeat(who);
         return (
           <div key={who} className="bg-[#9BBC0F] p-2 border-2 border-[#0F380F] flex flex-col justify-between shadow-[2px_2px_0px_#0F380F]">
-            <div className="flex items-center justify-between text-[11px] font-bold">
-              <span className="flex items-center gap-1 min-w-0">
-                <span className={`w-2.5 h-2.5 shrink-0 ${who === 'p1' ? 'bg-[#0F380F]' : 'bg-[#306230]'} inline-block border border-[#0F380F]`} />
-                <span className="truncate">{snake.name} {seatTag(who)}</span>
-              </span>
-              <span className="text-[10px] opacity-80">LEN: {snake.body.length}</span>
-            </div>
-            <div className="flex items-baseline justify-between mt-1">
-              <span className="text-xl font-black">{snake.score}</span>
-              <span className="text-[10px] font-semibold uppercase tracking-tight">PTS</span>
+            <div>
+              <div className="flex items-center justify-between text-[11px] font-bold">
+                <span className="flex items-center gap-1 min-w-0">
+                  <span className={`w-2.5 h-2.5 shrink-0 ${who === 'p1' ? 'bg-[#0F380F]' : 'bg-[#306230]'} inline-block border border-[#0F380F]`} />
+                  <span className="truncate">{snake.name} {seatTag(who)}</span>
+                </span>
+                <span className="text-[10px] opacity-80">LEN: {snake.body.length}</span>
+              </div>
+              <div className="flex items-baseline justify-between mt-1">
+                <span className="text-xl font-black">{snake.score}</span>
+                <span className="text-[10px] font-semibold uppercase tracking-tight">PTS</span>
+              </div>
             </div>
             {gameState.turnBased && gameState.phase !== 'OVER' && (
-              <div className={`text-[10px] mt-1 truncate ${locked ? 'opacity-100 font-bold' : 'opacity-60'}`}>
-                {thinkLabel(who)} {locked ? '🔒' : `(${buffer.length})`}
-              </div>
+              local ? (
+                <div className="mt-1 bg-[#8BAC0F]/40 border border-[#0F380F] p-1 flex items-center gap-1 text-[9px] font-bold overflow-x-auto">
+                  <span className="shrink-0">{locked ? '🔒' : ''} {buffer.length}/{snake.body.length}:</span>
+                  <div className="flex gap-0.5 items-center flex-wrap">
+                    {buffer.length === 0 ? (
+                      <span className="opacity-40 italic">Empty</span>
+                    ) : (
+                      buffer.map((dir, idx) => {
+                        const arrow = dir === 'UP' ? '↑' : dir === 'DOWN' ? '↓' : dir === 'LEFT' ? '←' : '→';
+                        return (
+                          <span key={idx} className="px-1 py-0.5 bg-[#0F380F] text-[#9BBC0F] text-[9px] font-bold border border-[#0F380F] leading-none">
+                            {arrow}
+                          </span>
+                        );
+                      })
+                    )}
+                  </div>
+                </div>
+              ) : (
+                <div className={`text-[10px] mt-1 truncate ${locked ? 'opacity-100 font-bold' : 'opacity-60'}`}>
+                  {thinkLabel(who)} {locked ? '🔒' : `(${buffer.length})`}
+                </div>
+              )
             )}
           </div>
         );

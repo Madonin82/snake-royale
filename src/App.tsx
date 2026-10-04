@@ -429,10 +429,18 @@ export const App: React.FC = () => {
   }, []);
 
   const handleMenuAction = useCallback((action: GamepadMenuAction, _slot: 1 | 2) => {
-    if (activeHandlerRef.current) {
+    const isUiActive =
+      inLobby ||
+      inOnlineLobby ||
+      replayActive ||
+      settingsModalOpen ||
+      latencyModalOpen ||
+      gameState.phase === 'OVER';
+
+    if (isUiActive && activeHandlerRef.current) {
       activeHandlerRef.current(action);
     }
-  }, []);
+  }, [inLobby, inOnlineLobby, replayActive, settingsModalOpen, latencyModalOpen, gameState.phase]);
 
   // Gamepad controller listener setup (run once)
   useEffect(() => {
@@ -866,6 +874,7 @@ export const App: React.FC = () => {
   }, [gameState.phase, gameState.winner, playMode]);
 
   const startNewMatch = () => {
+    activeHandlerRef.current = null;
     const me = displayName.trim();
     let matchNames = { p1: 'PLAYER 1', p2: 'PLAYER 2' };
     if (playMode === 'SOLO_AI') {

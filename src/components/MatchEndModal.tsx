@@ -27,8 +27,6 @@ export const MatchEndModal: React.FC<MatchEndModalProps> = ({
   onReturnToLobby,
   onRegisterHandler,
 }) => {
-  if (gameState.phase !== 'OVER') return null;
-
   const { p1, p2 } = gameState.snakes;
   const isDraw = gameState.winner === 'DRAW';
   const winnerSnake = gameState.winner === 'p1' ? p1 : gameState.winner === 'p2' ? p2 : null;
@@ -55,6 +53,11 @@ export const MatchEndModal: React.FC<MatchEndModalProps> = ({
   const currentBtn = buttons[focusIndex] || buttons[0];
 
   useEffect(() => {
+    if (gameState.phase !== 'OVER') {
+      onRegisterHandler?.(null);
+      return;
+    }
+
     const handleAction = (action: GamepadMenuAction) => {
       if (action === 'CANCEL') {
         soundEngine.playMenuBack();
@@ -90,7 +93,9 @@ export const MatchEndModal: React.FC<MatchEndModalProps> = ({
     return () => {
       onRegisterHandler?.(null);
     };
-  }, [currentBtn, onWatchReplay, onRematch, onReturnToLobby, buttons.length, onRegisterHandler]);
+  }, [gameState.phase, currentBtn, onWatchReplay, onRematch, onReturnToLobby, buttons.length, onRegisterHandler]);
+
+  if (gameState.phase !== 'OVER') return null;
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-xs font-mono select-none">
