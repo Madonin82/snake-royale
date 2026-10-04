@@ -1165,7 +1165,14 @@ export const App: React.FC = () => {
                 <GameBoard gameState={displayState} settings={settings} lockedPaths={lockedPaths} />
               </div>
               <div className="controls-area">
-                {!replayActive && <ControlsOverlay onDirection={(dir) => handleDirectionInput(1, dir)} />}
+                {!replayActive && (
+                  <ControlsOverlay
+                    onDirection={(dir) => handleDirectionInput(1, dir)}
+                    onLock={() => handleBufferLock(1)}
+                    onUndo={() => handleBufferUndo(1)}
+                    onClear={() => handleBufferClear(1)}
+                  />
+                )}
                 {replayActive && (
                   <ReplayControls
                     index={replayIdx}
