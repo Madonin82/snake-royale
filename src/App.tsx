@@ -1182,9 +1182,11 @@ export const App: React.FC = () => {
               spectatorsCount={spectatorsCount}
               playerNames={playerNames}
               series={series}
+              settings={settings}
               onStartMatch={startNewMatch}
               onLeaveRoom={handleLeaveRoom}
               onOpenLatencyHarness={() => setLatencyModalOpen(true)}
+              onOpenSettings={() => setSettingsModalOpen(true)}
               onRegisterHandler={(h) => { activeHandlerRef.current = h; }}
             />
           ) : (
