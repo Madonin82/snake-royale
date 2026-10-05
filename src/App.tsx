@@ -122,6 +122,15 @@ export const App: React.FC = () => {
   // re-delivered states must never consume buffered moves.
   const lastStateTickRef = useRef<number>(-1);
 
+  const viewerSeat: 'p1' | 'p2' | null = useMemo(() => {
+    if (playMode === 'SOLO_AI') return 'p1';
+    if (playMode === 'ONLINE_HOST') return 'p1';
+    if (playMode === 'ONLINE_JOIN') return onlineRole === 'p1' ? 'p1' : onlineRole === 'p2' ? 'p2' : null;
+    if (playMode === 'ONLINE_SERVER' || playMode === 'ONLINE_SPECTATOR') return null;
+    if (playMode === 'LOCAL_2P') return null; // Both local on shared keyboard
+    return 'p1';
+  }, [playMode, onlineRole]);
+
   const displayState = useMemo(() => {
     if (replayActive) return matchHistory[replayIdx] ?? gameState;
     const stateCopy: GameState = {
@@ -131,22 +140,30 @@ export const App: React.FC = () => {
         p2: { ...gameState.snakes.p2, body: [...gameState.snakes.p2.body] },
       },
     };
-    if (settings.turnBased && !locks.p1 && moveBuffers.p1.length > 0) {
-      stateCopy.snakes.p1.body = computePreviewSnake(gameState.snakes.p1, moveBuffers.p1);
-    }
-    if (settings.turnBased && !locks.p2 && moveBuffers.p2.length > 0) {
-      stateCopy.snakes.p2.body = computePreviewSnake(gameState.snakes.p2, moveBuffers.p2);
+    if (settings.turnBased) {
+      const showP1 = playMode === 'LOCAL_2P' || viewerSeat === 'p1';
+      const showP2 = playMode === 'LOCAL_2P' || viewerSeat === 'p2';
+
+      if (showP1 && !locks.p1 && moveBuffers.p1.length > 0) {
+        stateCopy.snakes.p1.body = computePreviewSnake(gameState.snakes.p1, moveBuffers.p1);
+      }
+      if (showP2 && !locks.p2 && moveBuffers.p2.length > 0) {
+        stateCopy.snakes.p2.body = computePreviewSnake(gameState.snakes.p2, moveBuffers.p2);
+      }
     }
     return stateCopy;
-  }, [replayActive, matchHistory, replayIdx, gameState, moveBuffers, locks, settings.turnBased]);
+  }, [replayActive, matchHistory, replayIdx, gameState, moveBuffers, locks, settings.turnBased, playMode, viewerSeat]);
 
   const lockedPaths = useMemo(() => {
     if (!settings.turnBased) return undefined;
+    const showP1 = playMode === 'LOCAL_2P' || viewerSeat === 'p1';
+    const showP2 = playMode === 'LOCAL_2P' || viewerSeat === 'p2';
+
     return {
-      p1: locks.p1 && moveBuffers.p1.length > 0 ? computeCommittedPath(gameState.snakes.p1, moveBuffers.p1) : undefined,
-      p2: locks.p2 && moveBuffers.p2.length > 0 ? computeCommittedPath(gameState.snakes.p2, moveBuffers.p2) : undefined,
+      p1: showP1 && locks.p1 && moveBuffers.p1.length > 0 ? computeCommittedPath(gameState.snakes.p1, moveBuffers.p1) : undefined,
+      p2: showP2 && locks.p2 && moveBuffers.p2.length > 0 ? computeCommittedPath(gameState.snakes.p2, moveBuffers.p2) : undefined,
     };
-  }, [settings.turnBased, locks, moveBuffers, gameState.snakes]);
+  }, [settings.turnBased, locks, moveBuffers, gameState.snakes, playMode, viewerSeat]);
 
   const stateRef = useRef<GameState>(gameState);
   stateRef.current = gameState;

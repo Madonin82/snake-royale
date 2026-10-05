@@ -145,6 +145,7 @@ export const Hud: React.FC<HudProps> = ({
     const lastTurn = gameState.lastTurnTimes ? (who === 'p1' ? gameState.lastTurnTimes.p1 : gameState.lastTurnTimes.p2) : null;
     const totalThink = gameState.totalThinkTime ? (who === 'p1' ? gameState.totalThinkTime.p1 : gameState.totalThinkTime.p2) : 0;
     const buffer = moveBuffers ? (who === 'p1' ? moveBuffers.p1 : moveBuffers.p2) : [];
+    const local = isLocalSeat(who);
 
     return (
       <div className="bg-[#9BBC0F] p-3 border-2 border-[#0F380F] flex flex-col h-full min-h-0 overflow-hidden shadow-[2px_2px_0px_#0F380F] w-full font-mono text-[#0F380F]">
@@ -188,17 +189,29 @@ export const Hud: React.FC<HudProps> = ({
             {locked && <span className="text-[8px] px-1 bg-[#0F380F] text-[#9BBC0F]">LOCKED</span>}
           </div>
           <div className="flex flex-wrap gap-1 content-start">
-            {buffer.length === 0 ? (
-              <span className="text-[10px] opacity-40 italic">Empty (plan moves)</span>
+            {local ? (
+              buffer.length === 0 ? (
+                <span className="text-[10px] opacity-40 italic">Empty (plan moves)</span>
+              ) : (
+                buffer.map((dir, idx) => {
+                  const arrow = dir === 'UP' ? '↑' : dir === 'DOWN' ? '↓' : dir === 'LEFT' ? '←' : '→';
+                  return (
+                    <span key={idx} className="px-1 py-0.5 bg-[#0F380F] text-[#9BBC0F] text-[10px] leading-tight font-bold border border-[#0F380F] shrink-0">
+                      {arrow}
+                    </span>
+                  );
+                })
+              )
             ) : (
-              buffer.map((dir, idx) => {
-                const arrow = dir === 'UP' ? '↑' : dir === 'DOWN' ? '↓' : dir === 'LEFT' ? '←' : '→';
-                return (
-                  <span key={idx} className="px-1 py-0.5 bg-[#0F380F] text-[#9BBC0F] text-[10px] leading-tight font-bold border border-[#0F380F] shrink-0">
-                    {arrow}
+              buffer.length === 0 ? (
+                <span className="text-[10px] opacity-40 italic">{locked ? 'Move locked' : 'Planning...'}</span>
+              ) : (
+                buffer.map((_, idx) => (
+                  <span key={idx} className="px-1.5 py-0.5 bg-[#0F380F] text-[#9BBC0F] text-[10px] leading-tight font-bold border border-[#0F380F] shrink-0 tracking-widest" title="Opponent move hidden">
+                    🔒?
                   </span>
-                );
-              })
+                ))
+              )
             )}
           </div>
         </div>
