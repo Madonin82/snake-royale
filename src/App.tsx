@@ -122,15 +122,6 @@ export const App: React.FC = () => {
   // re-delivered states must never consume buffered moves.
   const lastStateTickRef = useRef<number>(-1);
 
-  const viewerSeat: 'p1' | 'p2' | null = useMemo(() => {
-    if (playMode === 'SOLO_AI') return 'p1';
-    if (playMode === 'ONLINE_HOST') return 'p1';
-    if (playMode === 'ONLINE_JOIN') return onlineRole === 'p1' ? 'p1' : onlineRole === 'p2' ? 'p2' : null;
-    if (playMode === 'ONLINE_SERVER' || playMode === 'ONLINE_SPECTATOR') return null;
-    if (playMode === 'LOCAL_2P') return null; // Both local on shared keyboard
-    return 'p1';
-  }, [playMode, onlineRole]);
-
   const displayState = useMemo(() => {
     if (replayActive) return matchHistory[replayIdx] ?? gameState;
     const stateCopy: GameState = {
@@ -140,30 +131,22 @@ export const App: React.FC = () => {
         p2: { ...gameState.snakes.p2, body: [...gameState.snakes.p2.body] },
       },
     };
-    if (settings.turnBased) {
-      const showP1 = playMode === 'LOCAL_2P' || viewerSeat === 'p1';
-      const showP2 = playMode === 'LOCAL_2P' || viewerSeat === 'p2';
-
-      if (showP1 && !locks.p1 && moveBuffers.p1.length > 0) {
-        stateCopy.snakes.p1.body = computePreviewSnake(gameState.snakes.p1, moveBuffers.p1);
-      }
-      if (showP2 && !locks.p2 && moveBuffers.p2.length > 0) {
-        stateCopy.snakes.p2.body = computePreviewSnake(gameState.snakes.p2, moveBuffers.p2);
-      }
+    if (settings.turnBased && !locks.p1 && moveBuffers.p1.length > 0) {
+      stateCopy.snakes.p1.body = computePreviewSnake(gameState.snakes.p1, moveBuffers.p1);
+    }
+    if (settings.turnBased && !locks.p2 && moveBuffers.p2.length > 0) {
+      stateCopy.snakes.p2.body = computePreviewSnake(gameState.snakes.p2, moveBuffers.p2);
     }
     return stateCopy;
-  }, [replayActive, matchHistory, replayIdx, gameState, moveBuffers, locks, settings.turnBased, playMode, viewerSeat]);
+  }, [replayActive, matchHistory, replayIdx, gameState, moveBuffers, locks, settings.turnBased]);
 
   const lockedPaths = useMemo(() => {
     if (!settings.turnBased) return undefined;
-    const showP1 = playMode === 'LOCAL_2P' || viewerSeat === 'p1';
-    const showP2 = playMode === 'LOCAL_2P' || viewerSeat === 'p2';
-
     return {
-      p1: showP1 && locks.p1 && moveBuffers.p1.length > 0 ? computeCommittedPath(gameState.snakes.p1, moveBuffers.p1) : undefined,
-      p2: showP2 && locks.p2 && moveBuffers.p2.length > 0 ? computeCommittedPath(gameState.snakes.p2, moveBuffers.p2) : undefined,
+      p1: locks.p1 && moveBuffers.p1.length > 0 ? computeCommittedPath(gameState.snakes.p1, moveBuffers.p1) : undefined,
+      p2: locks.p2 && moveBuffers.p2.length > 0 ? computeCommittedPath(gameState.snakes.p2, moveBuffers.p2) : undefined,
     };
-  }, [settings.turnBased, locks, moveBuffers, gameState.snakes, playMode, viewerSeat]);
+  }, [settings.turnBased, locks, moveBuffers, gameState.snakes]);
 
   const stateRef = useRef<GameState>(gameState);
   stateRef.current = gameState;
@@ -180,23 +163,67 @@ export const App: React.FC = () => {
   // Active menu handler ref for zero-re-render gamepad/keyboard dispatch
   const activeHandlerRef = useRef<((action: GamepadMenuAction) => void) | null>(null);
 
-  // TURN CLOCK
-  interface TurnClock { startedAt: number; p1At: number | null; p2At: number | null }
-  const turnClockRef = useRef<TurnClock>({ startedAt: Date.now(), p1At: null, p2At: null });
-  const [turnClock, setTurnClock] = useState<TurnClock>(turnClockRef.current);
+  // THINK CLOCK — per-player, per-decision-window timing.
+  // A session runs only while the player's buffer is empty and accepting input.
+  // It pauses the moment they lock; time accrues only for completed windows.
+  // Driven by lock transitions (see the locks effect below), so every mode
+  // (local, solo, online host/join) is handled in one place.
+  interface ThinkSession { accum: number; sessionStart: number | null }
+  const thinkRef = useRef<{ p1: ThinkSession; p2: ThinkSession }>({
+    p1: { accum: 0, sessionStart: null },
+    p2: { accum: 0, sessionStart: null },
+  });
+  const [thinkSessions, setThinkSessions] = useState({
+    p1: { startTime: null as number | null },
+    p2: { startTime: null as number | null },
+  });
 
-  const stampLockTime = useCallback((who: 'p1' | 'p2', atMs?: number) => {
-    const key = who === 'p1' ? 'p1At' : 'p2At';
-    if (turnClockRef.current[key] === null) {
-      turnClockRef.current = { ...turnClockRef.current, [key]: atMs ?? Date.now() };
-      setTurnClock(turnClockRef.current);
-    }
+  const thinkSessionStart = useCallback((who: 'p1' | 'p2') => {
+    const t = thinkRef.current[who];
+    if (t.sessionStart !== null) return;
+    const current = stateRef.current;
+    if (current.phase === 'OVER') return;
+    const snake = current.snakes[who];
+    if (!snake || !snake.isAlive) return;
+    t.sessionStart = Date.now();
+    const startTime = t.sessionStart;
+    setThinkSessions(prev => ({ ...prev, [who]: { startTime } }));
   }, []);
 
-  const resetTurnClock = useCallback(() => {
-    turnClockRef.current = { startedAt: Date.now(), p1At: null, p2At: null };
-    setTurnClock(turnClockRef.current);
+  const thinkSessionEnd = useCallback((who: 'p1' | 'p2') => {
+    const t = thinkRef.current[who];
+    if (t.sessionStart === null) return;
+    const dt = parseFloat(((Date.now() - t.sessionStart) / 1000).toFixed(1));
+    t.accum = parseFloat((t.accum + dt).toFixed(1));
+    t.sessionStart = null;
+    setThinkSessions(prev => ({ ...prev, [who]: { startTime: null } }));
+    const accum = t.accum;
+    setGameState(prev => ({
+      ...prev,
+      totalThinkTime: { ...prev.totalThinkTime, [who]: accum },
+      lastTurnTimes: { ...(prev.lastTurnTimes || { p1: 0, p2: 0 }), [who]: dt },
+    }));
   }, []);
+
+  // Ends a session WITHOUT accruing (AI locks, game-over cleanup).
+  const thinkSessionCancel = useCallback((who: 'p1' | 'p2') => {
+    const t = thinkRef.current[who];
+    if (t.sessionStart === null) return;
+    t.sessionStart = null;
+    setThinkSessions(prev => ({ ...prev, [who]: { startTime: null } }));
+  }, []);
+
+  // Lock transitions drive the think sessions.
+  const prevLocksRef = useRef({ p1: false, p2: false });
+  useEffect(() => {
+    (['p1', 'p2'] as const).forEach(who => {
+      const was = prevLocksRef.current[who];
+      const is = locks[who];
+      if (!was && is) thinkSessionEnd(who);
+      else if (was && !is) thinkSessionStart(who);
+    });
+    prevLocksRef.current = { ...locks };
+  }, [locks, thinkSessionStart, thinkSessionEnd]);
 
   const getTargetKey = useCallback((playerSlot: 1 | 2): 'p1' | 'p2' => {
     if (playModeRef.current === 'SOLO_AI') return 'p1';
@@ -209,18 +236,24 @@ export const App: React.FC = () => {
   const setLock = useCallback((who: 'p1' | 'p2') => {
     locksRef.current = { ...locksRef.current, [who]: true };
     setLocks(locksRef.current);
-    stampLockTime(who);
+    // Think session ends via the locks-transition effect.
     if (playModeRef.current === 'ONLINE_HOST' || playModeRef.current === 'ONLINE_SERVER') {
       networkManager.broadcastState(stateRef.current, locksRef.current);
     }
-  }, [stampLockTime]);
+  }, []);
 
   const clearLocks = useCallback(() => {
     locksRef.current = { p1: false, p2: false };
     setLocks(locksRef.current);
-    resetTurnClock();
+    // New match: reset accumulators and open fresh think sessions.
+    thinkRef.current.p1 = { accum: 0, sessionStart: null };
+    thinkRef.current.p2 = { accum: 0, sessionStart: null };
+    setThinkSessions({ p1: { startTime: null }, p2: { startTime: null } });
+    prevLocksRef.current = { p1: false, p2: false };
+    thinkSessionStart('p1');
+    thinkSessionStart('p2');
     clearMoveBuffers();
-  }, [clearMoveBuffers, resetTurnClock]);
+  }, [clearMoveBuffers, thinkSessionStart]);
 
   const playTickEvents = useCallback((events: {
     tokenEatenP1: boolean;
@@ -257,9 +290,6 @@ export const App: React.FC = () => {
     const current = stateRef.current;
     const s = settingsRef.current;
     if (!s.turnBased || current.phase === 'OVER') return;
-    const isOnline = playModeRef.current === 'ONLINE_HOST' || playModeRef.current === 'ONLINE_JOIN' || playModeRef.current === 'ONLINE_SERVER';
-    const bothReady = !isOnline || (current.readyConfirmed?.p1 && current.readyConfirmed?.p2);
-    if (!bothReady) return;
 
     if (playModeRef.current === 'SOLO_AI' && !locksRef.current.p2) {
       const p2Buf = [...moveBuffersRef.current.p2];
@@ -289,7 +319,9 @@ export const App: React.FC = () => {
       setMoveBuffers({ ...moveBuffersRef.current });
       locksRef.current = { ...locksRef.current, p2: true };
       setLocks(locksRef.current);
-      stampLockTime('p2', turnClockRef.current.startedAt);
+      // AI doesn't accrue think time — close any open session silently.
+      // (The locks-transition effect will see sessionStart already null.)
+      thinkSessionCancel('p2');
     }
 
     const p1Buf = moveBuffersRef.current.p1;
@@ -304,17 +336,9 @@ export const App: React.FC = () => {
     queueSnakeDirection(current.snakes.p1, nextP1Dir);
     queueSnakeDirection(current.snakes.p2, nextP2Dir);
 
-    const now = Date.now();
-    const clock = turnClockRef.current;
-    const secs = (at: number | null) => parseFloat((((at ?? now) - clock.startedAt) / 1000).toFixed(1));
-
     const { nextState, events } = processGameTick(stateRef.current, s, 0);
-    const turnTimes = { p1: secs(clock.p1At), p2: secs(clock.p2At) };
-    nextState.lastTurnTimes = turnTimes;
-    nextState.totalThinkTime = {
-      p1: parseFloat((stateRef.current.totalThinkTime.p1 + turnTimes.p1).toFixed(1)),
-      p2: parseFloat((stateRef.current.totalThinkTime.p2 + turnTimes.p2).toFixed(1)),
-    };
+    // Think time accrues per decision window on lock (thinkSessionEnd),
+    // not per executed tick — nothing to add here.
     playTickEvents(events);
 
     const newP1Buf = [...moveBuffersRef.current.p1];
@@ -346,7 +370,7 @@ export const App: React.FC = () => {
         maybeAdvanceTurn();
       }, 550);
     }
-  }, [playTickEvents, stampLockTime]);
+  }, [playTickEvents, thinkSessionCancel]);
 
   const handleBufferUndo = useCallback((playerSlot: 1 | 2) => {
     const current = stateRef.current;
@@ -439,16 +463,6 @@ export const App: React.FC = () => {
     }));
   }, [inLobby, inOnlineLobby]);
 
-  const handleUpdateSettings = useCallback((newVals: Partial<GameSettings>) => {
-    setSettings(prev => {
-      const updated = { ...prev, ...newVals };
-      if (playModeRef.current === 'ONLINE_HOST' || playModeRef.current === 'ONLINE_SERVER') {
-        networkManager.updateRoomSettings(updated);
-      }
-      return updated;
-    });
-  }, []);
-
   const handleReturnToLobby = useCallback(() => {
     if (playModeRef.current === 'ONLINE_HOST' || playModeRef.current === 'ONLINE_JOIN' || playModeRef.current === 'ONLINE_SERVER' || playModeRef.current === 'ONLINE_SPECTATOR') {
       networkManager.disconnect();
@@ -491,14 +505,7 @@ export const App: React.FC = () => {
       if (!pressed) return;
       const targetSlot = playModeRef.current === 'LOCAL_2P' && slot === 2 ? 2 : 1;
       if (button === 'A') {
-        const isOnline = playModeRef.current === 'ONLINE_HOST' || playModeRef.current === 'ONLINE_JOIN' || playModeRef.current === 'ONLINE_SERVER';
-        const ready = stateRef.current.readyConfirmed;
-        const mySeat = onlineRoleRef.current === 'p2' ? 'p2' : 'p1';
-        if (isOnline && (!ready || !ready[mySeat])) {
-          handleConfirmReady();
-        } else {
-          handleBufferLock(targetSlot);
-        }
+        handleBufferLock(targetSlot);
       } else if (button === 'B') {
         handleBufferUndo(targetSlot);
       } else if (button === 'Y') {
@@ -602,14 +609,6 @@ export const App: React.FC = () => {
         return;
       }
       if (e.key === 'Enter' || e.key === ' ') {
-        const isOnline = playModeRef.current === 'ONLINE_HOST' || playModeRef.current === 'ONLINE_JOIN' || playModeRef.current === 'ONLINE_SERVER';
-        const ready = stateRef.current.readyConfirmed;
-        const mySeat = onlineRoleRef.current === 'p2' ? 'p2' : 'p1';
-        if (isOnline && (!ready || !ready[mySeat])) {
-          handleConfirmReady();
-          e.preventDefault();
-          return;
-        }
         handleBufferLock(1);
         e.preventDefault();
         return;
@@ -682,21 +681,7 @@ export const App: React.FC = () => {
           setOnlineRole(msg.role);
           setHasP1(msg.hasP1);
           setHasP2(msg.hasP2);
-          if (msg.p1Name || msg.p2Name) {
-            setPlayerNames({
-              p1: msg.p1Name || 'PLAYER 1',
-              p2: msg.p2Name || 'PLAYER 2',
-            });
-          }
-          if (msg.series) setSeries(msg.series);
           setSpectatorsCount(msg.spectatorsCount || 0);
-          if (msg.settings) {
-            setSettings(prev => ({ ...prev, ...msg.settings }));
-          }
-          if (msg.status === 'racing') {
-            setInOnlineLobby(false);
-            setInLobby(false);
-          }
           break;
         }
 
@@ -711,44 +696,6 @@ export const App: React.FC = () => {
             });
           }
           if (msg.series) setSeries(msg.series);
-          if (msg.settings) {
-            setSettings(prev => ({ ...prev, ...msg.settings }));
-          }
-          if (msg.status === 'racing' && (playModeRef.current === 'ONLINE_JOIN' || playModeRef.current === 'ONLINE_SPECTATOR')) {
-            setInOnlineLobby(false);
-            setInLobby(false);
-          }
-          break;
-        }
-
-        case 'SETTINGS_SYNC': {
-          if (playModeRef.current === 'ONLINE_JOIN' || playModeRef.current === 'ONLINE_SPECTATOR') {
-            if (msg.settings) {
-              setSettings(prev => ({ ...prev, ...msg.settings }));
-            }
-          }
-          break;
-        }
-
-        case 'MATCH_START': {
-          if (playModeRef.current === 'ONLINE_JOIN' || playModeRef.current === 'ONLINE_SPECTATOR') {
-            if (msg.settings) {
-              setSettings(prev => ({ ...prev, ...msg.settings }));
-            }
-            if (msg.state) {
-              const safeState = normalizeGameState(msg.state);
-              setGameState(safeState);
-              setMatchHistory([safeState]);
-              lastStateTickRef.current = safeState.tick;
-            } else {
-              lastStateTickRef.current = -1;
-            }
-            clearLocks();
-            sentTickRef.current = -1;
-            setInOnlineLobby(false);
-            setInLobby(false);
-            soundEngine.playCountdown(true);
-          }
           break;
         }
 
@@ -824,8 +771,10 @@ export const App: React.FC = () => {
               }
             }
 
-            setInOnlineLobby(false);
-            setInLobby(false);
+            if (inOnlineLobby) {
+              setInOnlineLobby(false);
+              setInLobby(false);
+            }
           }
           break;
         }
@@ -858,30 +807,6 @@ export const App: React.FC = () => {
 
         case 'SPECTATORS_CHANGED': {
           setSpectatorsCount(msg.count || 0);
-          break;
-        }
-
-        case 'READY_SYNC': {
-          if (msg.ready) {
-            setGameState(prev => ({
-              ...prev,
-              readyConfirmed: {
-                p1: !!msg.ready.p1,
-                p2: !!msg.ready.p2,
-              }
-            }));
-          }
-          break;
-        }
-
-        case 'READY_CONFIRM': {
-          if (msg.role) {
-            setGameState(prev => {
-              const cur = prev.readyConfirmed || { p1: false, p2: false };
-              const updated = { ...cur, [msg.role]: true };
-              return { ...prev, readyConfirmed: updated };
-            });
-          }
           break;
         }
 
@@ -966,9 +891,6 @@ export const App: React.FC = () => {
     const intervalId = setInterval(() => {
       const current = stateRef.current;
       if (current.phase === 'OVER') return;
-      const isOnline = playModeRef.current === 'ONLINE_HOST' || playModeRef.current === 'ONLINE_JOIN' || playModeRef.current === 'ONLINE_SERVER';
-      const bothReady = !isOnline || (current.readyConfirmed?.p1 && current.readyConfirmed?.p2);
-      if (!bothReady) return;
 
       if (playModeRef.current === 'SOLO_AI') {
         const aiDir = calculateAIMove(
@@ -1019,22 +941,6 @@ export const App: React.FC = () => {
     }
   }, [gameState.phase, gameState.winner, playMode]);
 
-  const handleConfirmReady = useCallback(() => {
-    const isOnline = playModeRef.current === 'ONLINE_HOST' || playModeRef.current === 'ONLINE_JOIN' || playModeRef.current === 'ONLINE_SERVER';
-    if (!isOnline) return;
-    const mySeat = onlineRoleRef.current === 'p2' ? 'p2' : 'p1';
-
-    setGameState(prev => {
-      const cur = prev.readyConfirmed || { p1: false, p2: false };
-      if (cur[mySeat]) return prev;
-      const updated = { ...cur, [mySeat]: true };
-      return { ...prev, readyConfirmed: updated };
-    });
-
-    soundEngine.playMenuSelect();
-    networkManager.sendReadyConfirm(mySeat);
-  }, []);
-
   const startNewMatch = () => {
     activeHandlerRef.current = null;
     const me = displayName.trim();
@@ -1052,13 +958,7 @@ export const App: React.FC = () => {
         ? { p1: me || 'PLAYER 1', p2: playerNamesRef.current.p2 || 'PLAYER 2' }
         : { p1: playerNamesRef.current.p1 || 'PLAYER 1', p2: me || 'PLAYER 2' };
     }
-    const isOnline = playMode === 'ONLINE_HOST' || playMode === 'ONLINE_JOIN' || playMode === 'ONLINE_SERVER';
     const initial = createInitialState(settings, matchNames);
-    if (isOnline) {
-      initial.readyConfirmed = { p1: false, p2: false };
-    } else {
-      initial.readyConfirmed = { p1: true, p2: true };
-    }
     seriesCountedRef.current = false;
     setMatchHistory([initial]);
     setReplayActive(false);
@@ -1074,7 +974,7 @@ export const App: React.FC = () => {
     soundEngine.playCountdown(true);
 
     if (playMode === 'ONLINE_HOST' || playMode === 'ONLINE_SERVER') {
-      networkManager.broadcastMatchStart(initial, settingsRef.current);
+      networkManager.broadcastState(initial);
     }
   };
 
@@ -1095,11 +995,8 @@ export const App: React.FC = () => {
     setPlayMode('ONLINE_HOST');
     setInOnlineLobby(true);
     setInLobby(false);
-    setHasP1(true);
-    setHasP2(false);
-    setPlayerNames({ p1: displayName.trim() || 'PLAYER 1', p2: 'PLAYER 2' });
 
-    await networkManager.connect(code, 'p1', displayName.trim() || undefined, settingsRef.current);
+    await networkManager.connect(code, 'p1', displayName.trim() || undefined);
     setOnlineRole('p1');
   };
 
@@ -1110,7 +1007,7 @@ export const App: React.FC = () => {
     setInOnlineLobby(true);
     setInLobby(false);
 
-    await networkManager.connect(code, 'server', displayName.trim() || undefined, settingsRef.current);
+    await networkManager.connect(code, 'server', displayName.trim() || undefined);
     setOnlineRole('server');
   };
 
@@ -1121,9 +1018,11 @@ export const App: React.FC = () => {
     setPlayMode('ONLINE_JOIN');
     setInOnlineLobby(true);
     setInLobby(false);
+    // BUGFIX 7: fresh tick tracking for the incoming state stream.
     lastStateTickRef.current = -1;
-    sentTickRef.current = -1;
 
+    // BUGFIX 8: honor connect()'s result. A failed connect must not leave a
+    // silent stuck lobby — show an error and return to the join form.
     const ok = await networkManager.connect(roomCode, undefined, displayName.trim() || undefined);
     const assigned = networkManager.getRole();
     if (!ok || !assigned) {
@@ -1134,6 +1033,20 @@ export const App: React.FC = () => {
       return;
     }
     setOnlineRole(assigned);
+
+    // BUGFIX 8: one explicit member-state sync after connect, so the lobby
+    // is correct even if the first ROOM_MEMBERS_CHANGED was missed (handler
+    // re-registration race / onValue only fires on changes).
+    const members = await networkManager.getRoomMembers();
+    if (members) {
+      setHasP1(members.hasP1);
+      setHasP2(members.hasP2);
+      setPlayerNames({
+        p1: members.p1Name || 'PLAYER 1',
+        p2: members.p2Name || 'PLAYER 2',
+      });
+      setSeries(members.series);
+    }
   };
 
   const handleSpectateRoom = async (code: string) => {
@@ -1269,11 +1182,9 @@ export const App: React.FC = () => {
               spectatorsCount={spectatorsCount}
               playerNames={playerNames}
               series={series}
-              settings={settings}
               onStartMatch={startNewMatch}
               onLeaveRoom={handleLeaveRoom}
               onOpenLatencyHarness={() => setLatencyModalOpen(true)}
-              onOpenSettings={() => setSettingsModalOpen(true)}
               onRegisterHandler={(h) => { activeHandlerRef.current = h; }}
             />
           ) : (
@@ -1286,7 +1197,7 @@ export const App: React.FC = () => {
                 onOpenSettings={() => setSettingsModalOpen(true)}
                 gamepadCount={gamepadCount}
                 locks={replayActive ? undefined : locks}
-                turnClock={replayActive ? undefined : turnClock}
+                thinkSessions={replayActive ? undefined : thinkSessions}
                 moveBuffers={moveBuffers}
                 viewerSeat={
                   playMode === 'ONLINE_HOST' ? 'p1'
@@ -1294,46 +1205,8 @@ export const App: React.FC = () => {
                   : null
                 }
               />
-              <div className="gameboard-area my-1 relative">
+              <div className="gameboard-area my-1">
                 <GameBoard gameState={displayState} settings={settings} lockedPaths={lockedPaths} />
-
-                {!replayActive && (playMode === 'ONLINE_HOST' || playMode === 'ONLINE_JOIN' || playMode === 'ONLINE_SERVER') && !(displayState.readyConfirmed?.p1 && displayState.readyConfirmed?.p2) && (
-                  <div className="absolute inset-0 bg-[#0F380F]/90 backdrop-blur-xs flex flex-col items-center justify-center p-3 z-20 font-mono text-[#9BBC0F]">
-                    <div className="bg-[#9BBC0F] border-4 border-[#0F380F] shadow-[6px_6px_0px_#0F380F] p-3 sm:p-4 max-w-[340px] w-full text-center flex flex-col gap-2.5">
-                      <div className="text-xs font-black uppercase tracking-wider text-[#0F380F]">
-                        🎮 MATCH READY CHECK
-                      </div>
-                      <div className="text-[10px] font-bold text-[#0F380F] bg-[#8BAC0F] p-2 border-2 border-[#0F380F]">
-                        BOTH PLAYERS MUST CONFIRM TO START
-                      </div>
-
-                      <div className="flex flex-col gap-1.5 my-1">
-                        <div className={`p-2 border-2 border-[#0F380F] flex items-center justify-between text-xs font-black ${displayState.readyConfirmed?.p1 ? 'bg-[#306230] text-[#9BBC0F]' : 'bg-[#8BAC0F] text-[#0F380F]'}`}>
-                          <span>{playerNames.p1} (P1):</span>
-                          <span>{displayState.readyConfirmed?.p1 ? '✅ READY' : '⏳ WAITING...'}</span>
-                        </div>
-                        <div className={`p-2 border-2 border-[#0F380F] flex items-center justify-between text-xs font-black ${displayState.readyConfirmed?.p2 ? 'bg-[#306230] text-[#9BBC0F]' : 'bg-[#8BAC0F] text-[#0F380F]'}`}>
-                          <span>{playerNames.p2} (P2):</span>
-                          <span>{displayState.readyConfirmed?.p2 ? '✅ READY' : '⏳ WAITING...'}</span>
-                        </div>
-                      </div>
-
-                      {!(displayState.readyConfirmed?.[onlineRole === 'p2' ? 'p2' : 'p1']) ? (
-                        <button
-                          onClick={handleConfirmReady}
-                          className="w-full py-2.5 bg-[#0F380F] hover:bg-[#306230] text-[#9BBC0F] border-2 border-[#0F380F] font-black text-sm cursor-pointer shadow-[3px_3px_0px_#0F380F] flex items-center justify-center gap-2 animate-pulse"
-                        >
-                          <span>PRESS A TO START</span>
-                          <span className="text-[10px] bg-[#9BBC0F] text-[#0F380F] px-1.5 py-0.5 font-bold">[A / ENTER]</span>
-                        </button>
-                      ) : (
-                        <div className="bg-[#306230] text-[#9BBC0F] p-2.5 border-2 border-[#0F380F] text-xs font-black">
-                          ✅ YOU ARE READY! WAITING FOR OPPONENT...
-                        </div>
-                      )}
-                    </div>
-                  </div>
-                )}
               </div>
               <div className="controls-area">
                 {!replayActive && (
@@ -1386,8 +1259,7 @@ export const App: React.FC = () => {
         isOpen={settingsModalOpen}
         onClose={() => setSettingsModalOpen(false)}
         settings={settings}
-        onUpdateSettings={handleUpdateSettings}
-        isOnlineGuest={!inLobby && (playMode === 'ONLINE_JOIN' || playMode === 'ONLINE_SPECTATOR')}
+        onUpdateSettings={(newVals) => setSettings(s => ({ ...s, ...newVals }))}
         onRegisterHandler={(h) => { activeHandlerRef.current = h; }}
       />
 
