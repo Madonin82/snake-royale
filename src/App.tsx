@@ -1047,6 +1047,9 @@ export const App: React.FC = () => {
     const initial = createInitialState(settings, matchNames);
     if (isOnline) {
       initial.readyConfirmed = { p1: false, p2: false };
+      // Clear stale RTDB ready flags so each player's confirm is a real
+      // onValue transition (writing true over true fires nothing).
+      networkManager.clearReadyFlags();
     } else {
       initial.readyConfirmed = { p1: true, p2: true };
     }
