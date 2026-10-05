@@ -11,7 +11,6 @@ interface HudProps {
   gamepadCount: number;
   locks?: { p1: boolean; p2: boolean };
   turnClock?: { startedAt: number; p1At: number | null; p2At: number | null };
-  thinkSessions?: { p1: { startTime: number | null }; p2: { startTime: number | null } };
   viewerSeat?: 'p1' | 'p2' | null;
   moveBuffers?: { p1: Direction[]; p2: Direction[] };
 }
@@ -24,7 +23,6 @@ export const Hud: React.FC<HudProps> = ({
   gamepadCount,
   locks,
   turnClock,
-  thinkSessions,
   viewerSeat,
   moveBuffers,
 }) => {
@@ -57,15 +55,11 @@ export const Hud: React.FC<HudProps> = ({
   };
   const thinkLabel = (who: 'p1' | 'p2') => {
     const snake = who === 'p1' ? p1 : p2;
-    const locked = isLocked(who);
-    const lastTurn = gameState.lastTurnTimes ? (who === 'p1' ? gameState.lastTurnTimes.p1 : gameState.lastTurnTimes.p2) : null;
-    const session = thinkSessions ? (who === 'p1' ? thinkSessions.p1 : thinkSessions.p2) : { startTime: null };
-
-    if (locked) {
-      return `${snake.name} ✓ ${lastTurn !== null ? `${lastTurn.toFixed(1)}s` : ''}`;
-    }
-    const elapsed = session.startTime !== null ? nowMs - session.startTime : 0;
-    return `${snake.name} … ${fmtSecs(elapsed)}`;
+    if (!turnClock) return snake.name;
+    const at = who === 'p1' ? turnClock.p1At : turnClock.p2At;
+    return at !== null
+      ? `${snake.name} ✓ ${fmtSecs(at - turnClock.startedAt)}`
+      : `${snake.name} … ${fmtSecs(nowMs - turnClock.startedAt)}`;
   };
 
   const isLocked = (who: 'p1' | 'p2') => {

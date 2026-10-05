@@ -55,7 +55,6 @@ export interface GameState {
   winner: 'p1' | 'p2' | 'DRAW' | null;
   winReason: string;
   totalMatchTime: number;
-  readyConfirmed?: { p1: boolean; p2: boolean };
 }
 
 export type PlayMode = 'SOLO_AI' | 'LOCAL_2P' | 'ONLINE_HOST' | 'ONLINE_JOIN' | 'ONLINE_SERVER' | 'ONLINE_SPECTATOR' | 'VIRTUAL_BOT';

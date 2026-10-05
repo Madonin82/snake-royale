@@ -314,20 +314,6 @@ export class NetworkManager {
       });
       this.rtdbListeners.push({ ref: pingsRef, callback: unsubPings });
 
-      // 3b. Ready sync listener
-      const readyRef = ref(rtdb, `rooms/${this.roomId}/ready`);
-      const unsubReady = onValue(readyRef, (snapshot) => {
-        const val = snapshot.val() || {};
-        this.notifyHandlers({
-          type: 'READY_SYNC',
-          ready: {
-            p1: !!val.p1?.ready,
-            p2: !!val.p2?.ready,
-          },
-        });
-      });
-      this.rtdbListeners.push({ ref: readyRef, callback: unsubReady });
-
       // 4. Initialize WebRTC P2P Signaling in the background
       if (this.role === 'p1' || this.role === 'p2') {
         this.setupWebRtcSignaling();
@@ -759,21 +745,6 @@ export class NetworkManager {
         clientTime: Date.now(),
       }).catch(() => {});
     });
-  }
-
-  public sendReadyConfirm(role: 'p1' | 'p2') {
-    if (!this.isConnected || !this.roomId) return;
-    const readyRef = ref(rtdb, `rooms/${this.roomId}/ready/${role}`);
-    set(readyRef, { ready: true, updatedAt: Date.now() }).catch(() => {});
-
-    if (this.isWebRtcConnected && this.dataChannel && this.dataChannel.readyState === 'open') {
-      try {
-        this.dataChannel.send(JSON.stringify({
-          type: 'READY_CONFIRM',
-          role,
-        }));
-      } catch {}
-    }
   }
 
   public requestRematch() {
