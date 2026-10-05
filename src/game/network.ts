@@ -776,6 +776,12 @@ export class NetworkManager {
     }
   }
 
+  public clearReadyFlags() {
+    if (!this.isConnected || !this.roomId) return;
+    const readyRef = ref(rtdb, `rooms/${this.roomId}/ready`);
+    remove(readyRef).catch(() => {});
+  }
+
   public requestRematch() {
     if (!this.isConnected || !this.roomId) return;
     const roomRef = ref(rtdb, `rooms/${this.roomId}`);
