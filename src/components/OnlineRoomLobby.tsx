@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
-import { Copy, Check, Play, Users, ArrowLeft, Activity } from 'lucide-react';
+import { Copy, Check, Play, Users, ArrowLeft, Activity, Settings } from 'lucide-react';
+import { GameSettings } from '../types/game';
 import { GamepadMenuAction } from '../game/gamepad';
 import { soundEngine } from '../audio/soundEngine';
 
@@ -11,9 +12,11 @@ interface OnlineRoomLobbyProps {
   spectatorsCount: number;
   playerNames: { p1: string; p2: string };
   series: { p1: number; p2: number; draws: number };
+  settings: GameSettings;
   onStartMatch: () => void;
   onLeaveRoom: () => void;
   onOpenLatencyHarness: () => void;
+  onOpenSettings?: () => void;
   onRegisterHandler?: (handler: ((action: GamepadMenuAction) => void) | null) => void;
 }
 
@@ -25,9 +28,11 @@ export const OnlineRoomLobby: React.FC<OnlineRoomLobbyProps> = ({
   spectatorsCount,
   playerNames,
   series,
+  settings,
   onStartMatch,
   onLeaveRoom,
   onOpenLatencyHarness,
+  onOpenSettings,
   onRegisterHandler,
 }) => {
   const [copied, setCopied] = useState(false);
@@ -37,9 +42,9 @@ export const OnlineRoomLobby: React.FC<OnlineRoomLobbyProps> = ({
   const canStart = isHost || isServer;
   const bothPlayersReady = hasP1 && hasP2;
 
-  const buttons: ('START' | 'COPY' | 'HARNESS' | 'LEAVE')[] = canStart
-    ? ['START', 'COPY', 'HARNESS', 'LEAVE']
-    : ['COPY', 'HARNESS', 'LEAVE'];
+  const buttons: ('START' | 'COPY' | 'SETTINGS' | 'HARNESS' | 'LEAVE')[] = canStart
+    ? ['START', 'COPY', 'SETTINGS', 'HARNESS', 'LEAVE']
+    : ['COPY', 'SETTINGS', 'HARNESS', 'LEAVE'];
 
   const [focusIndex, setFocusIndex] = useState<number>(0);
   const currentBtn = buttons[focusIndex] || buttons[0];
@@ -79,6 +84,9 @@ export const OnlineRoomLobby: React.FC<OnlineRoomLobbyProps> = ({
           }
         } else if (currentBtn === 'COPY') {
           handleCopy();
+        } else if (currentBtn === 'SETTINGS') {
+          soundEngine.playMenuSelect();
+          onOpenSettings?.();
         } else if (currentBtn === 'HARNESS') {
           soundEngine.playMenuSelect();
           onOpenLatencyHarness();
@@ -93,10 +101,10 @@ export const OnlineRoomLobby: React.FC<OnlineRoomLobbyProps> = ({
     return () => {
       onRegisterHandler?.(null);
     };
-  }, [currentBtn, canStart, bothPlayersReady, onStartMatch, onOpenLatencyHarness, onLeaveRoom, buttons.length, onRegisterHandler]);
+  }, [currentBtn, canStart, bothPlayersReady, onStartMatch, onOpenSettings, onOpenLatencyHarness, onLeaveRoom, buttons.length, onRegisterHandler]);
 
   return (
-    <div className="w-full max-w-[440px] bg-[#9BBC0F] border-4 border-[#0F380F] shadow-[8px_8px_0px_#0F380F] text-[#0F380F] p-4 font-mono select-none flex flex-col gap-4">
+    <div className="w-full max-w-[440px] bg-[#9BBC0F] border-4 border-[#0F380F] shadow-[8px_8px_0px_#0F380F] text-[#0F380F] p-4 font-mono select-none flex flex-col gap-3">
       {/* Top bar */}
       <div className="flex items-center justify-between border-b-2 border-[#0F380F] pb-2">
         <button
@@ -116,27 +124,46 @@ export const OnlineRoomLobby: React.FC<OnlineRoomLobbyProps> = ({
           <span>LEAVE ROOM</span>
         </button>
 
-        <button
-          onClick={() => {
-            soundEngine.playMenuSelect();
-            onOpenLatencyHarness();
-          }}
-          onMouseEnter={() => setFocusIndex(buttons.indexOf('HARNESS'))}
-          className={`flex items-center gap-1 px-2 py-1 border border-[#0F380F] text-xs font-bold cursor-pointer transition-colors ${
-            currentBtn === 'HARNESS'
-              ? 'bg-[#0F380F] text-[#9BBC0F] ring-2 ring-[#0F380F]'
-              : 'bg-[#8BAC0F] hover:bg-[#0F380F] hover:text-[#9BBC0F]'
-          }`}
-        >
-          {currentBtn === 'HARNESS' && <span className="animate-pulse">►</span>}
-          <Activity className="w-3.5 h-3.5" />
-          <span>NET HARNESS</span>
-        </button>
+        <div className="flex items-center gap-1.5">
+          <button
+            onClick={() => {
+              soundEngine.playMenuSelect();
+              onOpenSettings?.();
+            }}
+            onMouseEnter={() => setFocusIndex(buttons.indexOf('SETTINGS'))}
+            className={`flex items-center gap-1 px-2 py-1 border border-[#0F380F] text-xs font-bold cursor-pointer transition-colors ${
+              currentBtn === 'SETTINGS'
+                ? 'bg-[#0F380F] text-[#9BBC0F] ring-2 ring-[#0F380F]'
+                : 'bg-[#8BAC0F] hover:bg-[#0F380F] hover:text-[#9BBC0F]'
+            }`}
+          >
+            {currentBtn === 'SETTINGS' && <span className="animate-pulse">►</span>}
+            <Settings className="w-3.5 h-3.5" />
+            <span>RULES</span>
+          </button>
+
+          <button
+            onClick={() => {
+              soundEngine.playMenuSelect();
+              onOpenLatencyHarness();
+            }}
+            onMouseEnter={() => setFocusIndex(buttons.indexOf('HARNESS'))}
+            className={`flex items-center gap-1 px-2 py-1 border border-[#0F380F] text-xs font-bold cursor-pointer transition-colors ${
+              currentBtn === 'HARNESS'
+                ? 'bg-[#0F380F] text-[#9BBC0F] ring-2 ring-[#0F380F]'
+                : 'bg-[#8BAC0F] hover:bg-[#0F380F] hover:text-[#9BBC0F]'
+            }`}
+          >
+            {currentBtn === 'HARNESS' && <span className="animate-pulse">►</span>}
+            <Activity className="w-3.5 h-3.5" />
+            <span>NET</span>
+          </button>
+        </div>
       </div>
 
       {/* Room Code Display */}
       <div
-        className={`p-3 border-2 transition-all text-center flex flex-col items-center gap-2 ${
+        className={`p-2.5 border-2 transition-all text-center flex flex-col items-center gap-1.5 ${
           currentBtn === 'COPY'
             ? 'bg-[#8BAC0F] border-[#0F380F] ring-2 ring-[#0F380F]'
             : 'bg-[#8BAC0F] border-[#0F380F]'
@@ -148,7 +175,7 @@ export const OnlineRoomLobby: React.FC<OnlineRoomLobbyProps> = ({
           ROOM CODE (SHARE WITH OPPONENT):
         </div>
         <div className="flex items-center gap-2">
-          <span className="text-3xl font-black tracking-widest bg-[#9BBC0F] px-4 py-1 border-2 border-[#0F380F]">
+          <span className="text-3xl font-black tracking-widest bg-[#9BBC0F] px-4 py-0.5 border-2 border-[#0F380F]">
             {roomId}
           </span>
           <button
@@ -163,6 +190,33 @@ export const OnlineRoomLobby: React.FC<OnlineRoomLobbyProps> = ({
         {currentBtn === 'COPY' && (
           <span className="text-[9px] bg-[#0F380F] text-[#9BBC0F] px-1 font-bold">[A] COPY</span>
         )}
+      </div>
+
+      {/* Adopted Host Rules Banner */}
+      <div className="bg-[#8BAC0F] p-2 border-2 border-[#0F380F] flex flex-col gap-1">
+        <div className="flex items-center justify-between text-[10px] font-bold">
+          <span className="flex items-center gap-1">
+            <Settings className="w-3 h-3" />
+            <span>MATCH RULES:</span>
+          </span>
+          <span className="bg-[#0F380F] text-[#9BBC0F] px-1 py-0.5 text-[9px] font-black uppercase">
+            {canStart ? '⚙️ HOST CONTROL' : '👑 HOST RULES ADOPTED'}
+          </span>
+        </div>
+        <div className="grid grid-cols-3 gap-1 text-[10px] text-center font-black">
+          <div className="bg-[#9BBC0F] border border-[#0F380F] py-1">
+            <div className="text-[8px] opacity-75 font-semibold">GRID</div>
+            <div>{settings.gridSize}×{settings.gridSize}</div>
+          </div>
+          <div className="bg-[#9BBC0F] border border-[#0F380F] py-1">
+            <div className="text-[8px] opacity-75 font-semibold">STYLE</div>
+            <div>{settings.turnBased ? `TURNS (${settings.raceTurns})` : 'REAL-TIME'}</div>
+          </div>
+          <div className="bg-[#9BBC0F] border border-[#0F380F] py-1">
+            <div className="text-[8px] opacity-75 font-semibold">SPEED</div>
+            <div>{settings.tickRate} TPS</div>
+          </div>
+        </div>
       </div>
 
       {/* DM banner */}
@@ -232,7 +286,7 @@ export const OnlineRoomLobby: React.FC<OnlineRoomLobbyProps> = ({
           }}
           disabled={!bothPlayersReady}
           onMouseEnter={() => setFocusIndex(buttons.indexOf('START'))}
-          className={`w-full py-3 border-2 border-[#0F380F] font-black text-sm flex items-center justify-center gap-2 transition-all ${
+          className={`w-full py-2.5 border-2 border-[#0F380F] font-black text-sm flex items-center justify-center gap-2 transition-all ${
             bothPlayersReady
               ? currentBtn === 'START'
                 ? 'bg-[#0F380F] text-[#9BBC0F] ring-4 ring-[#0F380F] scale-[1.02] cursor-pointer shadow-[3px_3px_0px_#0F380F]'

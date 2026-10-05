@@ -36,11 +36,21 @@ export const LatencyHarnessModal: React.FC<LatencyHarnessModalProps> = ({
   const handleRunBurst = () => {
     soundEngine.playMenuSelect();
     setIsRunningTest(true);
-    networkManager.runLatencyBurst(25);
+    networkManager.runLatencyBurst(20, 60);
     setTimeout(() => {
       setIsRunningTest(false);
-    }, 2200);
+    }, 1500);
   };
+
+  useEffect(() => {
+    if (isOpen && isConnected && report.samples.length === 0 && !isRunningTest) {
+      setIsRunningTest(true);
+      networkManager.runLatencyBurst(15, 60);
+      setTimeout(() => {
+        setIsRunningTest(false);
+      }, 1200);
+    }
+  }, [isOpen, isConnected, report.samples.length]);
 
   const handleApplySimulation = (preset: 'NONE' | 'WIFI_JITTER' | 'SLOW_4G' | 'HIGH_LAG') => {
     soundEngine.playMenuSelect();

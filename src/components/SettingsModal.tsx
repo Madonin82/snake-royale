@@ -9,6 +9,7 @@ interface SettingsModalProps {
   onClose: () => void;
   settings: GameSettings;
   onUpdateSettings: (newSettings: Partial<GameSettings>) => void;
+  isOnlineGuest?: boolean;
   onRegisterHandler?: (handler: ((action: GamepadMenuAction) => void) | null) => void;
 }
 
@@ -17,17 +18,20 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
   onClose,
   settings,
   onUpdateSettings,
+  isOnlineGuest = false,
   onRegisterHandler,
 }) => {
   const [focusIndex, setFocusIndex] = useState<number>(0);
 
   type SettingsRow = 'STYLE' | 'TURNS' | 'GRID' | 'TICKS' | 'SOUND' | 'CRT' | 'CLOSE';
 
-  const rows: SettingsRow[] = settings.turnBased
+  const rows: SettingsRow[] = isOnlineGuest
+    ? ['SOUND', 'CRT', 'CLOSE']
+    : settings.turnBased
     ? ['STYLE', 'TURNS', 'GRID', 'TICKS', 'SOUND', 'CRT', 'CLOSE']
     : ['STYLE', 'GRID', 'TICKS', 'SOUND', 'CRT', 'CLOSE'];
 
-  const currentRow = rows[focusIndex] || 'STYLE';
+  const currentRow = rows[focusIndex] || rows[0];
 
   useEffect(() => {
     if (!isOpen) return;
@@ -55,24 +59,30 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
         soundEngine.playMenuSelect();
         switch (currentRow) {
           case 'STYLE':
-            onUpdateSettings({ turnBased: !settings.turnBased });
+            if (!isOnlineGuest) onUpdateSettings({ turnBased: !settings.turnBased });
             break;
           case 'TURNS': {
-            const turnOpts = [60, 90, 120];
-            const next = turnOpts[(turnOpts.indexOf(settings.raceTurns) + 1) % turnOpts.length];
-            onUpdateSettings({ raceTurns: next });
+            if (!isOnlineGuest) {
+              const turnOpts = [60, 90, 120];
+              const next = turnOpts[(turnOpts.indexOf(settings.raceTurns) + 1) % turnOpts.length];
+              onUpdateSettings({ raceTurns: next });
+            }
             break;
           }
           case 'GRID': {
-            const gridOpts = [8, 12, 16];
-            const next = gridOpts[(gridOpts.indexOf(settings.gridSize) + 1) % gridOpts.length];
-            onUpdateSettings({ gridSize: next });
+            if (!isOnlineGuest) {
+              const gridOpts = [8, 12, 16];
+              const next = gridOpts[(gridOpts.indexOf(settings.gridSize) + 1) % gridOpts.length];
+              onUpdateSettings({ gridSize: next });
+            }
             break;
           }
           case 'TICKS': {
-            const tickOpts = [4, 5, 6, 8];
-            const next = tickOpts[(tickOpts.indexOf(settings.tickRate) + 1) % tickOpts.length];
-            onUpdateSettings({ tickRate: next });
+            if (!isOnlineGuest) {
+              const tickOpts = [4, 5, 6, 8];
+              const next = tickOpts[(tickOpts.indexOf(settings.tickRate) + 1) % tickOpts.length];
+              onUpdateSettings({ tickRate: next });
+            }
             break;
           }
           case 'SOUND': {
@@ -96,30 +106,36 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
         const dir = action === 'RIGHT' ? 1 : -1;
         switch (currentRow) {
           case 'STYLE':
-            onUpdateSettings({ turnBased: !settings.turnBased });
+            if (!isOnlineGuest) onUpdateSettings({ turnBased: !settings.turnBased });
             break;
           case 'TURNS': {
-            const turnOpts = [60, 90, 120];
-            let idx = turnOpts.indexOf(settings.raceTurns) + dir;
-            if (idx < 0) idx = turnOpts.length - 1;
-            if (idx >= turnOpts.length) idx = 0;
-            onUpdateSettings({ raceTurns: turnOpts[idx] });
+            if (!isOnlineGuest) {
+              const turnOpts = [60, 90, 120];
+              let idx = turnOpts.indexOf(settings.raceTurns) + dir;
+              if (idx < 0) idx = turnOpts.length - 1;
+              if (idx >= turnOpts.length) idx = 0;
+              onUpdateSettings({ raceTurns: turnOpts[idx] });
+            }
             break;
           }
           case 'GRID': {
-            const gridOpts = [8, 12, 16];
-            let idx = gridOpts.indexOf(settings.gridSize) + dir;
-            if (idx < 0) idx = gridOpts.length - 1;
-            if (idx >= gridOpts.length) idx = 0;
-            onUpdateSettings({ gridSize: gridOpts[idx] });
+            if (!isOnlineGuest) {
+              const gridOpts = [8, 12, 16];
+              let idx = gridOpts.indexOf(settings.gridSize) + dir;
+              if (idx < 0) idx = gridOpts.length - 1;
+              if (idx >= gridOpts.length) idx = 0;
+              onUpdateSettings({ gridSize: gridOpts[idx] });
+            }
             break;
           }
           case 'TICKS': {
-            const tickOpts = [4, 5, 6, 8];
-            let idx = tickOpts.indexOf(settings.tickRate) + dir;
-            if (idx < 0) idx = tickOpts.length - 1;
-            if (idx >= tickOpts.length) idx = 0;
-            onUpdateSettings({ tickRate: tickOpts[idx] });
+            if (!isOnlineGuest) {
+              const tickOpts = [4, 5, 6, 8];
+              let idx = tickOpts.indexOf(settings.tickRate) + dir;
+              if (idx < 0) idx = tickOpts.length - 1;
+              if (idx >= tickOpts.length) idx = 0;
+              onUpdateSettings({ tickRate: tickOpts[idx] });
+            }
             break;
           }
           case 'SOUND': {
@@ -141,7 +157,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
     return () => {
       onRegisterHandler?.(null);
     };
-  }, [isOpen, currentRow, settings, rows.length, onUpdateSettings, onClose, onRegisterHandler]);
+  }, [isOpen, currentRow, settings, rows.length, onUpdateSettings, onClose, onRegisterHandler, isOnlineGuest]);
 
   if (!isOpen) return null;
 
@@ -165,53 +181,68 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
           </button>
         </div>
 
+        {/* Guest Adopted Rules Info Banner */}
+        {isOnlineGuest && (
+          <div className="bg-[#0F380F] text-[#9BBC0F] p-2 border border-[#0F380F] text-[10px] font-bold text-center flex flex-col gap-0.5">
+            <div className="font-black">👑 ADOPTED HOST MATCH RULES:</div>
+            <div>
+              {settings.gridSize}×{settings.gridSize} Arena • {settings.turnBased ? `Turn-Based (${settings.raceTurns} Turns)` : 'Real-Time'} • {settings.tickRate} TPS
+            </div>
+            <div className="text-[9px] opacity-80 mt-0.5 italic">
+              (Host controls match gameplay rules; you can toggle personal audio/CRT below)
+            </div>
+          </div>
+        )}
+
         {/* Options */}
         <div className="flex flex-col gap-2.5 text-xs font-bold">
           {/* Play Style */}
-          <div
-            className={`flex flex-col gap-1 p-1.5 border transition-all ${
-              currentRow === 'STYLE'
-                ? 'bg-[#8BAC0F] border-[#0F380F] ring-2 ring-[#0F380F]'
-                : 'border-transparent'
-            }`}
-            onClick={() => setFocusIndex(rows.indexOf('STYLE'))}
-          >
-            <div className="flex items-center justify-between">
-              <div className="flex items-center gap-1 opacity-90">
-                {currentRow === 'STYLE' && <span className="animate-pulse">►</span>}
-                <Gauge className="w-3.5 h-3.5" />
-                <span>PLAY STYLE:</span>
+          {!isOnlineGuest && (
+            <div
+              className={`flex flex-col gap-1 p-1.5 border transition-all ${
+                currentRow === 'STYLE'
+                  ? 'bg-[#8BAC0F] border-[#0F380F] ring-2 ring-[#0F380F]'
+                  : 'border-transparent'
+              }`}
+              onClick={() => setFocusIndex(rows.indexOf('STYLE'))}
+            >
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-1 opacity-90">
+                  {currentRow === 'STYLE' && <span className="animate-pulse">►</span>}
+                  <Gauge className="w-3.5 h-3.5" />
+                  <span>PLAY STYLE:</span>
+                </div>
+                {currentRow === 'STYLE' && (
+                  <span className="text-[9px] bg-[#0F380F] text-[#9BBC0F] px-1 font-bold">[◄ ►] TOGGLE</span>
+                )}
               </div>
-              {currentRow === 'STYLE' && (
-                <span className="text-[9px] bg-[#0F380F] text-[#9BBC0F] px-1 font-bold">[◄ ►] TOGGLE</span>
-              )}
+              <div className="grid grid-cols-2 gap-1">
+                <button
+                  onClick={() => onUpdateSettings({ turnBased: true })}
+                  className={`py-1.5 border border-[#0F380F] font-black cursor-pointer ${
+                    settings.turnBased
+                      ? 'bg-[#0F380F] text-[#9BBC0F]'
+                      : 'bg-[#8BAC0F] hover:bg-[#9BBC0F]'
+                  }`}
+                >
+                  TURN-BASED ★
+                </button>
+                <button
+                  onClick={() => onUpdateSettings({ turnBased: false })}
+                  className={`py-1.5 border border-[#0F380F] font-black cursor-pointer ${
+                    !settings.turnBased
+                      ? 'bg-[#0F380F] text-[#9BBC0F]'
+                      : 'bg-[#8BAC0F] hover:bg-[#9BBC0F]'
+                  }`}
+                >
+                  REAL-TIME
+                </button>
+              </div>
             </div>
-            <div className="grid grid-cols-2 gap-1">
-              <button
-                onClick={() => onUpdateSettings({ turnBased: true })}
-                className={`py-1.5 border border-[#0F380F] font-black cursor-pointer ${
-                  settings.turnBased
-                    ? 'bg-[#0F380F] text-[#9BBC0F]'
-                    : 'bg-[#8BAC0F] hover:bg-[#9BBC0F]'
-                }`}
-              >
-                TURN-BASED ★
-              </button>
-              <button
-                onClick={() => onUpdateSettings({ turnBased: false })}
-                className={`py-1.5 border border-[#0F380F] font-black cursor-pointer ${
-                  !settings.turnBased
-                    ? 'bg-[#0F380F] text-[#9BBC0F]'
-                    : 'bg-[#8BAC0F] hover:bg-[#9BBC0F]'
-                }`}
-              >
-                REAL-TIME
-              </button>
-            </div>
-          </div>
+          )}
 
           {/* Race length in turns (turn-based only) */}
-          {settings.turnBased && (
+          {!isOnlineGuest && settings.turnBased && (
             <div
               className={`flex flex-col gap-1 p-1.5 border transition-all ${
                 currentRow === 'TURNS'
@@ -249,76 +280,80 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
           )}
 
           {/* Grid Size */}
-          <div
-            className={`flex flex-col gap-1 p-1.5 border transition-all ${
-              currentRow === 'GRID'
-                ? 'bg-[#8BAC0F] border-[#0F380F] ring-2 ring-[#0F380F]'
-                : 'border-transparent'
-            }`}
-            onClick={() => setFocusIndex(rows.indexOf('GRID'))}
-          >
-            <div className="flex items-center justify-between">
-              <div className="flex items-center gap-1 opacity-90">
-                {currentRow === 'GRID' && <span className="animate-pulse">►</span>}
-                <Grid className="w-3.5 h-3.5" />
-                <span>ARENA GRID SIZE:</span>
+          {!isOnlineGuest && (
+            <div
+              className={`flex flex-col gap-1 p-1.5 border transition-all ${
+                currentRow === 'GRID'
+                  ? 'bg-[#8BAC0F] border-[#0F380F] ring-2 ring-[#0F380F]'
+                  : 'border-transparent'
+              }`}
+              onClick={() => setFocusIndex(rows.indexOf('GRID'))}
+            >
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-1 opacity-90">
+                  {currentRow === 'GRID' && <span className="animate-pulse">►</span>}
+                  <Grid className="w-3.5 h-3.5" />
+                  <span>ARENA GRID SIZE:</span>
+                </div>
+                {currentRow === 'GRID' && (
+                  <span className="text-[9px] bg-[#0F380F] text-[#9BBC0F] px-1 font-bold">[◄ ►] CYCLE</span>
+                )}
               </div>
-              {currentRow === 'GRID' && (
-                <span className="text-[9px] bg-[#0F380F] text-[#9BBC0F] px-1 font-bold">[◄ ►] CYCLE</span>
-              )}
+              <div className="grid grid-cols-3 gap-1">
+                {[8, 12, 16].map((size) => (
+                  <button
+                    key={size}
+                    onClick={() => onUpdateSettings({ gridSize: size })}
+                    className={`py-1 border border-[#0F380F] font-black cursor-pointer ${
+                      settings.gridSize === size
+                        ? 'bg-[#0F380F] text-[#9BBC0F]'
+                        : 'bg-[#8BAC0F] hover:bg-[#9BBC0F]'
+                    }`}
+                  >
+                    {size}×{size} {size === 8 ? '(v1)' : ''}
+                  </button>
+                ))}
+              </div>
             </div>
-            <div className="grid grid-cols-3 gap-1">
-              {[8, 12, 16].map((size) => (
-                <button
-                  key={size}
-                  onClick={() => onUpdateSettings({ gridSize: size })}
-                  className={`py-1 border border-[#0F380F] font-black cursor-pointer ${
-                    settings.gridSize === size
-                      ? 'bg-[#0F380F] text-[#9BBC0F]'
-                      : 'bg-[#8BAC0F] hover:bg-[#9BBC0F]'
-                  }`}
-                >
-                  {size}×{size} {size === 8 ? '(v1)' : ''}
-                </button>
-              ))}
-            </div>
-          </div>
+          )}
 
           {/* Tick Rate Speed */}
-          <div
-            className={`flex flex-col gap-1 p-1.5 border transition-all ${
-              currentRow === 'TICKS'
-                ? 'bg-[#8BAC0F] border-[#0F380F] ring-2 ring-[#0F380F]'
-                : 'border-transparent'
-            }`}
-            onClick={() => setFocusIndex(rows.indexOf('TICKS'))}
-          >
-            <div className="flex items-center justify-between">
-              <div className="flex items-center gap-1 opacity-90">
-                {currentRow === 'TICKS' && <span className="animate-pulse">►</span>}
-                <Gauge className="w-3.5 h-3.5" />
-                <span>GAME SPEED (TPS):</span>
+          {!isOnlineGuest && (
+            <div
+              className={`flex flex-col gap-1 p-1.5 border transition-all ${
+                currentRow === 'TICKS'
+                  ? 'bg-[#8BAC0F] border-[#0F380F] ring-2 ring-[#0F380F]'
+                  : 'border-transparent'
+              }`}
+              onClick={() => setFocusIndex(rows.indexOf('TICKS'))}
+            >
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-1 opacity-90">
+                  {currentRow === 'TICKS' && <span className="animate-pulse">►</span>}
+                  <Gauge className="w-3.5 h-3.5" />
+                  <span>GAME SPEED (TPS):</span>
+                </div>
+                {currentRow === 'TICKS' && (
+                  <span className="text-[9px] bg-[#0F380F] text-[#9BBC0F] px-1 font-bold">[◄ ►] CYCLE</span>
+                )}
               </div>
-              {currentRow === 'TICKS' && (
-                <span className="text-[9px] bg-[#0F380F] text-[#9BBC0F] px-1 font-bold">[◄ ►] CYCLE</span>
-              )}
+              <div className="grid grid-cols-4 gap-1">
+                {[4, 5, 6, 8].map((tps) => (
+                  <button
+                    key={tps}
+                    onClick={() => onUpdateSettings({ tickRate: tps })}
+                    className={`py-1 border border-[#0F380F] font-black cursor-pointer ${
+                      settings.tickRate === tps
+                        ? 'bg-[#0F380F] text-[#9BBC0F]'
+                        : 'bg-[#8BAC0F] hover:bg-[#9BBC0F]'
+                    }`}
+                  >
+                    {tps} tps
+                  </button>
+                ))}
+              </div>
             </div>
-            <div className="grid grid-cols-4 gap-1">
-              {[4, 5, 6, 8].map((tps) => (
-                <button
-                  key={tps}
-                  onClick={() => onUpdateSettings({ tickRate: tps })}
-                  className={`py-1 border border-[#0F380F] font-black cursor-pointer ${
-                    settings.tickRate === tps
-                      ? 'bg-[#0F380F] text-[#9BBC0F]'
-                      : 'bg-[#8BAC0F] hover:bg-[#9BBC0F]'
-                  }`}
-                >
-                  {tps} tps
-                </button>
-              ))}
-            </div>
-          </div>
+          )}
 
           {/* Sound Toggle */}
           <div

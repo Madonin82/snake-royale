@@ -419,6 +419,16 @@ export const App: React.FC = () => {
     }));
   }, [inLobby, inOnlineLobby]);
 
+  const handleUpdateSettings = useCallback((newVals: Partial<GameSettings>) => {
+    setSettings(prev => {
+      const updated = { ...prev, ...newVals };
+      if (playModeRef.current === 'ONLINE_HOST' || playModeRef.current === 'ONLINE_SERVER') {
+        networkManager.updateRoomSettings(updated);
+      }
+      return updated;
+    });
+  }, []);
+
   const handleReturnToLobby = useCallback(() => {
     if (playModeRef.current === 'ONLINE_HOST' || playModeRef.current === 'ONLINE_JOIN' || playModeRef.current === 'ONLINE_SERVER' || playModeRef.current === 'ONLINE_SPECTATOR') {
       networkManager.disconnect();
@@ -637,7 +647,21 @@ export const App: React.FC = () => {
           setOnlineRole(msg.role);
           setHasP1(msg.hasP1);
           setHasP2(msg.hasP2);
+          if (msg.p1Name || msg.p2Name) {
+            setPlayerNames({
+              p1: msg.p1Name || 'PLAYER 1',
+              p2: msg.p2Name || 'PLAYER 2',
+            });
+          }
+          if (msg.series) setSeries(msg.series);
           setSpectatorsCount(msg.spectatorsCount || 0);
+          if (msg.settings) {
+            setSettings(prev => ({ ...prev, ...msg.settings }));
+          }
+          if (msg.status === 'racing') {
+            setInOnlineLobby(false);
+            setInLobby(false);
+          }
           break;
         }
 
@@ -652,6 +676,44 @@ export const App: React.FC = () => {
             });
           }
           if (msg.series) setSeries(msg.series);
+          if (msg.settings) {
+            setSettings(prev => ({ ...prev, ...msg.settings }));
+          }
+          if (msg.status === 'racing' && (playModeRef.current === 'ONLINE_JOIN' || playModeRef.current === 'ONLINE_SPECTATOR')) {
+            setInOnlineLobby(false);
+            setInLobby(false);
+          }
+          break;
+        }
+
+        case 'SETTINGS_SYNC': {
+          if (playModeRef.current === 'ONLINE_JOIN' || playModeRef.current === 'ONLINE_SPECTATOR') {
+            if (msg.settings) {
+              setSettings(prev => ({ ...prev, ...msg.settings }));
+            }
+          }
+          break;
+        }
+
+        case 'MATCH_START': {
+          if (playModeRef.current === 'ONLINE_JOIN' || playModeRef.current === 'ONLINE_SPECTATOR') {
+            if (msg.settings) {
+              setSettings(prev => ({ ...prev, ...msg.settings }));
+            }
+            if (msg.state) {
+              const safeState = normalizeGameState(msg.state);
+              setGameState(safeState);
+              setMatchHistory([safeState]);
+              lastStateTickRef.current = safeState.tick;
+            } else {
+              lastStateTickRef.current = -1;
+            }
+            clearLocks();
+            sentTickRef.current = -1;
+            setInOnlineLobby(false);
+            setInLobby(false);
+            soundEngine.playCountdown(true);
+          }
           break;
         }
 
@@ -727,10 +789,8 @@ export const App: React.FC = () => {
               }
             }
 
-            if (inOnlineLobby) {
-              setInOnlineLobby(false);
-              setInLobby(false);
-            }
+            setInOnlineLobby(false);
+            setInLobby(false);
           }
           break;
         }
@@ -930,7 +990,7 @@ export const App: React.FC = () => {
     soundEngine.playCountdown(true);
 
     if (playMode === 'ONLINE_HOST' || playMode === 'ONLINE_SERVER') {
-      networkManager.broadcastState(initial);
+      networkManager.broadcastMatchStart(initial, settingsRef.current);
     }
   };
 
@@ -951,8 +1011,11 @@ export const App: React.FC = () => {
     setPlayMode('ONLINE_HOST');
     setInOnlineLobby(true);
     setInLobby(false);
+    setHasP1(true);
+    setHasP2(false);
+    setPlayerNames({ p1: displayName.trim() || 'PLAYER 1', p2: 'PLAYER 2' });
 
-    await networkManager.connect(code, 'p1', displayName.trim() || undefined);
+    await networkManager.connect(code, 'p1', displayName.trim() || undefined, settingsRef.current);
     setOnlineRole('p1');
   };
 
@@ -963,7 +1026,7 @@ export const App: React.FC = () => {
     setInOnlineLobby(true);
     setInLobby(false);
 
-    await networkManager.connect(code, 'server', displayName.trim() || undefined);
+    await networkManager.connect(code, 'server', displayName.trim() || undefined, settingsRef.current);
     setOnlineRole('server');
   };
 
@@ -974,11 +1037,9 @@ export const App: React.FC = () => {
     setPlayMode('ONLINE_JOIN');
     setInOnlineLobby(true);
     setInLobby(false);
-    // BUGFIX 7: fresh tick tracking for the incoming state stream.
     lastStateTickRef.current = -1;
+    sentTickRef.current = -1;
 
-    // BUGFIX 8: honor connect()'s result. A failed connect must not leave a
-    // silent stuck lobby — show an error and return to the join form.
     const ok = await networkManager.connect(roomCode, undefined, displayName.trim() || undefined);
     const assigned = networkManager.getRole();
     if (!ok || !assigned) {
@@ -989,20 +1050,6 @@ export const App: React.FC = () => {
       return;
     }
     setOnlineRole(assigned);
-
-    // BUGFIX 8: one explicit member-state sync after connect, so the lobby
-    // is correct even if the first ROOM_MEMBERS_CHANGED was missed (handler
-    // re-registration race / onValue only fires on changes).
-    const members = await networkManager.getRoomMembers();
-    if (members) {
-      setHasP1(members.hasP1);
-      setHasP2(members.hasP2);
-      setPlayerNames({
-        p1: members.p1Name || 'PLAYER 1',
-        p2: members.p2Name || 'PLAYER 2',
-      });
-      setSeries(members.series);
-    }
   };
 
   const handleSpectateRoom = async (code: string) => {
@@ -1138,9 +1185,11 @@ export const App: React.FC = () => {
               spectatorsCount={spectatorsCount}
               playerNames={playerNames}
               series={series}
+              settings={settings}
               onStartMatch={startNewMatch}
               onLeaveRoom={handleLeaveRoom}
               onOpenLatencyHarness={() => setLatencyModalOpen(true)}
+              onOpenSettings={() => setSettingsModalOpen(true)}
               onRegisterHandler={(h) => { activeHandlerRef.current = h; }}
             />
           ) : (
@@ -1215,7 +1264,8 @@ export const App: React.FC = () => {
         isOpen={settingsModalOpen}
         onClose={() => setSettingsModalOpen(false)}
         settings={settings}
-        onUpdateSettings={(newVals) => setSettings(s => ({ ...s, ...newVals }))}
+        onUpdateSettings={handleUpdateSettings}
+        isOnlineGuest={!inLobby && (playMode === 'ONLINE_JOIN' || playMode === 'ONLINE_SPECTATOR')}
         onRegisterHandler={(h) => { activeHandlerRef.current = h; }}
       />
 
