@@ -122,6 +122,15 @@ export const App: React.FC = () => {
   // re-delivered states must never consume buffered moves.
   const lastStateTickRef = useRef<number>(-1);
 
+  const viewerSeat: 'p1' | 'p2' | null = useMemo(() => {
+    if (playMode === 'SOLO_AI') return 'p1';
+    if (playMode === 'ONLINE_HOST') return 'p1';
+    if (playMode === 'ONLINE_JOIN') return onlineRole === 'p1' ? 'p1' : onlineRole === 'p2' ? 'p2' : null;
+    if (playMode === 'ONLINE_SERVER' || playMode === 'ONLINE_SPECTATOR') return null;
+    if (playMode === 'LOCAL_2P') return null; // Both local on shared keyboard
+    return 'p1';
+  }, [playMode, onlineRole]);
+
   const displayState = useMemo(() => {
     if (replayActive) return matchHistory[replayIdx] ?? gameState;
     const stateCopy: GameState = {
@@ -131,22 +140,30 @@ export const App: React.FC = () => {
         p2: { ...gameState.snakes.p2, body: [...gameState.snakes.p2.body] },
       },
     };
-    if (settings.turnBased && !locks.p1 && moveBuffers.p1.length > 0) {
-      stateCopy.snakes.p1.body = computePreviewSnake(gameState.snakes.p1, moveBuffers.p1);
-    }
-    if (settings.turnBased && !locks.p2 && moveBuffers.p2.length > 0) {
-      stateCopy.snakes.p2.body = computePreviewSnake(gameState.snakes.p2, moveBuffers.p2);
+    if (settings.turnBased) {
+      const showP1 = playMode === 'LOCAL_2P' || viewerSeat === 'p1';
+      const showP2 = playMode === 'LOCAL_2P' || viewerSeat === 'p2';
+
+      if (showP1 && !locks.p1 && moveBuffers.p1.length > 0) {
+        stateCopy.snakes.p1.body = computePreviewSnake(gameState.snakes.p1, moveBuffers.p1);
+      }
+      if (showP2 && !locks.p2 && moveBuffers.p2.length > 0) {
+        stateCopy.snakes.p2.body = computePreviewSnake(gameState.snakes.p2, moveBuffers.p2);
+      }
     }
     return stateCopy;
-  }, [replayActive, matchHistory, replayIdx, gameState, moveBuffers, locks, settings.turnBased]);
+  }, [replayActive, matchHistory, replayIdx, gameState, moveBuffers, locks, settings.turnBased, playMode, viewerSeat]);
 
   const lockedPaths = useMemo(() => {
     if (!settings.turnBased) return undefined;
+    const showP1 = playMode === 'LOCAL_2P' || viewerSeat === 'p1';
+    const showP2 = playMode === 'LOCAL_2P' || viewerSeat === 'p2';
+
     return {
-      p1: locks.p1 && moveBuffers.p1.length > 0 ? computeCommittedPath(gameState.snakes.p1, moveBuffers.p1) : undefined,
-      p2: locks.p2 && moveBuffers.p2.length > 0 ? computeCommittedPath(gameState.snakes.p2, moveBuffers.p2) : undefined,
+      p1: showP1 && locks.p1 && moveBuffers.p1.length > 0 ? computeCommittedPath(gameState.snakes.p1, moveBuffers.p1) : undefined,
+      p2: showP2 && locks.p2 && moveBuffers.p2.length > 0 ? computeCommittedPath(gameState.snakes.p2, moveBuffers.p2) : undefined,
     };
-  }, [settings.turnBased, locks, moveBuffers, gameState.snakes]);
+  }, [settings.turnBased, locks, moveBuffers, gameState.snakes, playMode, viewerSeat]);
 
   const stateRef = useRef<GameState>(gameState);
   stateRef.current = gameState;
@@ -290,6 +307,9 @@ export const App: React.FC = () => {
     const current = stateRef.current;
     const s = settingsRef.current;
     if (!s.turnBased || current.phase === 'OVER') return;
+    const isOnline = playModeRef.current === 'ONLINE_HOST' || playModeRef.current === 'ONLINE_JOIN' || playModeRef.current === 'ONLINE_SERVER';
+    const bothReady = !isOnline || (current.readyConfirmed?.p1 && current.readyConfirmed?.p2);
+    if (!bothReady) return;
 
     if (playModeRef.current === 'SOLO_AI' && !locksRef.current.p2) {
       const p2Buf = [...moveBuffersRef.current.p2];
@@ -463,6 +483,16 @@ export const App: React.FC = () => {
     }));
   }, [inLobby, inOnlineLobby]);
 
+  const handleUpdateSettings = useCallback((newVals: Partial<GameSettings>) => {
+    setSettings(prev => {
+      const updated = { ...prev, ...newVals };
+      if (playModeRef.current === 'ONLINE_HOST' || playModeRef.current === 'ONLINE_SERVER') {
+        networkManager.updateRoomSettings(updated);
+      }
+      return updated;
+    });
+  }, []);
+
   const handleReturnToLobby = useCallback(() => {
     if (playModeRef.current === 'ONLINE_HOST' || playModeRef.current === 'ONLINE_JOIN' || playModeRef.current === 'ONLINE_SERVER' || playModeRef.current === 'ONLINE_SPECTATOR') {
       networkManager.disconnect();
@@ -505,7 +535,14 @@ export const App: React.FC = () => {
       if (!pressed) return;
       const targetSlot = playModeRef.current === 'LOCAL_2P' && slot === 2 ? 2 : 1;
       if (button === 'A') {
-        handleBufferLock(targetSlot);
+        const isOnline = playModeRef.current === 'ONLINE_HOST' || playModeRef.current === 'ONLINE_JOIN' || playModeRef.current === 'ONLINE_SERVER';
+        const ready = stateRef.current.readyConfirmed;
+        const mySeat = onlineRoleRef.current === 'p2' ? 'p2' : 'p1';
+        if (isOnline && (!ready || !ready[mySeat])) {
+          handleConfirmReady();
+        } else {
+          handleBufferLock(targetSlot);
+        }
       } else if (button === 'B') {
         handleBufferUndo(targetSlot);
       } else if (button === 'Y') {
@@ -609,6 +646,14 @@ export const App: React.FC = () => {
         return;
       }
       if (e.key === 'Enter' || e.key === ' ') {
+        const isOnline = playModeRef.current === 'ONLINE_HOST' || playModeRef.current === 'ONLINE_JOIN' || playModeRef.current === 'ONLINE_SERVER';
+        const ready = stateRef.current.readyConfirmed;
+        const mySeat = onlineRoleRef.current === 'p2' ? 'p2' : 'p1';
+        if (isOnline && (!ready || !ready[mySeat])) {
+          handleConfirmReady();
+          e.preventDefault();
+          return;
+        }
         handleBufferLock(1);
         e.preventDefault();
         return;
@@ -810,6 +855,17 @@ export const App: React.FC = () => {
           break;
         }
 
+        case 'READY_CONFIRM': {
+          if (msg.role) {
+            setGameState(prev => {
+              const cur = prev.readyConfirmed || { p1: false, p2: false };
+              const updated = { ...cur, [msg.role]: true };
+              return { ...prev, readyConfirmed: updated };
+            });
+          }
+          break;
+        }
+
         case 'RESTART_MATCH': {
           if (playModeRef.current === 'ONLINE_SPECTATOR') {
             setMatchHistory([]);
@@ -941,6 +997,22 @@ export const App: React.FC = () => {
     }
   }, [gameState.phase, gameState.winner, playMode]);
 
+  const handleConfirmReady = useCallback(() => {
+    const isOnline = playModeRef.current === 'ONLINE_HOST' || playModeRef.current === 'ONLINE_JOIN' || playModeRef.current === 'ONLINE_SERVER';
+    if (!isOnline) return;
+    const mySeat = onlineRoleRef.current === 'p2' ? 'p2' : 'p1';
+
+    setGameState(prev => {
+      const cur = prev.readyConfirmed || { p1: false, p2: false };
+      if (cur[mySeat]) return prev;
+      const updated = { ...cur, [mySeat]: true };
+      return { ...prev, readyConfirmed: updated };
+    });
+
+    soundEngine.playMenuSelect();
+    networkManager.sendReadyConfirm(mySeat);
+  }, []);
+
   const startNewMatch = () => {
     activeHandlerRef.current = null;
     const me = displayName.trim();
@@ -958,7 +1030,13 @@ export const App: React.FC = () => {
         ? { p1: me || 'PLAYER 1', p2: playerNamesRef.current.p2 || 'PLAYER 2' }
         : { p1: playerNamesRef.current.p1 || 'PLAYER 1', p2: me || 'PLAYER 2' };
     }
+    const isOnline = playMode === 'ONLINE_HOST' || playMode === 'ONLINE_JOIN' || playMode === 'ONLINE_SERVER';
     const initial = createInitialState(settings, matchNames);
+    if (isOnline) {
+      initial.readyConfirmed = { p1: false, p2: false };
+    } else {
+      initial.readyConfirmed = { p1: true, p2: true };
+    }
     seriesCountedRef.current = false;
     setMatchHistory([initial]);
     setReplayActive(false);
@@ -1201,14 +1279,47 @@ export const App: React.FC = () => {
                 locks={replayActive ? undefined : locks}
                 thinkSessions={replayActive ? undefined : thinkSessions}
                 moveBuffers={moveBuffers}
-                viewerSeat={
-                  playMode === 'ONLINE_HOST' ? 'p1'
-                  : playMode === 'ONLINE_JOIN' ? (onlineRole === 'p1' ? 'p1' : onlineRole === 'p2' ? 'p2' : null)
-                  : null
-                }
+                viewerSeat={viewerSeat}
               />
               <div className="gameboard-area my-1">
                 <GameBoard gameState={displayState} settings={settings} lockedPaths={lockedPaths} />
+                {!replayActive && (playMode === 'ONLINE_HOST' || playMode === 'ONLINE_JOIN' || playMode === 'ONLINE_SERVER') && !(displayState.readyConfirmed?.p1 && displayState.readyConfirmed?.p2) && (
+                  <div className="absolute inset-0 bg-[#0F380F]/90 backdrop-blur-xs flex flex-col items-center justify-center p-3 z-20 font-mono text-[#9BBC0F]">
+                    <div className="bg-[#9BBC0F] border-4 border-[#0F380F] shadow-[6px_6px_0px_#0F380F] p-3 sm:p-4 max-w-[340px] w-full text-center flex flex-col gap-2.5">
+                      <div className="text-xs font-black uppercase tracking-wider text-[#0F380F]">
+                        🎮 MATCH READY CHECK
+                      </div>
+                      <div className="text-[10px] font-bold text-[#0F380F] bg-[#8BAC0F] p-2 border-2 border-[#0F380F]">
+                        BOTH PLAYERS MUST CONFIRM TO START
+                      </div>
+
+                      <div className="flex flex-col gap-1.5 my-1">
+                        <div className={`p-2 border-2 border-[#0F380F] flex items-center justify-between text-xs font-black ${displayState.readyConfirmed?.p1 ? 'bg-[#306230] text-[#9BBC0F]' : 'bg-[#8BAC0F] text-[#0F380F]'}`}>
+                          <span>{playerNames.p1} (P1):</span>
+                          <span>{displayState.readyConfirmed?.p1 ? '✅ READY' : '⏳ WAITING...'}</span>
+                        </div>
+                        <div className={`p-2 border-2 border-[#0F380F] flex items-center justify-between text-xs font-black ${displayState.readyConfirmed?.p2 ? 'bg-[#306230] text-[#9BBC0F]' : 'bg-[#8BAC0F] text-[#0F380F]'}`}>
+                          <span>{playerNames.p2} (P2):</span>
+                          <span>{displayState.readyConfirmed?.p2 ? '✅ READY' : '⏳ WAITING...'}</span>
+                        </div>
+                      </div>
+
+                      {!(displayState.readyConfirmed?.[onlineRole === 'p2' ? 'p2' : 'p1']) ? (
+                        <button
+                          onClick={handleConfirmReady}
+                          className="w-full py-2.5 bg-[#0F380F] hover:bg-[#306230] text-[#9BBC0F] border-2 border-[#0F380F] font-black text-sm cursor-pointer shadow-[3px_3px_0px_#0F380F] flex items-center justify-center gap-2 animate-pulse"
+                        >
+                          <span>PRESS A TO START</span>
+                          <span className="text-[10px] bg-[#9BBC0F] text-[#0F380F] px-1.5 py-0.5 font-bold">[A / ENTER]</span>
+                        </button>
+                      ) : (
+                        <div className="bg-[#306230] text-[#9BBC0F] p-2.5 border-2 border-[#0F380F] text-xs font-black">
+                          ✅ YOU ARE READY! WAITING FOR OPPONENT...
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                )}
               </div>
               <div className="controls-area">
                 {!replayActive && (
@@ -1261,7 +1372,8 @@ export const App: React.FC = () => {
         isOpen={settingsModalOpen}
         onClose={() => setSettingsModalOpen(false)}
         settings={settings}
-        onUpdateSettings={(newVals) => setSettings(s => ({ ...s, ...newVals }))}
+        onUpdateSettings={handleUpdateSettings}
+        isOnlineGuest={!inLobby && (playMode === 'ONLINE_JOIN' || playMode === 'ONLINE_SPECTATOR')}
         onRegisterHandler={(h) => { activeHandlerRef.current = h; }}
       />
 
