@@ -855,6 +855,19 @@ export const App: React.FC = () => {
           break;
         }
 
+        case 'READY_SYNC': {
+          if (msg.ready) {
+            setGameState(prev => ({
+              ...prev,
+              readyConfirmed: {
+                p1: !!msg.ready.p1,
+                p2: !!msg.ready.p2,
+              }
+            }));
+          }
+          break;
+        }
+
         case 'READY_CONFIRM': {
           if (msg.role) {
             setGameState(prev => {
