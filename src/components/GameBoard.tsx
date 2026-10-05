@@ -132,19 +132,33 @@ function renderSnake(
 ) {
   if (snake.body.length === 0) return;
 
+  const tailIdx = snake.body.length - 1;
+
   // Render Body Segments (from tail to neck)
-  for (let i = snake.body.length - 1; i >= 1; i--) {
+  for (let i = tailIdx; i >= 1; i--) {
     const seg = snake.body[i];
     const prevSeg = snake.body[i - 1];
     const px = seg.x * cellSize;
     const py = seg.y * cellSize;
 
-    ctx.fillStyle = bodyColor;
-    ctx.fillRect(px + 2, py + 2, cellSize - 4, cellSize - 4);
+    if (i === tailIdx && tailIdx > 1) {
+      // Tapered tail: smaller centered block so the tail reads as an endpoint
+      const tSize = cellSize * 0.55;
+      const tOff = (cellSize - tSize) / 2;
+      ctx.fillStyle = bodyColor;
+      ctx.fillRect(px + tOff, py + tOff, tSize, tSize);
+      ctx.fillStyle = accentColor;
+      const inner = tSize * 0.45;
+      const innerOff = (cellSize - inner) / 2;
+      ctx.fillRect(px + innerOff, py + innerOff, inner, inner);
+    } else {
+      ctx.fillStyle = bodyColor;
+      ctx.fillRect(px + 2, py + 2, cellSize - 4, cellSize - 4);
 
-    // Subtle scale pattern / inner block
-    ctx.fillStyle = accentColor;
-    ctx.fillRect(px + 6, py + 6, cellSize - 12, cellSize - 12);
+      // Subtle scale pattern / inner block
+      ctx.fillStyle = accentColor;
+      ctx.fillRect(px + 6, py + 6, cellSize - 12, cellSize - 12);
+    }
 
     // Connection seam / bridge
     if (prevSeg) {
@@ -165,9 +179,26 @@ function renderSnake(
   ctx.fillStyle = bodyColor;
   ctx.fillRect(hx + 1, hy + 1, cellSize - 2, cellSize - 2);
 
-  // Accent eyes / center
+  // Directional eyes on the leading edge
+  const eyeSize = Math.max(3, cellSize * 0.14);
+  const edge = 3;
+  const spread = cellSize * 0.28;
+  const c = cellSize / 2;
   ctx.fillStyle = accentColor;
-  ctx.fillRect(hx + 8, hy + 8, cellSize - 16, cellSize - 16);
+  if (snake.direction === 'UP') {
+    ctx.fillRect(hx + c - spread / 2 - eyeSize / 2, hy + edge, eyeSize, eyeSize);
+    ctx.fillRect(hx + c + spread / 2 - eyeSize / 2, hy + edge, eyeSize, eyeSize);
+  } else if (snake.direction === 'DOWN') {
+    ctx.fillRect(hx + c - spread / 2 - eyeSize / 2, hy + cellSize - edge - eyeSize, eyeSize, eyeSize);
+    ctx.fillRect(hx + c + spread / 2 - eyeSize / 2, hy + cellSize - edge - eyeSize, eyeSize, eyeSize);
+  } else if (snake.direction === 'LEFT') {
+    ctx.fillRect(hx + edge, hy + c - spread / 2 - eyeSize / 2, eyeSize, eyeSize);
+    ctx.fillRect(hx + edge, hy + c + spread / 2 - eyeSize / 2, eyeSize, eyeSize);
+  } else {
+    // RIGHT
+    ctx.fillRect(hx + cellSize - edge - eyeSize, hy + c - spread / 2 - eyeSize / 2, eyeSize, eyeSize);
+    ctx.fillRect(hx + cellSize - edge - eyeSize, hy + c + spread / 2 - eyeSize / 2, eyeSize, eyeSize);
+  }
 }
 
 function renderToken(ctx: CanvasRenderingContext2D, x: number, y: number, cellSize: number, blink: boolean) {
