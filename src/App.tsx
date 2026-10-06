@@ -116,6 +116,11 @@ export const App: React.FC = () => {
   // TURN-BASED MOVE LOCKS
   const locksRef = useRef<{ p1: boolean; p2: boolean }>({ p1: false, p2: false });
   const [locks, setLocks] = useState<{ p1: boolean; p2: boolean }>({ p1: false, p2: false });
+  const [thinkTimeRemaining, setThinkTimeRemaining] = useState<{ p1: number | null; p2: number | null }>({ p1: null, p2: null });
+  const thinkTimeRemainingRef = useRef(thinkTimeRemaining);
+  thinkTimeRemainingRef.current = thinkTimeRemaining;
+  const thinkTimeEndsRef = useRef<{ p1: number | null; p2: number | null }>({ p1: null, p2: null });
+  const lastThinkTimeTickRef = useRef<{ p1: number | null; p2: number | null }>({ p1: null, p2: null });
   const sentTickRef = useRef<number>(-1);
   // BUGFIX 7: tracks the last STATE_SYNC tick processed on the guest so the
   // buffer drain runs exactly once per completed step. Duplicate, stale, or
@@ -256,6 +261,9 @@ export const App: React.FC = () => {
   }, []);
 
   const setLock = useCallback((who: 'p1' | 'p2') => {
+    thinkTimeEndsRef.current = { ...thinkTimeEndsRef.current, [who]: null };
+    lastThinkTimeTickRef.current = { ...lastThinkTimeTickRef.current, [who]: null };
+    setThinkTimeRemaining(prev => ({ ...prev, [who]: null }));
     locksRef.current = { ...locksRef.current, [who]: true };
     setLocks(locksRef.current);
     // Think session ends via the locks-transition effect.
@@ -265,6 +273,10 @@ export const App: React.FC = () => {
   }, []);
 
   const clearLocks = useCallback(() => {
+    thinkTimeEndsRef.current = { p1: null, p2: null };
+    lastThinkTimeTickRef.current = { p1: null, p2: null };
+    thinkTimeRemainingRef.current = { p1: null, p2: null };
+    setThinkTimeRemaining({ p1: null, p2: null });
     locksRef.current = { p1: false, p2: false };
     setLocks(locksRef.current);
     // New match: reset accumulators. Think sessions open on the first tick
@@ -361,10 +373,8 @@ export const App: React.FC = () => {
     const p2Buf = moveBuffersRef.current.p2;
 
     if (!locksRef.current.p1 || !locksRef.current.p2) return;
-    if (p1Buf.length === 0 || p2Buf.length === 0) return;
-
-    const nextP1Dir = p1Buf.shift()!;
-    const nextP2Dir = p2Buf.shift()!;
+    const nextP1Dir = p1Buf.shift() || current.snakes.p1.direction;
+    const nextP2Dir = p2Buf.shift() || current.snakes.p2.direction;
 
     queueSnakeDirection(current.snakes.p1, nextP1Dir);
     queueSnakeDirection(current.snakes.p2, nextP2Dir);
@@ -404,6 +414,120 @@ export const App: React.FC = () => {
       }, 550);
     }
   }, [playTickEvents, thinkSessionCancel]);
+
+  const autoLockPlayer = useCallback((who: 'p1' | 'p2') => {
+    if (locksRef.current[who]) return;
+    const current = stateRef.current;
+    const buffer = moveBuffersRef.current[who];
+
+    setLock(who);
+    if (playModeRef.current === 'ONLINE_JOIN') {
+      if (buffer.length > 0 && sentTickRef.current !== current.tick) {
+        sentTickRef.current = current.tick;
+        networkManager.sendInput(buffer[0], current.tick);
+      }
+      return;
+    }
+
+    maybeAdvanceTurn();
+  }, [maybeAdvanceTurn, setLock]);
+
+  useEffect(() => {
+    if (!settings.turnBased || settings.thinkTimeSeconds === null) {
+      thinkTimeEndsRef.current = { p1: null, p2: null };
+      lastThinkTimeTickRef.current = { p1: null, p2: null };
+      thinkTimeRemainingRef.current = { p1: null, p2: null };
+      setThinkTimeRemaining({ p1: null, p2: null });
+      return;
+    }
+
+    const clearCountdown = (who: 'p1' | 'p2') => {
+      if (thinkTimeEndsRef.current[who] === null && thinkTimeRemainingRef.current[who] === null) return;
+      thinkTimeEndsRef.current = { ...thinkTimeEndsRef.current, [who]: null };
+      lastThinkTimeTickRef.current = { ...lastThinkTimeTickRef.current, [who]: null };
+      thinkTimeRemainingRef.current = { ...thinkTimeRemainingRef.current, [who]: null };
+      setThinkTimeRemaining({ ...thinkTimeRemainingRef.current });
+    };
+
+    const interval = setInterval(() => {
+      const current = stateRef.current;
+      const mode = playModeRef.current;
+      const ready = current.readyConfirmed;
+      const isOnline = mode === 'ONLINE_HOST' || mode === 'ONLINE_JOIN' || mode === 'ONLINE_SERVER';
+      const matchActive =
+        !inLobby &&
+        !inOnlineLobby &&
+        !replayActive &&
+        current.phase !== 'OVER' &&
+        (!isOnline || (ready?.p1 && ready?.p2));
+
+      (['p1', 'p2'] as const).forEach(who => {
+        const isOwnSeat =
+          mode === 'LOCAL_2P' ||
+          (mode === 'SOLO_AI' && who === 'p1') ||
+          (mode === 'ONLINE_HOST' && who === 'p1') ||
+          (mode === 'ONLINE_JOIN' && onlineRoleRef.current === who);
+        const isAuthority =
+          mode !== 'ONLINE_JOIN' &&
+          mode !== 'ONLINE_SPECTATOR' &&
+          !(mode === 'SOLO_AI' && who === 'p2');
+        const snake = current.snakes[who];
+
+        if (
+          !matchActive ||
+          !isOwnSeat && !isAuthority ||
+          !snake?.isAlive ||
+          locksRef.current[who]
+        ) {
+          clearCountdown(who);
+          return;
+        }
+
+        if (thinkTimeEndsRef.current[who] === null) {
+          if (moveBuffersRef.current[who].length > 0) return;
+
+          const endsAt = Date.now() + settings.thinkTimeSeconds! * 1000;
+          thinkTimeEndsRef.current = { ...thinkTimeEndsRef.current, [who]: endsAt };
+          const initialCount = settings.thinkTimeSeconds!;
+          lastThinkTimeTickRef.current = { ...lastThinkTimeTickRef.current, [who]: initialCount };
+          thinkTimeRemainingRef.current = { ...thinkTimeRemainingRef.current, [who]: initialCount };
+          setThinkTimeRemaining({ ...thinkTimeRemainingRef.current });
+          soundEngine.playThinkTimeTick();
+          if (isOwnSeat) {
+            const slot = mode === 'LOCAL_2P' && who === 'p2' ? 2 : 1;
+            gamepadController.rumble(slot);
+          }
+          return;
+        }
+
+        const secondsLeft = Math.max(0, Math.ceil((thinkTimeEndsRef.current[who]! - Date.now()) / 1000));
+        if (secondsLeft === 0) {
+          clearCountdown(who);
+          autoLockPlayer(who);
+          return;
+        }
+
+        if (lastThinkTimeTickRef.current[who] !== secondsLeft) {
+          lastThinkTimeTickRef.current = { ...lastThinkTimeTickRef.current, [who]: secondsLeft };
+          soundEngine.playThinkTimeTick(secondsLeft === 1);
+        }
+        if (thinkTimeRemainingRef.current[who] !== secondsLeft) {
+          thinkTimeRemainingRef.current = { ...thinkTimeRemainingRef.current, [who]: secondsLeft };
+          setThinkTimeRemaining({ ...thinkTimeRemainingRef.current });
+        }
+      });
+    }, 50);
+
+    return () => clearInterval(interval);
+  }, [
+    autoLockPlayer,
+    inLobby,
+    inOnlineLobby,
+    onlineRole,
+    replayActive,
+    settings.thinkTimeSeconds,
+    settings.turnBased,
+  ]);
 
   const handleBufferUndo = useCallback((playerSlot: 1 | 2) => {
     const current = stateRef.current;
@@ -504,6 +628,16 @@ export const App: React.FC = () => {
       }
       return updated;
     });
+  }, []);
+
+  const adoptRoomSettings = useCallback((roomSettings: Partial<GameSettings>) => {
+    setSettings(prev => ({
+      ...prev,
+      ...roomSettings,
+      thinkTimeSeconds: roomSettings.thinkTimeSeconds ?? null,
+      soundEnabled: prev.soundEnabled,
+      crtFilterEnabled: prev.crtFilterEnabled,
+    }));
   }, []);
 
   const handleReturnToLobby = useCallback(() => {
@@ -740,6 +874,7 @@ export const App: React.FC = () => {
           setHasP1(msg.hasP1);
           setHasP2(msg.hasP2);
           setSpectatorsCount(msg.spectatorsCount || 0);
+          if (msg.settings) adoptRoomSettings(msg.settings);
           break;
         }
 
@@ -753,7 +888,13 @@ export const App: React.FC = () => {
               p2: msg.p2Name || 'PLAYER 2',
             });
           }
+          if (msg.settings) adoptRoomSettings(msg.settings);
           if (msg.series) setSeries(msg.series);
+          break;
+        }
+
+        case 'SETTINGS_SYNC': {
+          if (msg.settings) adoptRoomSettings(msg.settings);
           break;
         }
 
@@ -813,10 +954,11 @@ export const App: React.FC = () => {
                         sentTickRef.current = safeState.tick;
                         networkManager.sendInput(buf[0], safeState.tick);
                       }
-                    } else {
-                      locksRef.current = { ...locksRef.current, [myRole]: false };
-                      setLocks({ ...locksRef.current });
                     }
+                  }
+                  if (moveBuffersRef.current[myRole].length === 0) {
+                    locksRef.current = { ...locksRef.current, [myRole]: false };
+                    setLocks({ ...locksRef.current });
                   }
                 }
               }
@@ -911,7 +1053,7 @@ export const App: React.FC = () => {
     return () => {
       unsubscribe();
     };
-  }, [inOnlineLobby, clearLocks, maybeAdvanceTurn, setLock]);
+  }, [inOnlineLobby, clearLocks, maybeAdvanceTurn, setLock, adoptRoomSettings]);
 
   // Latency Report Polling
   useEffect(() => {
@@ -1100,7 +1242,7 @@ export const App: React.FC = () => {
     setInOnlineLobby(true);
     setInLobby(false);
 
-    await networkManager.connect(code, 'p1', displayName.trim() || undefined);
+    await networkManager.connect(code, 'p1', displayName.trim() || undefined, settings);
     setOnlineRole('p1');
   };
 
@@ -1111,7 +1253,7 @@ export const App: React.FC = () => {
     setInOnlineLobby(true);
     setInLobby(false);
 
-    await networkManager.connect(code, 'server', displayName.trim() || undefined);
+    await networkManager.connect(code, 'server', displayName.trim() || undefined, settings);
     setOnlineRole('server');
   };
 
@@ -1201,6 +1343,9 @@ export const App: React.FC = () => {
           turnBased: parsed.settings!.turnBased ?? s.turnBased,
           raceTurns: parsed.settings!.raceTurns ?? s.raceTurns,
           tickRate: parsed.settings!.tickRate ?? s.tickRate,
+          thinkTimeSeconds: parsed.settings!.thinkTimeSeconds === undefined
+            ? s.thinkTimeSeconds
+            : parsed.settings!.thinkTimeSeconds,
         }));
       }
       setMatchHistory(parsed.states);
@@ -1304,6 +1449,7 @@ export const App: React.FC = () => {
                 gamepadCount={gamepadCount}
                 locks={replayActive ? undefined : locks}
                 thinkSessions={replayActive ? undefined : thinkSessions}
+                thinkTimeRemaining={replayActive ? undefined : thinkTimeRemaining}
                 moveBuffers={moveBuffers}
                 viewerSeat={viewerSeat}
               />

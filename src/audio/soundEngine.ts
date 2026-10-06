@@ -248,6 +248,32 @@ class SoundEngine {
     }
   }
 
+  // Quiet one-second pulse for the per-turn planning timer
+  public playThinkTimeTick(isFinal: boolean = false) {
+    if (!this.enabled) return;
+    this.initCtx();
+    if (!this.ctx) return;
+
+    try {
+      const osc = this.ctx.createOscillator();
+      const gain = this.ctx.createGain();
+      const now = this.ctx.currentTime;
+      osc.type = 'square';
+      osc.frequency.setValueAtTime(isFinal ? 660 : 440, now);
+
+      gain.gain.setValueAtTime(0.035, now);
+      gain.gain.exponentialRampToValueAtTime(0.001, now + 0.06);
+
+      osc.connect(gain);
+      gain.connect(this.ctx.destination);
+
+      osc.start(now);
+      osc.stop(now + 0.065);
+    } catch {
+      // Ignore audio context errors
+    }
+  }
+
   // Crisp retro menu cursor navigation blip
   public playMenuMove() {
     if (!this.enabled) return;

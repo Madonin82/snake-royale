@@ -11,6 +11,7 @@ interface HudProps {
   gamepadCount: number;
   locks?: { p1: boolean; p2: boolean };
   thinkSessions?: { p1: { startTime: number | null }; p2: { startTime: number | null } };
+  thinkTimeRemaining?: { p1: number | null; p2: number | null };
   viewerSeat?: 'p1' | 'p2' | null;
   moveBuffers?: { p1: Direction[]; p2: Direction[] };
 }
@@ -23,6 +24,7 @@ export const Hud: React.FC<HudProps> = ({
   gamepadCount,
   locks,
   thinkSessions,
+  thinkTimeRemaining,
   viewerSeat,
   moveBuffers,
 }) => {
@@ -150,6 +152,7 @@ export const Hud: React.FC<HudProps> = ({
     const lastTurn = gameState.lastTurnTimes ? (who === 'p1' ? gameState.lastTurnTimes.p1 : gameState.lastTurnTimes.p2) : null;
     const totalThink = gameState.totalThinkTime ? (who === 'p1' ? gameState.totalThinkTime.p1 : gameState.totalThinkTime.p2) : 0;
     const buffer = moveBuffers ? (who === 'p1' ? moveBuffers.p1 : moveBuffers.p2) : [];
+    const countdown = thinkTimeRemaining?.[who] ?? null;
 
     return (
       <div className="bg-[#9BBC0F] p-3 border-2 border-[#0F380F] flex flex-col h-full min-h-0 overflow-hidden shadow-[2px_2px_0px_#0F380F] w-full font-mono text-[#0F380F]">
@@ -171,8 +174,13 @@ export const Hud: React.FC<HudProps> = ({
 
           {gameState.turnBased && gameState.phase !== 'OVER' && (
             <div className="mb-3 p-2 bg-[#8BAC0F]/40 border border-[#0F380F] text-xs font-bold">
-              <div className={`truncate ${locked ? 'text-[#0F380F] opacity-100 font-extrabold' : 'opacity-70'}`}>
-                {thinkLabel(who)} {locked ? '🔒 (LOCKED)' : '✏️ (PLANNING)'}
+              <div className={`flex items-center justify-between gap-1 ${locked ? 'text-[#0F380F] opacity-100 font-extrabold' : 'opacity-70'}`}>
+                <span className="truncate">
+                  {thinkLabel(who)} {locked ? '🔒 (LOCKED)' : countdown === null ? '✏️ (PLANNING)' : ''}
+                </span>
+                {!locked && countdown !== null && (
+                  <span className="shrink-0 text-3xl leading-none font-black tabular-nums">{countdown}</span>
+                )}
               </div>
               {lastTurn !== null && (
                 <div className="text-[10px] opacity-80 mt-1.5 flex justify-between">
@@ -220,6 +228,7 @@ export const Hud: React.FC<HudProps> = ({
         const locked = isLocked(who);
         const buffer = moveBuffers ? (who === 'p1' ? moveBuffers.p1 : moveBuffers.p2) : [];
         const local = isLocalSeat(who);
+        const countdown = thinkTimeRemaining?.[who] ?? null;
         return (
           <div key={who} className="bg-[#9BBC0F] p-2 border-2 border-[#0F380F] flex flex-col justify-between shadow-[2px_2px_0px_#0F380F]">
             <div>
@@ -237,26 +246,36 @@ export const Hud: React.FC<HudProps> = ({
             </div>
             {gameState.turnBased && gameState.phase !== 'OVER' && (
               local ? (
-                <div className="mt-1 bg-[#8BAC0F]/40 border border-[#0F380F] p-1 flex items-center gap-1 text-[9px] font-bold overflow-x-auto">
-                  <span className="shrink-0">{locked ? '🔒' : ''} {buffer.length}/{snake.body.length}:</span>
-                  <div className="flex gap-0.5 items-center flex-wrap">
-                    {buffer.length === 0 ? (
-                      <span className="opacity-40 italic">Empty</span>
-                    ) : (
-                      buffer.map((dir, idx) => {
-                        const arrow = dir === 'UP' ? '↑' : dir === 'DOWN' ? '↓' : dir === 'LEFT' ? '←' : '→';
-                        return (
-                          <span key={idx} className="px-1 py-0.5 bg-[#0F380F] text-[#9BBC0F] text-[9px] font-bold border border-[#0F380F] leading-none">
-                            {arrow}
-                          </span>
-                        );
-                      })
+                <div className="mt-1 bg-[#8BAC0F]/40 border border-[#0F380F] p-1">
+                  <div className="flex items-center justify-between gap-1 text-[9px] font-bold">
+                    <span className="shrink-0">{locked ? '🔒' : ''} {buffer.length}/{snake.body.length}:</span>
+                    <div className="flex gap-0.5 items-center flex-wrap min-w-0">
+                      {buffer.length === 0 ? (
+                        <span className="opacity-40 italic">Empty</span>
+                      ) : (
+                        buffer.map((dir, idx) => {
+                          const arrow = dir === 'UP' ? '↑' : dir === 'DOWN' ? '↓' : dir === 'LEFT' ? '←' : '→';
+                          return (
+                            <span key={idx} className="px-1 py-0.5 bg-[#0F380F] text-[#9BBC0F] text-[9px] font-bold border border-[#0F380F] leading-none">
+                              {arrow}
+                            </span>
+                          );
+                        })
+                      )}
+                    </div>
+                    {!locked && countdown !== null && (
+                      <span className="shrink-0 text-2xl leading-none font-black tabular-nums">{countdown}</span>
                     )}
                   </div>
                 </div>
               ) : (
-                <div className={`text-[10px] mt-1 truncate ${locked ? 'opacity-100 font-bold' : 'opacity-60'}`}>
-                  {thinkLabel(who)} {locked ? '🔒' : `(${buffer.length})`}
+                <div className={`mt-1 flex items-center justify-between gap-1 ${locked ? 'opacity-100 font-bold' : 'opacity-60'}`}>
+                  <span className="text-[10px] truncate">
+                    {thinkLabel(who)} {locked ? '🔒' : countdown === null ? `(${buffer.length})` : ''}
+                  </span>
+                  {!locked && countdown !== null && (
+                    <span className="shrink-0 text-2xl leading-none font-black tabular-nums">{countdown}</span>
+                  )}
                 </div>
               )
             )}

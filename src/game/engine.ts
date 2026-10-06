@@ -12,6 +12,7 @@ export const DEFAULT_SETTINGS: GameSettings = {
   gridSize: 12,
   tickRate: 8,
   turnBased: true,
+  thinkTimeSeconds: null,
   raceTurns: 60,
   shrinkEveryTurns: 8,
   raceDurationSeconds: 180, // 3 minutes

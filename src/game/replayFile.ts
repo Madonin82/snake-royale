@@ -10,6 +10,7 @@ export interface ReplayFileObject {
     turnBased: boolean;
     raceTurns: number;
     tickRate: number;
+    thinkTimeSeconds?: number | null;
   };
   result: {
     winner: 'p1' | 'p2' | 'DRAW' | null;
@@ -36,6 +37,7 @@ export function createReplayDataObject(matchHistory: GameState[], settings: Game
       turnBased: settings.turnBased,
       raceTurns: settings.raceTurns,
       tickRate: settings.tickRate,
+      thinkTimeSeconds: settings.thinkTimeSeconds,
     },
     result: {
       winner,
@@ -74,7 +76,7 @@ export function exportReplayToFile(matchHistory: GameState[], settings: GameSett
   }
 }
 
-export function parseAndValidateReplayData(rawText: string): { states: GameState[]; settings?: { gridSize: number; turnBased: boolean; raceTurns: number; tickRate: number } } {
+export function parseAndValidateReplayData(rawText: string): { states: GameState[]; settings?: { gridSize: number; turnBased: boolean; raceTurns: number; tickRate: number; thinkTimeSeconds?: number | null } } {
   if (!rawText || rawText.length > 5 * 1024 * 1024) {
     throw new Error("That file isn't a Snake Royale replay");
   }

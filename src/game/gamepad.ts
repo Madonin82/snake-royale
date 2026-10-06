@@ -109,6 +109,25 @@ class GamepadController {
     return false;
   }
 
+  public rumble(slot: 1 | 2) {
+    if (typeof navigator === 'undefined' || !navigator.getGamepads) return;
+    const info = Array.from(this.activeGamepads.values()).find(gamepad => gamepad.slot === slot);
+    if (!info) return;
+    const gamepad = navigator.getGamepads()[info.index];
+    const actuator = gamepad?.vibrationActuator;
+    if (!actuator) return;
+
+    try {
+      actuator.playEffect('dual-rumble', {
+        duration: 80,
+        strongMagnitude: 0.18,
+        weakMagnitude: 0.12,
+      }).catch(() => {});
+    } catch {
+      // Haptics are optional and unsupported on some controllers.
+    }
+  }
+
   private startPolling() {
     if (!this.animFrameId && typeof window !== 'undefined') {
       this.poll();

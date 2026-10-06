@@ -23,6 +23,7 @@ export interface GameSettings {
   gridSize: number; // 8 (default), 12, 16
   tickRate: number; // 5 ticks/sec default (real-time mode only)
   turnBased: boolean; // true = simultaneous turns: snakes step only when both players lock a move
+  thinkTimeSeconds: number | null; // turn-based planning limit; null = infinite
   raceTurns: number; // turn-based: turns in Phase 1 before shrink starts
   shrinkEveryTurns: number; // turn-based: ring closes every N turns in Phase 2
   raceDurationSeconds: number; // 180s (3m)

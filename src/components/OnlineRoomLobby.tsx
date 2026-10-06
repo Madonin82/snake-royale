@@ -213,8 +213,8 @@ export const OnlineRoomLobby: React.FC<OnlineRoomLobbyProps> = ({
             <div>{settings.turnBased ? `TURNS (${settings.raceTurns})` : 'REAL-TIME'}</div>
           </div>
           <div className="bg-[#9BBC0F] border border-[#0F380F] py-1">
-            <div className="text-[8px] opacity-75 font-semibold">SPEED</div>
-            <div>{settings.tickRate} TPS</div>
+            <div className="text-[8px] opacity-75 font-semibold">{settings.turnBased ? 'THINK TIME' : 'SPEED'}</div>
+            <div>{settings.turnBased ? (settings.thinkTimeSeconds === null ? 'INFINITE' : `${settings.thinkTimeSeconds}s`) : `${settings.tickRate} TPS`}</div>
           </div>
         </div>
       </div>

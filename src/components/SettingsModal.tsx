@@ -23,12 +23,12 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
 }) => {
   const [focusIndex, setFocusIndex] = useState<number>(0);
 
-  type SettingsRow = 'STYLE' | 'TURNS' | 'GRID' | 'TICKS' | 'SOUND' | 'CRT' | 'CLOSE';
+  type SettingsRow = 'STYLE' | 'TURNS' | 'GRID' | 'TICKS' | 'THINK_TIME' | 'SOUND' | 'CRT' | 'CLOSE';
 
   const rows: SettingsRow[] = isOnlineGuest
     ? ['SOUND', 'CRT', 'CLOSE']
     : settings.turnBased
-    ? ['STYLE', 'TURNS', 'GRID', 'TICKS', 'SOUND', 'CRT', 'CLOSE']
+    ? ['STYLE', 'TURNS', 'GRID', 'THINK_TIME', 'SOUND', 'CRT', 'CLOSE']
     : ['STYLE', 'GRID', 'TICKS', 'SOUND', 'CRT', 'CLOSE'];
 
   const currentRow = rows[focusIndex] || rows[0];
@@ -85,6 +85,14 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
             }
             break;
           }
+          case 'THINK_TIME': {
+            if (!isOnlineGuest) {
+              const thinkTimeOpts = [null, 5, 10, 15] as const;
+              const index = thinkTimeOpts.findIndex(value => value === settings.thinkTimeSeconds);
+              onUpdateSettings({ thinkTimeSeconds: thinkTimeOpts[(index + 1) % thinkTimeOpts.length] });
+            }
+            break;
+          }
           case 'SOUND': {
             const next = !settings.soundEnabled;
             soundEngine.setEnabled(next);
@@ -138,6 +146,16 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
             }
             break;
           }
+          case 'THINK_TIME': {
+            if (!isOnlineGuest) {
+              const thinkTimeOpts = [null, 5, 10, 15] as const;
+              let idx = thinkTimeOpts.findIndex(value => value === settings.thinkTimeSeconds) + dir;
+              if (idx < 0) idx = thinkTimeOpts.length - 1;
+              if (idx >= thinkTimeOpts.length) idx = 0;
+              onUpdateSettings({ thinkTimeSeconds: thinkTimeOpts[idx] });
+            }
+            break;
+          }
           case 'SOUND': {
             const next = !settings.soundEnabled;
             soundEngine.setEnabled(next);
@@ -186,7 +204,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
           <div className="bg-[#0F380F] text-[#9BBC0F] p-2 border border-[#0F380F] text-[10px] font-bold text-center flex flex-col gap-0.5">
             <div className="font-black">👑 ADOPTED HOST MATCH RULES:</div>
             <div>
-              {settings.gridSize}×{settings.gridSize} Arena • {settings.turnBased ? `Turn-Based (${settings.raceTurns} Turns)` : 'Real-Time'} • {settings.tickRate} TPS
+              {settings.gridSize}×{settings.gridSize} Arena • {settings.turnBased ? `Turn-Based (${settings.raceTurns} Turns, Think Time: ${settings.thinkTimeSeconds === null ? 'Infinite' : `${settings.thinkTimeSeconds}s`})` : `Real-Time (${settings.tickRate} TPS)`}
             </div>
             <div className="text-[9px] opacity-80 mt-0.5 italic">
               (Host controls match gameplay rules; you can toggle personal audio/CRT below)
@@ -317,8 +335,8 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
             </div>
           )}
 
-          {/* Tick Rate Speed */}
-          {!isOnlineGuest && (
+          {/* Tick Rate Speed (real-time only) */}
+          {!isOnlineGuest && !settings.turnBased && (
             <div
               className={`flex flex-col gap-1 p-1.5 border transition-all ${
                 currentRow === 'TICKS'
@@ -349,6 +367,49 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                     }`}
                   >
                     {tps} tps
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* Per-turn planning limit */}
+          {!isOnlineGuest && settings.turnBased && (
+            <div
+              className={`flex flex-col gap-1 p-1.5 border transition-all ${
+                currentRow === 'THINK_TIME'
+                  ? 'bg-[#8BAC0F] border-[#0F380F] ring-2 ring-[#0F380F]'
+                  : 'border-transparent'
+              }`}
+              onClick={() => setFocusIndex(rows.indexOf('THINK_TIME'))}
+            >
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-1 opacity-90">
+                  {currentRow === 'THINK_TIME' && <span className="animate-pulse">►</span>}
+                  <Gauge className="w-3.5 h-3.5" />
+                  <span>THINK TIME:</span>
+                </div>
+                {currentRow === 'THINK_TIME' && (
+                  <span className="text-[9px] bg-[#0F380F] text-[#9BBC0F] px-1 font-bold">[◄ ►] CYCLE</span>
+                )}
+              </div>
+              <div className="grid grid-cols-4 gap-1">
+                {([
+                  { value: null, label: 'Infinite' },
+                  { value: 5, label: '5s' },
+                  { value: 10, label: '10s' },
+                  { value: 15, label: '15s' },
+                ] as const).map((option) => (
+                  <button
+                    key={option.label}
+                    onClick={() => onUpdateSettings({ thinkTimeSeconds: option.value })}
+                    className={`py-1 border border-[#0F380F] font-black cursor-pointer ${
+                      settings.thinkTimeSeconds === option.value
+                        ? 'bg-[#0F380F] text-[#9BBC0F]'
+                        : 'bg-[#8BAC0F] hover:bg-[#9BBC0F]'
+                    }`}
+                  >
+                    {option.label}
                   </button>
                 ))}
               </div>
