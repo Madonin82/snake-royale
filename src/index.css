@@ -144,6 +144,42 @@
   }
 }
 
+@media (max-width: 767px) and (orientation: portrait) {
+  .match-grid-container {
+    gap: 0.25rem;
+  }
+  .top-strip-area {
+    max-width: none;
+    gap: 0;
+  }
+  .top-strip-content,
+  .turn-instruction,
+  .mobile-cards-area,
+  .legacy-mobile-controls {
+    display: none !important;
+  }
+  .portrait-hud,
+  .portrait-opponents,
+  .portrait-controls-row {
+    display: flex !important;
+  }
+  .portrait-opponents {
+    flex-shrink: 0;
+  }
+  .gameboard-area {
+    flex: 1 1 0;
+    margin-top: 0;
+    margin-bottom: 0;
+  }
+  .controls-area {
+    flex-shrink: 0;
+    max-width: none;
+  }
+  .match-board canvas {
+    touch-action: none;
+  }
+}
+
 /* Board sized by the SMALLER of available width/height — stays square and
    never overflows. The .gameboard-area is container-type: size, so cqw/cqh
    resolve against it. */
@@ -160,4 +196,3 @@
     height: min(100cqw, 100cqh);
   }
 }
-

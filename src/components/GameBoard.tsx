@@ -1,4 +1,4 @@
-import React, { useEffect, useRef } from 'react';
+import React, { PointerEvent as ReactPointerEvent, useEffect, useRef } from 'react';
 import { Direction, GameSettings, GameState, Position, Snake } from '../types/game';
 import { GAMEBOY_COLORS } from '../game/engine';
 
@@ -6,10 +6,16 @@ interface GameBoardProps {
   gameState: GameState;
   settings: GameSettings;
   lockedPaths?: { p1?: Position[]; p2?: Position[] };
+  controlSeat: 'p1' | 'p2';
+  onDirection: (direction: Direction) => void;
+  interactionEnabled: boolean;
 }
 
-export const GameBoard: React.FC<GameBoardProps> = ({ gameState, settings, lockedPaths }) => {
+export const GameBoard: React.FC<GameBoardProps> = ({
+  gameState, settings, lockedPaths, controlSeat, onDirection, interactionEnabled,
+}) => {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
+  const pointerStartRef = useRef<{ id: number; x: number; y: number } | null>(null);
 
   useEffect(() => {
     const canvas = canvasRef.current;
@@ -110,16 +116,77 @@ export const GameBoard: React.FC<GameBoardProps> = ({ gameState, settings, locke
 
   }, [gameState, settings, lockedPaths]);
 
+  const handlePointerDown = (event: ReactPointerEvent<HTMLCanvasElement>) => {
+    if (!interactionEnabled || event.pointerType !== 'touch' ||
+      !window.matchMedia('(max-width: 767px) and (orientation: portrait)').matches) return;
+    pointerStartRef.current = { id: event.pointerId, x: event.clientX, y: event.clientY };
+    event.currentTarget.setPointerCapture(event.pointerId);
+  };
+
+  const handlePointerUp = (event: ReactPointerEvent<HTMLCanvasElement>) => {
+    const start = pointerStartRef.current;
+    pointerStartRef.current = null;
+    if (!interactionEnabled || !start || start.id !== event.pointerId) return;
+
+    const deltaX = event.clientX - start.x;
+    const deltaY = event.clientY - start.y;
+    if (Math.hypot(deltaX, deltaY) > 12) {
+      const direction: Direction = Math.abs(deltaX) > Math.abs(deltaY)
+        ? deltaX < 0 ? 'LEFT' : 'RIGHT'
+        : deltaY < 0 ? 'UP' : 'DOWN';
+      onDirection(direction);
+      return;
+    }
+
+    const canvas = canvasRef.current;
+    const rect = canvas?.getBoundingClientRect();
+    const snake = gameState.snakes[controlSeat];
+    const head = snake.body[0];
+    if (!canvas || !rect || !head) return;
+    const contentLeft = rect.left + canvas.clientLeft;
+    const contentTop = rect.top + canvas.clientTop;
+    const contentRight = contentLeft + canvas.clientWidth;
+    const contentBottom = contentTop + canvas.clientHeight;
+    if (event.clientX < contentLeft || event.clientX > contentRight ||
+      event.clientY < contentTop || event.clientY > contentBottom) return;
+
+    const cellSize = 32;
+    const x = ((event.clientX - contentLeft) / canvas.clientWidth) * canvas.width;
+    const y = ((event.clientY - contentTop) / canvas.clientHeight) * canvas.height;
+    const left = head.x * cellSize;
+    const right = left + cellSize;
+    const top = head.y * cellSize;
+    const bottom = top + cellSize;
+    if (x >= left && x < right && y >= top && y < bottom) return;
+
+    const horizontalDistance = x < left ? left - x : x >= right ? x - right : -1;
+    const verticalDistance = y < top ? top - y : y >= bottom ? y - bottom : -1;
+    const direction: Direction = horizontalDistance > verticalDistance
+      ? x < left ? 'LEFT' : 'RIGHT'
+      : y < top ? 'UP' : 'DOWN';
+    if (!isReverseDirection(snake.direction, direction)) onDirection(direction);
+  };
+
   return (
     <div className="match-board relative flex flex-col items-center justify-center p-2 bg-[#9BBC0F] border-4 border-[#0F380F] shadow-[inset_0_0_12px_rgba(15,56,15,0.4)]">
       <canvas
         ref={canvasRef}
         className="w-full h-full max-w-full aspect-square block pixelated border-2 border-[#306230]"
         style={{ imageRendering: 'pixelated' }}
+        onPointerDown={handlePointerDown}
+        onPointerUp={handlePointerUp}
+        onPointerCancel={() => { pointerStartRef.current = null; }}
       />
     </div>
   );
 };
+
+function isReverseDirection(current: Direction, next: Direction): boolean {
+  return (current === 'UP' && next === 'DOWN') ||
+    (current === 'DOWN' && next === 'UP') ||
+    (current === 'LEFT' && next === 'RIGHT') ||
+    (current === 'RIGHT' && next === 'LEFT');
+}
 
 // Helper: Render Snake Body & Head
 function renderSnake(
