@@ -86,9 +86,11 @@ export const Hud: React.FC<HudProps> = ({
   const minutes = Math.floor(totalSeconds / 60);
   const seconds = totalSeconds % 60;
   const formattedTime = `${minutes}:${seconds < 10 ? '0' : ''}${seconds}`;
+  const portraitTimerSeat = viewerSeat ?? 'p1';
+  const portraitCountdown = thinkTimeRemaining?.[portraitTimerSeat] ?? null;
 
   const topStripContent = (
-    <div className="flex items-center justify-between gap-2 bg-[#8BAC0F] px-3 py-1.5 border-2 border-[#0F380F] text-xs font-bold tracking-wider w-full shadow-[2px_2px_0px_#0F380F]">
+    <div className="top-strip-content flex items-center justify-between gap-2 bg-[#8BAC0F] px-3 py-1.5 border-2 border-[#0F380F] text-xs font-bold tracking-wider w-full shadow-[2px_2px_0px_#0F380F]">
       <div className="flex items-center gap-1.5 flex-wrap min-w-0">
         <span
           className={`whitespace-nowrap px-1.5 py-0.5 border border-[#0F380F] text-[10px] ${
@@ -288,12 +290,36 @@ export const Hud: React.FC<HudProps> = ({
   return (
     <>
       <div className="top-strip-area w-full flex flex-col items-center">
+        <div className="portrait-hud hidden w-full items-center justify-between gap-2 bg-[#8BAC0F] px-2 py-1 border-2 border-[#0F380F] font-mono text-[#0F380F]">
+          <span className="min-w-0 truncate text-[10px] font-black tracking-tight">
+            {gameState.phase === 'RACING' ? 'RACE' : gameState.phase === 'SHRINKING' ? 'SHRINK' : 'OVER'}
+          </span>
+          <span className="shrink-0 text-[10px] font-bold">TURN {gameState.tick}</span>
+          <span className="shrink-0 min-w-[2.5rem] text-right text-3xl leading-none font-black tabular-nums">
+            {gameState.turnBased ? portraitCountdown ?? '∞' : formattedTime}
+          </span>
+        </div>
         {topStripContent}
         {gameState.turnBased && gameState.phase !== 'OVER' && (
-          <div className="md:hidden text-center text-[10px] font-bold bg-[#8BAC0F] px-2 py-0.5 border-x-2 border-b-2 border-[#0F380F] w-full">
+          <div className="turn-instruction md:hidden text-center text-[10px] font-bold bg-[#8BAC0F] px-2 py-0.5 border-x-2 border-b-2 border-[#0F380F] w-full">
             BOTH LOCK → BOARD STEPS
           </div>
         )}
+      </div>
+
+      <div className="portrait-opponents hidden w-full items-center gap-1 border-2 border-[#0F380F] bg-[#9BBC0F] px-1 py-0.5 font-mono text-[10px] font-bold text-[#0F380F]">
+        {(['p1', 'p2'] as const).map((who) => {
+          const snake = who === 'p1' ? p1 : p2;
+          return (
+            <div key={who} className="flex min-w-0 flex-1 items-center gap-1">
+              <span className={`h-2 w-2 shrink-0 border border-[#0F380F] ${who === 'p1' ? 'bg-[#0F380F]' : 'bg-[#306230]'}`} />
+              <span className="min-w-0 flex-1 truncate">{snake.name}</span>
+              <span className="shrink-0">{snake.score}</span>
+              <span className="shrink-0 opacity-80">L{snake.body.length}</span>
+              <span className="shrink-0">{isLocked(who) ? 'LOCK' : 'PLAN'}</span>
+            </div>
+          );
+        })}
       </div>
 
       <div className="desktop-panel-left">

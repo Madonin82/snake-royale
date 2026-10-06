@@ -7,11 +7,18 @@ interface ControlsOverlayProps {
   onLock: () => void;
   onUndo: () => void;
   onClear: () => void;
+  queue: Direction[];
+  queueLimit: number;
+  locked: boolean;
+  turnBased: boolean;
 }
 
-export const ControlsOverlay: React.FC<ControlsOverlayProps> = ({ onDirection, onLock, onUndo, onClear }) => {
+export const ControlsOverlay: React.FC<ControlsOverlayProps> = ({
+  onDirection, onLock, onUndo, onClear, queue, queueLimit, locked, turnBased,
+}) => {
   return (
-    <div className="w-full max-w-[340px] sm:hidden flex flex-col items-center py-2 select-none">
+    <>
+    <div className="legacy-mobile-controls w-full max-w-[340px] sm:hidden flex flex-col items-center py-2 select-none">
       <div className="flex items-center justify-center gap-4">
         <div className="relative w-36 h-36 bg-[#8BAC0F] border-2 border-[#0F380F] p-1 shadow-[2px_2px_0px_#0F380F] shrink-0">
         {/* Center pivot */}
@@ -78,5 +85,36 @@ export const ControlsOverlay: React.FC<ControlsOverlayProps> = ({ onDirection, o
         Plan: D-pad queue • B undo • Y clear • A lock
       </div>
     </div>
+    <div className="portrait-controls-row hidden items-center gap-1.5 w-full font-mono select-none">
+      <button
+        type="button"
+        onClick={onUndo}
+        disabled={!turnBased || locked || queue.length === 0}
+        className="shrink-0 border-2 border-[#0F380F] bg-[#306230] px-2 py-2 text-[11px] font-black text-[#9BBC0F] disabled:opacity-40"
+      >
+        UNDO
+      </button>
+      <div className="flex min-w-0 flex-1 items-center gap-1 overflow-x-auto border-2 border-dashed border-[#0F380F] bg-[#8BAC0F] px-1.5 py-1.5 text-[10px] font-bold text-[#0F380F]">
+        <span className="shrink-0">QUEUE {queue.length}/{queueLimit}</span>
+        <span className="flex min-w-0 gap-0.5">
+          {queue.map((direction, index) => (
+            <span key={`${direction}-${index}`} className="shrink-0 bg-[#0F380F] px-1 text-[#9BBC0F]">
+              {direction === 'UP' ? '↑' : direction === 'DOWN' ? '↓' : direction === 'LEFT' ? '←' : '→'}
+            </span>
+          ))}
+          {queue.length === 0 && <span className="opacity-60">—</span>}
+        </span>
+        {locked && <span className="shrink-0">LOCKED</span>}
+      </div>
+      <button
+        type="button"
+        onClick={onLock}
+        disabled={!turnBased || locked || queue.length === 0}
+        className="shrink-0 border-2 border-[#0F380F] bg-[#0F380F] px-3 py-2 text-[11px] font-black text-[#9BBC0F] disabled:opacity-40"
+      >
+        LOCK
+      </button>
+    </div>
+    </>
   );
 };

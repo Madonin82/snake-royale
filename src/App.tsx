@@ -1454,7 +1454,14 @@ export const App: React.FC = () => {
                 viewerSeat={viewerSeat}
               />
               <div className="gameboard-area my-1">
-                <GameBoard gameState={displayState} settings={settings} lockedPaths={lockedPaths} />
+                <GameBoard
+                  gameState={displayState}
+                  settings={settings}
+                  lockedPaths={lockedPaths}
+                  controlSeat={playMode === 'ONLINE_JOIN' && onlineRole === 'p2' ? 'p2' : 'p1'}
+                  onDirection={(dir) => handleDirectionInput(1, dir)}
+                  interactionEnabled={!replayActive}
+                />
                 {!replayActive && (playMode === 'ONLINE_HOST' || playMode === 'ONLINE_JOIN' || playMode === 'ONLINE_SERVER') && !(displayState.readyConfirmed?.p1 && displayState.readyConfirmed?.p2) && (
                   <div className="absolute inset-0 bg-[#0F380F]/90 backdrop-blur-xs flex flex-col items-center justify-center p-3 z-20 font-mono text-[#9BBC0F]">
                     <div className="bg-[#9BBC0F] border-4 border-[#0F380F] shadow-[6px_6px_0px_#0F380F] p-3 sm:p-4 max-w-[340px] w-full text-center flex flex-col gap-2.5">
@@ -1500,6 +1507,13 @@ export const App: React.FC = () => {
                     onLock={() => handleBufferLock(1)}
                     onUndo={() => handleBufferUndo(1)}
                     onClear={() => handleBufferClear(1)}
+                    queue={settings.turnBased
+                      ? moveBuffers[getTargetKey(1)]
+                      : [gameState.snakes[getTargetKey(1)].queuedDirection]
+                        .filter((direction): direction is Direction => direction !== null)}
+                    queueLimit={gameState.snakes[getTargetKey(1)].body.length}
+                    locked={locks[getTargetKey(1)]}
+                    turnBased={settings.turnBased}
                   />
                 )}
                 {replayActive && (
