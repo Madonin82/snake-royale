@@ -42,7 +42,7 @@ A tiny competitive Snake game for two players: race for tokens on a small board,
 | Server (DM) | HOST AS SERVER | Runs the simulation, plays nobody |
 | Spectator | WATCH A MATCH + code | Watches live; counted in the lobby |
 
-The simulation authority (host or server) publishes game state to `rooms/{roomId}/state/current`; each player writes only their own input doc; spectators register a small presence doc under `rooms/{roomId}/spectators/`. Anonymous Firebase Auth gives every client a UID — no sign-up.
+The simulation authority (host or server) publishes match-tagged, revisioned snapshots to `rooms/{roomId}/state/current`. State and input messages use both WebRTC (when available) and Firebase RTDB fallback; clients deduplicate them by match and sequence so delayed packets from an earlier match cannot roll the board back. Online real-time simulation waits for both players to confirm readiness. Each player writes only their own input doc; spectators register a small presence doc under `rooms/{roomId}/spectators/`. Anonymous Firebase Auth gives every client a UID — no sign-up.
 
 ## Run it locally
 

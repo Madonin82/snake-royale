@@ -20,13 +20,13 @@ export const db = getFirestore(app);
 export const rtdb = getDatabase(app);
 
 // Initialize anonymous auth session
-export async function initAuth(): Promise<string | null> {
+export async function initAuth(): Promise<string> {
   try {
     if (auth.currentUser) return auth.currentUser.uid;
     const cred = await signInAnonymously(auth);
     return cred.user.uid;
   } catch (err) {
-    console.warn('Firebase anonymous auth warning:', err);
-    return null;
+    const message = err instanceof Error ? err.message : String(err);
+    throw new Error(`Firebase anonymous authentication failed: ${message}`);
   }
 }

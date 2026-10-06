@@ -11,6 +11,7 @@ import {
 import { calculateAIMove } from './game/ai';
 import { gamepadController, GamepadMenuAction } from './game/gamepad';
 import { networkManager } from './game/network';
+import { canAcceptState, canAdoptMatch, isCurrentMatch, isNewerSequence, MatchIdentity } from './game/networkProtocol';
 import { normalizeGameState } from './game/normalize';
 import { exportReplayToFile, parseAndValidateReplayData } from './game/replayFile';
 import { soundEngine } from './audio/soundEngine';
@@ -122,6 +123,10 @@ export const App: React.FC = () => {
   const thinkTimeEndsRef = useRef<{ p1: number | null; p2: number | null }>({ p1: null, p2: null });
   const lastThinkTimeTickRef = useRef<{ p1: number | null; p2: number | null }>({ p1: null, p2: null });
   const sentTickRef = useRef<number>(-1);
+  const activeMatchRef = useRef<MatchIdentity | null>(null);
+  const lastStateRevisionRef = useRef<number>(-1);
+  const lastInputSequenceRef = useRef<{ p1: number; p2: number }>({ p1: 0, p2: 0 });
+  const startNewMatchRef = useRef<() => void>(() => {});
   // BUGFIX 7: tracks the last STATE_SYNC tick processed on the guest so the
   // buffer drain runs exactly once per completed step. Duplicate, stale, or
   // re-delivered states must never consume buffered moves.
@@ -874,7 +879,40 @@ export const App: React.FC = () => {
           setHasP1(msg.hasP1);
           setHasP2(msg.hasP2);
           setSpectatorsCount(msg.spectatorsCount || 0);
+          if (typeof msg.matchId === 'string' && Number.isSafeInteger(msg.matchNumber)) {
+            activeMatchRef.current = { matchId: msg.matchId, matchNumber: msg.matchNumber };
+          } else {
+            activeMatchRef.current = null;
+          }
+          lastStateRevisionRef.current = -1;
+          lastStateTickRef.current = -1;
+          sentTickRef.current = -1;
+          lastInputSequenceRef.current = { p1: 0, p2: 0 };
+          clearLocks();
+          setMatchHistory([]);
+          setReplayActive(false);
+          setReplayIdx(0);
+          setReplayPlaying(false);
           if (msg.settings) adoptRoomSettings(msg.settings);
+          break;
+        }
+
+        case 'MATCH_START': {
+          if (typeof msg.matchId !== 'string' || !Number.isSafeInteger(msg.matchNumber)) break;
+          const incomingMatch = { matchId: msg.matchId, matchNumber: msg.matchNumber };
+          if (!canAdoptMatch(activeMatchRef.current, incomingMatch)) break;
+          if (!isCurrentMatch(activeMatchRef.current, incomingMatch)) {
+            activeMatchRef.current = incomingMatch;
+            lastStateRevisionRef.current = -1;
+            lastStateTickRef.current = -1;
+            sentTickRef.current = -1;
+            lastInputSequenceRef.current = { p1: 0, p2: 0 };
+            clearLocks();
+            setMatchHistory([]);
+            setReplayActive(false);
+            setReplayIdx(0);
+            setReplayPlaying(false);
+          }
           break;
         }
 
@@ -900,75 +938,71 @@ export const App: React.FC = () => {
 
         case 'STATE_SYNC': {
           if ((playModeRef.current === 'ONLINE_JOIN' || playModeRef.current === 'ONLINE_SPECTATOR') && msg.state) {
+            const incomingMatch = { matchId: msg.matchId, matchNumber: msg.matchNumber };
+            if (
+              typeof msg.matchId !== 'string' ||
+              !Number.isSafeInteger(msg.matchNumber) ||
+              !canAcceptState(activeMatchRef.current, lastStateRevisionRef.current, incomingMatch, msg.stateRevision)
+            ) break;
+
             // Wire states (RTDB / WebRTC) can arrive with array fields
             // dropped or object-shaped; normalize before anything reads them.
             const safeState = normalizeGameState(msg.state);
+            if (safeState.tick < lastStateTickRef.current) break;
 
-            // BUGFIX 7: STATE_SYNC can fire multiple times per step — RTDB
-            // listeners re-fire on unrelated room writes, both transports can
-            // deliver, and lag reorders arrivals. Key the guest buffer drain
-            // (and board updates) on the state tick so each completed step is
-            // processed exactly once.
             const isNewTick = safeState.tick > lastStateTickRef.current;
-            const isStaleTick = safeState.tick < lastStateTickRef.current;
-            if (isNewTick) {
-              lastStateTickRef.current = safeState.tick;
+            lastStateRevisionRef.current = msg.stateRevision;
+            lastStateTickRef.current = safeState.tick;
+
+            setGameState(safeState);
+            setMatchHistory(prev => {
+              if (prev.length === 0 || safeState.tick > prev[prev.length - 1].tick) {
+                return [...prev, safeState];
+              }
+              if (safeState.tick === prev[prev.length - 1].tick) {
+                return [...prev.slice(0, -1), safeState];
+              }
+              return prev;
+            });
+
+            if (msg.locks) {
+              const myRole = onlineRoleRef.current;
+              setLocks(prevLocks => ({
+                p1: myRole === 'p1' ? (moveBuffersRef.current.p1.length > 0 ? prevLocks.p1 : msg.locks.p1) : msg.locks.p1,
+                p2: myRole === 'p2' ? (moveBuffersRef.current.p2.length > 0 ? prevLocks.p2 : msg.locks.p2) : msg.locks.p2,
+              }));
+              locksRef.current = {
+                p1: myRole === 'p1' ? (moveBuffersRef.current.p1.length > 0 ? locksRef.current.p1 : msg.locks.p1) : msg.locks.p1,
+                p2: myRole === 'p2' ? (moveBuffersRef.current.p2.length > 0 ? locksRef.current.p2 : msg.locks.p2) : msg.locks.p2,
+              };
             }
 
-            // Stale states are ignored for game purposes (no board snap-back,
-            // no buffer drain, no lock updates). Equal-tick states may still
-            // refresh display metadata (locks) but never touch board/buffer.
-            if (!isStaleTick) {
-              if (isNewTick) {
-                setGameState(safeState);
-                setMatchHistory(prev =>
-                  prev.length === 0 || safeState.tick > prev[prev.length - 1].tick
-                    ? [...prev, safeState]
-                    : prev
-                );
-              }
+            if (isNewTick && settingsRef.current.turnBased && playModeRef.current === 'ONLINE_JOIN' && onlineRoleRef.current) {
+              const myRole = onlineRoleRef.current === 'p1' ? 'p1' : onlineRoleRef.current === 'p2' ? 'p2' : null;
+              if (myRole) {
+                const buf = [...moveBuffersRef.current[myRole]];
+                if (buf.length > 0) {
+                  buf.shift();
+                  moveBuffersRef.current = { ...moveBuffersRef.current, [myRole]: buf };
+                  setMoveBuffers({ ...moveBuffersRef.current });
 
-              if (msg.locks) {
-                const myRole = onlineRoleRef.current;
-                setLocks(prevLocks => ({
-                  p1: myRole === 'p1' ? (moveBuffersRef.current.p1.length > 0 ? prevLocks.p1 : msg.locks.p1) : msg.locks.p1,
-                  p2: myRole === 'p2' ? (moveBuffersRef.current.p2.length > 0 ? prevLocks.p2 : msg.locks.p2) : msg.locks.p2,
-                }));
-                locksRef.current = {
-                  p1: myRole === 'p1' ? (moveBuffersRef.current.p1.length > 0 ? locksRef.current.p1 : msg.locks.p1) : msg.locks.p1,
-                  p2: myRole === 'p2' ? (moveBuffersRef.current.p2.length > 0 ? locksRef.current.p2 : msg.locks.p2) : msg.locks.p2,
-                };
-              }
-
-              if (isNewTick && settingsRef.current.turnBased && playModeRef.current === 'ONLINE_JOIN' && onlineRoleRef.current) {
-                const myRole = onlineRoleRef.current === 'p1' ? 'p1' : onlineRoleRef.current === 'p2' ? 'p2' : null;
-                if (myRole) {
-                  const buf = [...moveBuffersRef.current[myRole]];
                   if (buf.length > 0) {
-                    buf.shift();
-                    moveBuffersRef.current = { ...moveBuffersRef.current, [myRole]: buf };
-                    setMoveBuffers({ ...moveBuffersRef.current });
-
-                    if (buf.length > 0) {
-                      if (sentTickRef.current !== safeState.tick) {
-                        sentTickRef.current = safeState.tick;
-                        networkManager.sendInput(buf[0], safeState.tick);
-                      }
+                    if (sentTickRef.current !== safeState.tick) {
+                      sentTickRef.current = safeState.tick;
+                      networkManager.sendInput(buf[0], safeState.tick);
                     }
                   }
-                  if (moveBuffersRef.current[myRole].length === 0) {
-                    locksRef.current = { ...locksRef.current, [myRole]: false };
-                    setLocks({ ...locksRef.current });
-                  }
+                }
+                if (moveBuffersRef.current[myRole].length === 0) {
+                  locksRef.current = { ...locksRef.current, [myRole]: false };
+                  setLocks({ ...locksRef.current });
                 }
               }
+            }
 
-              if (settingsRef.current.turnBased && playModeRef.current === 'ONLINE_SPECTATOR') {
-                if (msg.locks) {
-                  setLocks(msg.locks);
-                  locksRef.current = msg.locks;
-                }
-              }
+            if (settingsRef.current.turnBased && playModeRef.current === 'ONLINE_SPECTATOR' && msg.locks) {
+              setLocks(msg.locks);
+              locksRef.current = msg.locks;
             }
 
             if (inOnlineLobby) {
@@ -980,6 +1014,16 @@ export const App: React.FC = () => {
         }
 
         case 'INPUT_SYNC': {
+          if (msg.role !== 'p1' && msg.role !== 'p2') break;
+          const inputRole: 'p1' | 'p2' = msg.role;
+          if (
+            typeof msg.matchId !== 'string' ||
+            !Number.isSafeInteger(msg.matchNumber) ||
+            !isCurrentMatch(activeMatchRef.current, { matchId: msg.matchId, matchNumber: msg.matchNumber }) ||
+            !isNewerSequence(msg.inputSequence, lastInputSequenceRef.current[inputRole])
+          ) break;
+          lastInputSequenceRef.current = { ...lastInputSequenceRef.current, [inputRole]: msg.inputSequence };
+
           const isAuthority =
             (playModeRef.current === 'ONLINE_HOST' && msg.role === 'p2') ||
             (playModeRef.current === 'ONLINE_SERVER' && (msg.role === 'p1' || msg.role === 'p2'));
@@ -1036,13 +1080,11 @@ export const App: React.FC = () => {
         }
 
         case 'RESTART_MATCH': {
-          if (playModeRef.current === 'ONLINE_SPECTATOR') {
-            setMatchHistory([]);
-            setReplayActive(false);
-            setReplayIdx(0);
-            setReplayPlaying(false);
-          } else {
-            startNewMatch();
+          const isAuthority =
+            playModeRef.current === 'ONLINE_HOST' ||
+            playModeRef.current === 'ONLINE_SERVER';
+          if (isAuthority && msg.sender !== onlineRoleRef.current) {
+            startNewMatchRef.current();
           }
           break;
         }
@@ -1116,6 +1158,9 @@ export const App: React.FC = () => {
     const intervalId = setInterval(() => {
       const current = stateRef.current;
       if (current.phase === 'OVER') return;
+      const isOnlineAuthority =
+        playModeRef.current === 'ONLINE_HOST' || playModeRef.current === 'ONLINE_SERVER';
+      if (isOnlineAuthority && (!current.readyConfirmed?.p1 || !current.readyConfirmed?.p2)) return;
 
       if (playModeRef.current === 'SOLO_AI') {
         const aiDir = calculateAIMove(
@@ -1200,7 +1245,7 @@ export const App: React.FC = () => {
         : { p1: playerNamesRef.current.p1 || 'PLAYER 1', p2: me || 'PLAYER 2' };
     }
     const isOnline = playMode === 'ONLINE_HOST' || playMode === 'ONLINE_JOIN' || playMode === 'ONLINE_SERVER';
-    const initial = createInitialState(settings, matchNames);
+    const initial = createInitialState(settingsRef.current, matchNames);
     if (isOnline) {
       initial.readyConfirmed = { p1: false, p2: false };
     } else {
@@ -1215,15 +1260,20 @@ export const App: React.FC = () => {
     clearLocks();
     sentTickRef.current = -1;
     lastStateTickRef.current = -1;
+    lastStateRevisionRef.current = -1;
+    lastInputSequenceRef.current = { p1: 0, p2: 0 };
     setInLobby(false);
     setInOnlineLobby(false);
 
     soundEngine.playCountdown(true);
 
     if (playMode === 'ONLINE_HOST' || playMode === 'ONLINE_SERVER') {
-      networkManager.broadcastMatchStart(initial, settingsRef.current);
+      activeMatchRef.current = networkManager.broadcastMatchStart(initial, settingsRef.current);
+    } else {
+      activeMatchRef.current = null;
     }
   };
+  startNewMatchRef.current = startNewMatch;
 
   const handleStartSolo = (diff: 'EASY' | 'MEDIUM' | 'HARD') => {
     setSettings(prev => ({ ...prev, botDifficulty: diff }));
@@ -1237,24 +1287,42 @@ export const App: React.FC = () => {
   };
 
   const handleCreateOnlineRoom = async () => {
+    setJoinError(null);
     const code = Math.random().toString(36).substring(2, 6).toUpperCase();
     setOnlineRoomId(code);
     setPlayMode('ONLINE_HOST');
     setInOnlineLobby(true);
     setInLobby(false);
 
-    await networkManager.connect(code, 'p1', displayName.trim() || undefined, settings);
+    const ok = await networkManager.connect(code, 'p1', displayName.trim() || undefined, settings);
+    if (!ok) {
+      const error = networkManager.getLastConnectionError();
+      networkManager.disconnect();
+      setJoinError(error ? `Online room connection failed: ${error}` : "Couldn't create online room.");
+      setInOnlineLobby(false);
+      setInLobby(true);
+      return;
+    }
     setOnlineRole('p1');
   };
 
   const handleCreateServerRoom = async () => {
+    setJoinError(null);
     const code = Math.random().toString(36).substring(2, 6).toUpperCase();
     setOnlineRoomId(code);
     setPlayMode('ONLINE_SERVER');
     setInOnlineLobby(true);
     setInLobby(false);
 
-    await networkManager.connect(code, 'server', displayName.trim() || undefined, settings);
+    const ok = await networkManager.connect(code, 'server', displayName.trim() || undefined, settings);
+    if (!ok) {
+      const error = networkManager.getLastConnectionError();
+      networkManager.disconnect();
+      setJoinError(error ? `Server room connection failed: ${error}` : "Couldn't create server room.");
+      setInOnlineLobby(false);
+      setInLobby(true);
+      return;
+    }
     setOnlineRole('server');
   };
 
@@ -1265,16 +1333,19 @@ export const App: React.FC = () => {
     setPlayMode('ONLINE_JOIN');
     setInOnlineLobby(true);
     setInLobby(false);
-    // BUGFIX 7: fresh tick tracking for the incoming state stream.
+    activeMatchRef.current = null;
+    lastStateRevisionRef.current = -1;
     lastStateTickRef.current = -1;
+    lastInputSequenceRef.current = { p1: 0, p2: 0 };
 
     // BUGFIX 8: honor connect()'s result. A failed connect must not leave a
     // silent stuck lobby — show an error and return to the join form.
     const ok = await networkManager.connect(roomCode, undefined, displayName.trim() || undefined);
     const assigned = networkManager.getRole();
     if (!ok || !assigned) {
+      const error = networkManager.getLastConnectionError();
       networkManager.disconnect();
-      setJoinError("Couldn't join room — check the code");
+      setJoinError(error ? `Room connection failed: ${error}` : "Couldn't join room — check the code");
       setInOnlineLobby(false);
       setInLobby(true);
       return;
@@ -1307,6 +1378,12 @@ export const App: React.FC = () => {
     const ok = await networkManager.connect(roomCode, 'spectator', displayName.trim() || undefined);
     if (ok) {
       setOnlineRole('spectator');
+    } else {
+      const error = networkManager.getLastConnectionError();
+      networkManager.disconnect();
+      setJoinError(error ? `Spectator connection failed: ${error}` : "Couldn't watch that room — check the code");
+      setInOnlineLobby(false);
+      setInLobby(true);
     }
   };
 
@@ -1317,8 +1394,10 @@ export const App: React.FC = () => {
   };
 
   const handleRematch = () => {
-    if (playMode === 'ONLINE_HOST' || playMode === 'ONLINE_JOIN' || playMode === 'ONLINE_SERVER') {
+    if (playMode === 'ONLINE_SPECTATOR') return;
+    if (playMode === 'ONLINE_JOIN') {
       networkManager.requestRematch();
+      return;
     }
     startNewMatch();
   };

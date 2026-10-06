@@ -1,5 +1,6 @@
 import { Direction, GameState, LatencyReport, LatencySample } from '../types/game';
 import { rtdb, initAuth } from '../firebase';
+import { canAcceptState, canAdoptMatch, isCurrentMatch, isNewerSequence, MatchIdentity } from './networkProtocol';
 import {
   ref,
   set,
@@ -7,9 +8,7 @@ import {
   update,
   remove,
   onValue,
-  off,
   push,
-  DatabaseReference,
 } from 'firebase/database';
 
 type MessageHandler = (data: any) => void;
@@ -18,9 +17,19 @@ export class NetworkManager {
   private roomId: string = '';
   private role: 'p1' | 'p2' | 'spectator' | 'server' | null = null;
   private uid: string | null = null;
+  private activeMatchId: string | null = null;
+  private matchNumber = 0;
+  private nextStateRevision = 0;
+  private lastReceivedStateRevision = -1;
+  private nextInputSequence: Record<'p1' | 'p2', number> = { p1: 0, p2: 0 };
+  private lastReceivedInputSequence: Record<'p1' | 'p2', number> = { p1: 0, p2: 0 };
   private messageHandlers: Set<MessageHandler> = new Set();
   private isConnected: boolean = false;
-  private rtdbListeners: { ref: DatabaseReference; callback: (snap: any) => void }[] = [];
+  private isRtdbConnected = false;
+  private lastConnectionError: string | null = null;
+  private lastTransportError: string | null = null;
+  private connectionGeneration = 0;
+  private rtdbListeners: (() => void)[] = [];
 
   // WebRTC P2P state
   private pc: RTCPeerConnection | null = null;
@@ -48,8 +57,8 @@ export class NetworkManager {
 
   private simulatedDelayMs: number = 0;
   private simulatedJitterMs: number = 0;
+  private orderedSimulationQueue: Promise<void> = Promise.resolve();
   private lastRestartTrigger: number = 0;
-  private lastMatchStartTrigger: number = 0;
   private heartbeatInterval: NodeJS.Timeout | null = null;
   private bothPlayersWereReady: boolean = false;
 
@@ -62,13 +71,21 @@ export class NetworkManager {
     this.disconnect();
     this.roomId = roomId.toUpperCase().trim();
     this.bothPlayersWereReady = false;
+    this.lastConnectionError = null;
+    this.lastTransportError = null;
+    this.lastRestartTrigger = 0;
     const cleanName = (displayName || '').trim().slice(0, 14);
 
     try {
       const uid = await initAuth();
+      if (!uid) throw new Error('Firebase authentication did not return a user.');
       this.uid = uid;
       const roomRef = ref(rtdb, `rooms/${this.roomId}`);
       const roomSnap = await get(roomRef);
+      const existingRoomData = roomSnap.exists() ? roomSnap.val() || {} : null;
+      this.matchNumber = Number.isSafeInteger(existingRoomData?.matchNumber) ? existingRoomData.matchNumber : 0;
+      this.activeMatchId = typeof existingRoomData?.matchId === 'string' ? existingRoomData.matchId : null;
+      this.lastRestartTrigger = Number(existingRoomData?.restartTrigger) || 0;
 
       let joinedHasP1 = false;
       let joinedHasP2 = false;
@@ -103,6 +120,8 @@ export class NetworkManager {
           hasP2: joinedHasP2,
           status: 'lobby',
           settings: hostSettings || null,
+          matchNumber: 0,
+          matchId: null,
           lastActive: Date.now(),
         });
       } else if (requestedRole === 'server') {
@@ -163,8 +182,44 @@ export class NetworkManager {
         }
       }
 
+      const currentStateSnap = await get(ref(rtdb, `rooms/${this.roomId}/state/current`));
+      if (currentStateSnap.exists()) {
+        const currentState = currentStateSnap.val() || {};
+        if (
+          currentState.matchId === this.activeMatchId &&
+          currentState.matchNumber === this.matchNumber &&
+          Number.isSafeInteger(currentState.stateRevision)
+        ) {
+          this.nextStateRevision = Math.max(this.nextStateRevision, currentState.stateRevision);
+          if (this.role === 'p1' || this.role === 'server') {
+            this.lastReceivedStateRevision = currentState.stateRevision;
+          }
+        }
+      }
+      if (this.role === 'p1' || this.role === 'p2') {
+        const ownInputSnap = await get(ref(rtdb, `rooms/${this.roomId}/inputs/${this.role}`));
+        const ownInput = ownInputSnap.val() || {};
+        if (
+          ownInput.matchId === this.activeMatchId &&
+          ownInput.matchNumber === this.matchNumber &&
+          Number.isSafeInteger(ownInput.inputSequence)
+        ) {
+          this.nextInputSequence[this.role] = Math.max(this.nextInputSequence[this.role], ownInput.inputSequence);
+        }
+      }
+
       this.isConnected = true;
       this.startContinuousHeartbeat();
+
+      const connectionRef = ref(rtdb, '.info/connected');
+      const unsubConnection = onValue(connectionRef, (snapshot) => {
+        this.isRtdbConnected = snapshot.val() === true;
+        if (this.isRtdbConnected) this.lastTransportError = null;
+      }, (error) => {
+        this.isRtdbConnected = false;
+        this.reportTransportError('Realtime Database connection', error);
+      });
+      this.rtdbListeners.push(unsubConnection);
 
       if (this.role === 'spectator' && this.roomId && uid) {
         const presenceRef = ref(rtdb, `rooms/${this.roomId}/spectators/${uid}`);
@@ -176,6 +231,8 @@ export class NetworkManager {
         type: 'ROOM_JOINED',
         roomId: this.roomId,
         role: this.role,
+        matchId: this.activeMatchId,
+        matchNumber: this.matchNumber,
         hasP1: joinedHasP1,
         hasP2: joinedHasP2,
         p1Name,
@@ -229,22 +286,14 @@ export class NetworkManager {
           });
         }
 
-        if (rData.matchStartTrigger && rData.matchStartTrigger !== this.lastMatchStartTrigger) {
-          this.lastMatchStartTrigger = rData.matchStartTrigger;
-          this.notifyHandlers({
-            type: 'MATCH_START',
-            status: rData.status,
-            settings: rData.settings,
-            trigger: rData.matchStartTrigger,
-          });
-        }
+        this.adoptRoomMatch(rData);
 
         if (rData.restartTrigger && rData.restartTrigger !== this.lastRestartTrigger) {
           this.lastRestartTrigger = rData.restartTrigger;
           this.notifyHandlers({ type: 'RESTART_MATCH', sender: rData.restartSender });
         }
       });
-      this.rtdbListeners.push({ ref: roomRef, callback: unsubRoom });
+      this.rtdbListeners.push(unsubRoom);
 
       // 1b. Spectator count
       const specsRef = ref(rtdb, `rooms/${this.roomId}/spectators`);
@@ -253,7 +302,7 @@ export class NetworkManager {
         const count = Object.keys(val).length;
         this.notifyHandlers({ type: 'SPECTATORS_CHANGED', count });
       });
-      this.rtdbListeners.push({ ref: specsRef, callback: unsubSpecs });
+      this.rtdbListeners.push(unsubSpecs);
 
       // 2. Fallback / RTDB state listeners
       const stateRef = ref(rtdb, `rooms/${this.roomId}/state/current`);
@@ -261,34 +310,51 @@ export class NetworkManager {
         if (!snapshot.exists()) return;
         const sData = snapshot.val() || {};
         if (sData.state && this.role !== 'p1') {
-          this.notifyHandlers({
+          this.receiveState({
             type: 'STATE_SYNC',
+            matchId: sData.matchId,
+            matchNumber: sData.matchNumber,
+            stateRevision: sData.stateRevision,
             state: sData.state,
             tick: sData.tick,
             locks: sData.locks,
           });
         }
       });
-      this.rtdbListeners.push({ ref: stateRef, callback: unsubState });
+      this.rtdbListeners.push(unsubState);
 
       const inputRolesToHear: Array<'p1' | 'p2'> =
         this.role === 'server' ? ['p1', 'p2'] : [this.role === 'p1' ? 'p2' : 'p1'];
       inputRolesToHear.forEach((inputDocName) => {
         const inputRef = ref(rtdb, `rooms/${this.roomId}/inputs/${inputDocName}`);
+        let isInitialSnapshot = true;
         const unsubInput = onValue(inputRef, (snapshot) => {
+          const initialSnapshot = isInitialSnapshot;
+          isInitialSnapshot = false;
           if (!snapshot.exists()) return;
           const iData = snapshot.val() || {};
           if (iData && iData.dir && iData.tick !== undefined) {
-            this.notifyHandlers({
+            if (initialSnapshot) {
+              if (
+                iData.matchId === this.activeMatchId &&
+                iData.matchNumber === this.matchNumber &&
+                Number.isSafeInteger(iData.inputSequence)
+              ) {
+                this.lastReceivedInputSequence[inputDocName] = Math.max(
+                  this.lastReceivedInputSequence[inputDocName],
+                  iData.inputSequence,
+                );
+              }
+              return;
+            }
+            this.receiveInput({
               type: 'INPUT_SYNC',
+              ...iData,
               role: inputDocName,
-              dir: iData.dir,
-              tick: iData.tick,
-              clientTime: iData.clientTime,
             });
           }
         });
-        this.rtdbListeners.push({ ref: inputRef, callback: unsubInput });
+        this.rtdbListeners.push(unsubInput);
       });
 
       // 3. Pings listener
@@ -312,7 +378,7 @@ export class NetworkManager {
           }
         });
       });
-      this.rtdbListeners.push({ ref: pingsRef, callback: unsubPings });
+      this.rtdbListeners.push(unsubPings);
 
       // 3b. Ready sync listener
       const readyRef = ref(rtdb, `rooms/${this.roomId}/ready`);
@@ -326,7 +392,7 @@ export class NetworkManager {
           },
         });
       });
-      this.rtdbListeners.push({ ref: readyRef, callback: unsubReady });
+      this.rtdbListeners.push(unsubReady);
 
       // 4. Initialize WebRTC P2P Signaling in the background
       if (this.role === 'p1' || this.role === 'p2') {
@@ -335,10 +401,105 @@ export class NetworkManager {
 
       return true;
     } catch (err) {
-      console.warn('Firebase RTDB / WebRTC connection error:', err);
-      this.isConnected = false;
+      const message = err instanceof Error ? err.message : String(err);
+      console.error('Firebase room connection failed:', err);
+      this.disconnect();
+      this.lastConnectionError = message;
       return false;
     }
+  }
+
+  private getCurrentMatch(): MatchIdentity | null {
+    return this.activeMatchId ? { matchId: this.activeMatchId, matchNumber: this.matchNumber } : null;
+  }
+
+  private adoptMatch(match: MatchIdentity): boolean {
+    const current = this.getCurrentMatch();
+    if (!canAdoptMatch(current, match)) return false;
+
+    const changed = !isCurrentMatch(current, match);
+    if (changed) {
+      this.activeMatchId = match.matchId;
+      this.matchNumber = match.matchNumber;
+      this.nextStateRevision = 0;
+      this.lastReceivedStateRevision = -1;
+      this.nextInputSequence = { p1: 0, p2: 0 };
+      this.lastReceivedInputSequence = { p1: 0, p2: 0 };
+      this.notifyHandlers({
+        type: 'MATCH_START',
+        matchId: match.matchId,
+        matchNumber: match.matchNumber,
+      });
+    }
+    return true;
+  }
+
+  private adoptRoomMatch(roomData: Record<string, any>) {
+    if (typeof roomData.matchId !== 'string' || !Number.isSafeInteger(roomData.matchNumber)) return;
+    this.adoptMatch({ matchId: roomData.matchId, matchNumber: roomData.matchNumber });
+  }
+
+  private receiveState(message: Record<string, any>) {
+    if (
+      typeof message.matchId !== 'string' ||
+      !Number.isSafeInteger(message.matchNumber) ||
+      !Number.isSafeInteger(message.stateRevision) ||
+      !message.state
+    ) return;
+
+    const match = { matchId: message.matchId, matchNumber: message.matchNumber };
+    if (!this.adoptMatch(match)) return;
+    if (!canAcceptState(this.getCurrentMatch(), this.lastReceivedStateRevision, match, message.stateRevision)) return;
+
+    this.lastReceivedStateRevision = message.stateRevision;
+    this.notifyHandlers({ ...message, type: 'STATE_SYNC' });
+  }
+
+  private receiveInput(message: Record<string, any>) {
+    if (
+      (message.role !== 'p1' && message.role !== 'p2') ||
+      typeof message.matchId !== 'string' ||
+      !Number.isSafeInteger(message.matchNumber) ||
+      !Number.isSafeInteger(message.inputSequence)
+    ) return;
+
+    const role: 'p1' | 'p2' = message.role;
+    const match = { matchId: message.matchId, matchNumber: message.matchNumber };
+    if (!isCurrentMatch(this.getCurrentMatch(), match)) return;
+    if (!isNewerSequence(message.inputSequence, this.lastReceivedInputSequence[role])) return;
+
+    this.lastReceivedInputSequence[role] = message.inputSequence;
+    this.notifyHandlers({ ...message, role, type: 'INPUT_SYNC' });
+  }
+
+  private receiveMatchStart(message: Record<string, any>) {
+    if (typeof message.matchId !== 'string' || !Number.isSafeInteger(message.matchNumber)) return;
+    const match = { matchId: message.matchId, matchNumber: message.matchNumber };
+    if (!this.adoptMatch(match)) return;
+    if (message.state) {
+      this.receiveState({
+        ...message,
+        type: 'STATE_SYNC',
+        stateRevision: Number.isSafeInteger(message.stateRevision) ? message.stateRevision : 0,
+      });
+    }
+  }
+
+  private sendDataChannelMessage(message: object): boolean {
+    if (!this.isWebRtcConnected || !this.dataChannel || this.dataChannel.readyState !== 'open') return false;
+    try {
+      this.dataChannel.send(JSON.stringify(message));
+      return true;
+    } catch (error) {
+      this.isWebRtcConnected = false;
+      this.reportTransportError('WebRTC DataChannel send', error);
+      return false;
+    }
+  }
+
+  private reportTransportError(operation: string, error: unknown) {
+    this.lastTransportError = `${operation}: ${error instanceof Error ? error.message : String(error)}`;
+    console.warn(this.lastTransportError);
   }
 
   // WebRTC P2P Signaling & Data Channel Setup
@@ -356,7 +517,7 @@ export class NetworkManager {
 
       if (this.role === 'p1') {
         // P1 (Host) creates data channel and offer
-        this.dataChannel = this.pc.createDataChannel('snakeGameData', { ordered: false });
+        this.dataChannel = this.pc.createDataChannel('snakeGameData', { ordered: true });
         this.setupDataChannel();
 
         this.pc.createOffer().then(offer => {
@@ -376,7 +537,7 @@ export class NetworkManager {
             } catch {}
           }
         });
-        this.rtdbListeners.push({ ref: ansRef, callback: unsubAns });
+        this.rtdbListeners.push(unsubAns);
 
         // Listen for P2 ICE candidates
         const candRef = ref(rtdb, `rooms/${this.roomId}/signals/p2Candidates`);
@@ -394,7 +555,7 @@ export class NetworkManager {
             });
           }
         });
-        this.rtdbListeners.push({ ref: candRef, callback: unsubCand });
+        this.rtdbListeners.push(unsubCand);
       } else if (this.role === 'p2') {
         // P2 (Joiner) listens for data channel and offer
         this.pc.ondatachannel = (event) => {
@@ -415,7 +576,7 @@ export class NetworkManager {
             } catch {}
           }
         });
-        this.rtdbListeners.push({ ref: offerRef, callback: unsubOffer });
+        this.rtdbListeners.push(unsubOffer);
 
         // Listen for P1 ICE candidates
         const candRef = ref(rtdb, `rooms/${this.roomId}/signals/p1Candidates`);
@@ -433,7 +594,7 @@ export class NetworkManager {
             });
           }
         });
-        this.rtdbListeners.push({ ref: candRef, callback: unsubCand });
+        this.rtdbListeners.push(unsubCand);
       }
     } catch (err) {
       console.warn('WebRTC signaling initialization warning:', err);
@@ -488,7 +649,13 @@ export class NetworkManager {
           }
           return;
         }
-        if (msg.type) {
+        if (msg.type === 'MATCH_START') {
+          this.receiveMatchStart(msg);
+        } else if (msg.type === 'STATE_SYNC') {
+          this.receiveState(msg);
+        } else if (msg.type === 'INPUT_SYNC') {
+          this.receiveInput(msg);
+        } else if (msg.type) {
           this.notifyHandlers(msg);
         }
       } catch {
@@ -498,6 +665,7 @@ export class NetworkManager {
   }
 
   public disconnect() {
+    this.connectionGeneration += 1;
     this.stopContinuousHeartbeat();
     if (this.dataChannel) {
       this.dataChannel.close();
@@ -511,9 +679,7 @@ export class NetworkManager {
     this.pendingRemoteCandidates = [];
     this.processedCandidateKeys.clear();
 
-    this.rtdbListeners.forEach(item => {
-      off(item.ref, 'value', item.callback);
-    });
+    this.rtdbListeners.forEach(unsubscribe => unsubscribe());
     this.rtdbListeners = [];
 
     if (this.roomId && this.role) {
@@ -530,9 +696,16 @@ export class NetworkManager {
     }
 
     this.isConnected = false;
+    this.isRtdbConnected = false;
     this.role = null;
     this.uid = null;
     this.roomId = '';
+    this.activeMatchId = null;
+    this.matchNumber = 0;
+    this.nextStateRevision = 0;
+    this.lastReceivedStateRevision = -1;
+    this.nextInputSequence = { p1: 0, p2: 0 };
+    this.lastReceivedInputSequence = { p1: 0, p2: 0 };
   }
 
   public getRole(): 'p1' | 'p2' | 'spectator' | 'server' | null {
@@ -578,6 +751,10 @@ export class NetworkManager {
     return this.isConnected;
   }
 
+  public getLastConnectionError(): string | null {
+    return this.lastConnectionError;
+  }
+
   public getLatencyReport(): LatencyReport {
     return this.currentLatencyReport;
   }
@@ -585,6 +762,9 @@ export class NetworkManager {
   public async getWebRtcStats(): Promise<{
     connected: boolean;
     state: string;
+    dataChannelState: string;
+    rtdbConnected: boolean;
+    lastTransportError: string | null;
     bytesSent: number;
     bytesReceived: number;
     packetsLost: number;
@@ -595,6 +775,9 @@ export class NetworkManager {
       return {
         connected: this.isWebRtcConnected,
         state: 'DISCONNECTED',
+        dataChannelState: this.dataChannel?.readyState || 'CLOSED',
+        rtdbConnected: this.isRtdbConnected,
+        lastTransportError: this.lastTransportError,
         bytesSent: 0,
         bytesReceived: 0,
         packetsLost: 0,
@@ -631,6 +814,9 @@ export class NetworkManager {
     return {
       connected: this.isWebRtcConnected,
       state: this.pc.connectionState || 'UNKNOWN',
+      dataChannelState: this.dataChannel?.readyState || 'CLOSED',
+      rtdbConnected: this.isRtdbConnected,
+      lastTransportError: this.lastTransportError,
       bytesSent,
       bytesReceived,
       packetsLost,
@@ -671,100 +857,143 @@ export class NetworkManager {
     }
   }
 
-  public broadcastMatchStart(initialState: GameState, settings?: any) {
-    if (!this.isConnected || (this.role !== 'p1' && this.role !== 'server')) return;
+  public broadcastMatchStart(initialState: GameState, settings?: any): MatchIdentity | null {
+    if (!this.isConnected || (this.role !== 'p1' && this.role !== 'server')) return null;
 
-    this.withSimulation(() => {
+    const roomId = this.roomId;
+    const connectionGeneration = this.connectionGeneration;
+    const matchId = crypto.randomUUID();
+    const matchNumber = this.matchNumber + 1;
+    this.activeMatchId = matchId;
+    this.matchNumber = matchNumber;
+    this.nextStateRevision = 0;
+    this.lastReceivedStateRevision = -1;
+    this.nextInputSequence = { p1: 0, p2: 0 };
+    this.lastReceivedInputSequence = { p1: 0, p2: 0 };
+    const stateRevision = this.nextStateRevision;
+    const timestamp = Date.now();
+
+    this.withOrderedSimulation(() => {
+      if (connectionGeneration !== this.connectionGeneration) return;
       const payload = {
         type: 'MATCH_START',
+        matchId,
+        matchNumber,
+        stateRevision,
         state: initialState,
         settings,
         status: 'racing',
-        timestamp: Date.now(),
+        timestamp,
       };
 
-      if (this.isWebRtcConnected && this.dataChannel && this.dataChannel.readyState === 'open') {
-        try {
-          this.dataChannel.send(JSON.stringify(payload));
-        } catch {}
-      }
+      this.sendDataChannelMessage(payload);
 
-      const roomRef = ref(rtdb, `rooms/${this.roomId}`);
+      const roomRef = ref(rtdb, `rooms/${roomId}`);
       update(roomRef, {
         status: 'racing',
-        matchStartTrigger: Date.now(),
+        matchId,
+        matchNumber,
+        matchStartTrigger: timestamp,
         settings: settings || null,
-        lastActive: Date.now(),
+        lastActive: timestamp,
         // Reset ready flags so this match's confirms are real false->true
         // transitions. onValue only fires on change — stale `true`s from a
         // previous match would leave both clients stuck at the ready check.
         ready: {
-          p1: { ready: false, updatedAt: Date.now() },
-          p2: { ready: false, updatedAt: Date.now() },
+          p1: { ready: false, updatedAt: timestamp },
+          p2: { ready: false, updatedAt: timestamp },
         },
-      }).catch(() => {});
+      }).catch(error => this.reportTransportError('Writing match start to RTDB', error));
 
-      const stateRef = ref(rtdb, `rooms/${this.roomId}/state/current`);
+      const stateRef = ref(rtdb, `rooms/${roomId}/state/current`);
       set(stateRef, {
+        matchId,
+        matchNumber,
+        stateRevision,
         state: initialState,
         locks: { p1: false, p2: false },
         tick: initialState.tick,
-        updatedAt: Date.now(),
-      }).catch(() => {});
+        updatedAt: timestamp,
+      }).catch(error => this.reportTransportError('Writing initial state to RTDB', error));
     });
+    return { matchId, matchNumber };
   }
 
   public broadcastState(state: GameState, locks?: { p1: boolean; p2: boolean }) {
     if (!this.isConnected || (this.role !== 'p1' && this.role !== 'server')) return;
+    if (!this.activeMatchId) return;
 
-    this.withSimulation(() => {
+    const roomId = this.roomId;
+    const connectionGeneration = this.connectionGeneration;
+    const matchId = this.activeMatchId;
+    const matchNumber = this.matchNumber;
+    const stateRevision = ++this.nextStateRevision;
+    const updatedAt = Date.now();
+    this.withOrderedSimulation(() => {
+      if (connectionGeneration !== this.connectionGeneration) return;
       const payload = {
         type: 'STATE_SYNC',
+        matchId,
+        matchNumber,
+        stateRevision,
         state,
         locks,
         tick: state.tick,
       };
 
       // Send via WebRTC P2P DataChannel if connected for ultra-low latency
-      if (this.isWebRtcConnected && this.dataChannel && this.dataChannel.readyState === 'open') {
-        this.dataChannel.send(JSON.stringify(payload));
-      }
+      this.sendDataChannelMessage(payload);
 
       // Also persist to RTDB as fallback/sync backup
-      const stateRef = ref(rtdb, `rooms/${this.roomId}/state/current`);
+      const stateRef = ref(rtdb, `rooms/${roomId}/state/current`);
       set(stateRef, {
+        matchId,
+        matchNumber,
+        stateRevision,
         state,
         locks,
         tick: state.tick,
-        updatedAt: Date.now(),
-      }).catch(() => {});
+        updatedAt,
+      }).catch(error => this.reportTransportError('Writing state to RTDB', error));
     });
   }
 
   public sendInput(dir: Direction, currentTick: number) {
-    if (!this.isConnected || !this.role) return;
+    if (!this.isConnected || (this.role !== 'p1' && this.role !== 'p2') || !this.activeMatchId) return;
 
-    this.withSimulation(() => {
-      const payload = {
-        type: 'INPUT_SYNC',
-        role: this.role,
-        dir,
-        tick: currentTick,
-        clientTime: Date.now(),
-      };
+    const roomId = this.roomId;
+    const connectionGeneration = this.connectionGeneration;
+    const role = this.role;
+    const matchId = this.activeMatchId;
+    const matchNumber = this.matchNumber;
+    const inputSequence = ++this.nextInputSequence[role];
+    const clientTime = Date.now();
+    const payload = {
+      type: 'INPUT_SYNC',
+      matchId,
+      matchNumber,
+      inputSequence,
+      role,
+      dir,
+      tick: currentTick,
+      clientTime,
+    };
 
+    this.withOrderedSimulation(() => {
+      if (connectionGeneration !== this.connectionGeneration) return;
       // Send via WebRTC P2P DataChannel if connected
-      if (this.isWebRtcConnected && this.dataChannel && this.dataChannel.readyState === 'open') {
-        this.dataChannel.send(JSON.stringify(payload));
-      }
+      this.sendDataChannelMessage(payload);
 
       // Also persist to RTDB as backup
-      const inputRef = ref(rtdb, `rooms/${this.roomId}/inputs/${this.role}`);
+      const inputRef = ref(rtdb, `rooms/${roomId}/inputs/${role}`);
       set(inputRef, {
+        matchId,
+        matchNumber,
+        inputSequence,
         dir,
         tick: currentTick,
-        clientTime: Date.now(),
-      }).catch(() => {});
+        clientTime,
+      }).catch(error => this.reportTransportError('Writing input to RTDB', error));
     });
   }
 
@@ -773,14 +1002,7 @@ export class NetworkManager {
     const readyRef = ref(rtdb, `rooms/${this.roomId}/ready/${role}`);
     set(readyRef, { ready: true, updatedAt: Date.now() }).catch(() => {});
 
-    if (this.isWebRtcConnected && this.dataChannel && this.dataChannel.readyState === 'open') {
-      try {
-        this.dataChannel.send(JSON.stringify({
-          type: 'READY_CONFIRM',
-          role,
-        }));
-      } catch {}
-    }
+    this.sendDataChannelMessage({ type: 'READY_CONFIRM', role });
   }
 
   public requestRematch() {
@@ -883,13 +1105,19 @@ export class NetworkManager {
     }
   }
 
-  private withSimulation(fn: () => void) {
-    const totalDelay = this.simulatedDelayMs + (Math.random() * this.simulatedJitterMs);
-    if (totalDelay > 0) {
-      setTimeout(fn, totalDelay);
-    } else {
-      fn();
-    }
+  private withOrderedSimulation(fn: () => void) {
+    const totalDelay = this.simulatedDelayMs + Math.random() * this.simulatedJitterMs;
+    this.orderedSimulationQueue = this.orderedSimulationQueue.then(() => new Promise<void>((resolve) => {
+      setTimeout(() => {
+        try {
+          fn();
+        } catch (error) {
+          this.reportTransportError('Sending ordered network update', error);
+        } finally {
+          resolve();
+        }
+      }, totalDelay);
+    }));
   }
 
   private recordLatencySample(pingId: string, rttMs: number, peerMissing: boolean) {

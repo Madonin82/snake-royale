@@ -288,7 +288,7 @@ export const LatencyHarnessModal: React.FC<LatencyHarnessModalProps> = ({
         <div className="flex items-center justify-between pt-2 border-t-2 border-[#0F380F]">
           <div className="flex items-center gap-1 text-[10px]">
             <ShieldCheck className="w-3.5 h-3.5" />
-            <span>Host-authoritative 5t/s loop</span>
+            <span>Host-authoritative · WebRTC + RTDB fallback</span>
           </div>
 
           <div className="flex items-center gap-2">
