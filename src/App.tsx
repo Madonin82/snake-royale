@@ -999,6 +999,7 @@ export const App: React.FC = () => {
             }
             if (settingsRef.current.turnBased) {
               setLock(key);
+              thinkSessionEnd(key);
               maybeAdvanceTurn();
             }
           }
