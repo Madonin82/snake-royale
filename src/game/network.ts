@@ -695,6 +695,13 @@ export class NetworkManager {
         matchStartTrigger: Date.now(),
         settings: settings || null,
         lastActive: Date.now(),
+        // Reset ready flags so this match's confirms are real false->true
+        // transitions. onValue only fires on change — stale `true`s from a
+        // previous match would leave both clients stuck at the ready check.
+        ready: {
+          p1: { ready: false, updatedAt: Date.now() },
+          p2: { ready: false, updatedAt: Date.now() },
+        },
       }).catch(() => {});
 
       const stateRef = ref(rtdb, `rooms/${this.roomId}/state/current`);
