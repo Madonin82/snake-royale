@@ -6,12 +6,15 @@ A tiny competitive Snake game for two players: race for tokens on a small board,
 
 ## What it does now
 
-- **Turn-based mode (default):** both players secretly pick a direction; the board steps once, simultaneously, when both have locked. No clock, no lag deaths — it plays like correspondence chess with snakes. Real-time mode (fixed tick rate) is still available in Settings for the brave.
+- **Turn-based mode (default):** both players secretly pick a direction; the board steps once, simultaneously, when both have locked. Real-time mode (fixed tick rate) is still available in Settings for the brave.
+- **Think Time (turn-based):** an optional per-turn countdown (Infinite/5s/10s/15s, default Infinite). When your buffer empties, a big countdown appears in your HUD panel — hit zero and whatever's buffered auto-locks (empty buffer = snake goes straight). Tick sounds and gamepad rumble on each count. Runs alongside the accumulating think clock, which tracks total time per player like a chess clock (turn 0 is free; the clock starts at turn 1).
 - **Online rooms with 4-letter codes:** one player hosts, the other joins. Two extra roles on top:
   - **Server / DM mode:** a third client hosts *without playing* — it runs the simulation for two seated players, like a referee.
   - **Spectator mode:** anyone with the room code can watch a live match (watcher count shown in the lobby). No seat, no input.
-- **Display names + series score:** set an optional name (saved per browser); the room keeps a running series score (wins/draws) across rematches, and each player's cumulative think time is tracked like a chess clock.
-- **Match replay:** every match is recorded turn by turn. After a match, WATCH REPLAY scrubs through it at 2×/5×/10× (thinking pauses edited out).
+- **Display names + series score:** set an optional name (saved per browser); the room keeps a running series score (wins/draws) across rematches, and each player's cumulative think time is tracked.
+- **Move privacy:** your queued move arrows are visible only to you — opponents see "Hidden" (desktop HUD and mobile cards).
+- **Snake visuals:** directional eyes on the head, tapered tail. Same Game Boy palette.
+- **Match replay:** every match is recorded turn by turn. After a match, WATCH REPLAY scrubs through it at 2×/5×/10× (thinking pauses edited out). Replays include think-time data.
 - **Solo vs AI and local 2P** for same-screen or bot-sparring play.
 - **Latency harness:** a NET readout in the HUD with ping/pong probes (median + p95), plus input-to-render tick lag. Note: the ping number measures time-until-the-peer-acks, so on a slow-thinking opponent it reads huge — that's the harness being honest about a different thing than wire latency.
 
