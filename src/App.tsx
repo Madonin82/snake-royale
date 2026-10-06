@@ -232,6 +232,11 @@ export const App: React.FC = () => {
 
   // Lock transitions drive the think sessions.
   const prevLocksRef = useRef({ p1: false, p2: false });
+  // Tracks whether think sessions were started for the current match.
+  // Sessions start on the first tick after both players are ready (not at
+  // match setup), so a player who confirms ready early isn't timed while
+  // waiting for their opponent.
+  const thinkStartedRef = useRef(false);
   useEffect(() => {
     (['p1', 'p2'] as const).forEach(who => {
       const was = prevLocksRef.current[who];
@@ -262,13 +267,13 @@ export const App: React.FC = () => {
   const clearLocks = useCallback(() => {
     locksRef.current = { p1: false, p2: false };
     setLocks(locksRef.current);
-    // New match: reset accumulators and open fresh think sessions.
+    // New match: reset accumulators. Think sessions open on the first tick
+    // after both players are ready (see maybeAdvanceTurn).
     thinkRef.current.p1 = { accum: 0, sessionStart: null };
     thinkRef.current.p2 = { accum: 0, sessionStart: null };
     setThinkSessions({ p1: { startTime: null }, p2: { startTime: null } });
     prevLocksRef.current = { p1: false, p2: false };
-    thinkSessionStart('p1');
-    thinkSessionStart('p2');
+    thinkStartedRef.current = false;
     clearMoveBuffers();
   }, [clearMoveBuffers, thinkSessionStart]);
 
@@ -310,6 +315,14 @@ export const App: React.FC = () => {
     const isOnline = playModeRef.current === 'ONLINE_HOST' || playModeRef.current === 'ONLINE_JOIN' || playModeRef.current === 'ONLINE_SERVER';
     const bothReady = !isOnline || (current.readyConfirmed?.p1 && current.readyConfirmed?.p2);
     if (!bothReady) return;
+
+    // Think sessions open on the first tick after both players are ready,
+    // but turn 0 is a freebie — the clock starts at turn 1.
+    if (!thinkStartedRef.current && current.tick >= 1) {
+      thinkSessionStart('p1');
+      thinkSessionStart('p2');
+      thinkStartedRef.current = true;
+    }
 
     if (playModeRef.current === 'SOLO_AI' && !locksRef.current.p2) {
       const p2Buf = [...moveBuffersRef.current.p2];
