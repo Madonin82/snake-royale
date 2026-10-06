@@ -1220,7 +1220,7 @@ export const App: React.FC = () => {
     soundEngine.playCountdown(true);
 
     if (playMode === 'ONLINE_HOST' || playMode === 'ONLINE_SERVER') {
-      networkManager.broadcastState(initial);
+      networkManager.broadcastMatchStart(initial, settingsRef.current);
     }
   };
 
