@@ -83,6 +83,9 @@ export interface LatencyReport {
 
 export interface NetworkInputPayload {
   role: 'p1' | 'p2';
+  matchId: string;
+  matchNumber: number;
+  inputSequence: number;
   dir: Direction;
   tick: number;
   clientTime: number;

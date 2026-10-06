@@ -6,6 +6,9 @@ export const WebRtcStatsCard: React.FC = () => {
   const [stats, setStats] = useState({
     connected: false,
     state: 'DISCONNECTED',
+    dataChannelState: 'CLOSED',
+    rtdbConnected: false,
+    lastTransportError: null as string | null,
     bytesSent: 0,
     bytesReceived: 0,
     packetsLost: 0,
@@ -76,6 +79,16 @@ export const WebRtcStatsCard: React.FC = () => {
           <div className="font-black text-sm mt-0.5">{stats.packetLossPercent}%</div>
         </div>
       </div>
+
+      <div className="flex items-center justify-between text-[9px] font-bold border-t border-[#0F380F] pt-1">
+        <span>RTDB FALLBACK: {stats.rtdbConnected ? 'ONLINE' : 'OFFLINE'}</span>
+        <span>CHANNEL: {stats.dataChannelState.toUpperCase()}</span>
+      </div>
+      {stats.lastTransportError && (
+        <div className="text-[9px] font-bold text-red-800 break-words" role="status">
+          {stats.lastTransportError}
+        </div>
+      )}
     </div>
   );
 };
