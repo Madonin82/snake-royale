@@ -146,6 +146,7 @@ export const Hud: React.FC<HudProps> = ({
   const renderDesktopPlayerPanel = (who: 'p1' | 'p2') => {
     const snake = who === 'p1' ? p1 : p2;
     const locked = isLocked(who);
+    const canSeeMoves = playMode === 'LOCAL_2P' || viewerSeat === who;
     const lastTurn = gameState.lastTurnTimes ? (who === 'p1' ? gameState.lastTurnTimes.p1 : gameState.lastTurnTimes.p2) : null;
     const totalThink = gameState.totalThinkTime ? (who === 'p1' ? gameState.totalThinkTime.p1 : gameState.totalThinkTime.p2) : 0;
     const buffer = moveBuffers ? (who === 'p1' ? moveBuffers.p1 : moveBuffers.p2) : [];
@@ -194,6 +195,8 @@ export const Hud: React.FC<HudProps> = ({
           <div className="flex flex-wrap gap-1 content-start">
             {buffer.length === 0 ? (
               <span className="text-[10px] opacity-40 italic">Empty (plan moves)</span>
+            ) : !canSeeMoves ? (
+              <span className="text-[10px] opacity-60 italic">Hidden</span>
             ) : (
               buffer.map((dir, idx) => {
                 const arrow = dir === 'UP' ? '↑' : dir === 'DOWN' ? '↓' : dir === 'LEFT' ? '←' : '→';
