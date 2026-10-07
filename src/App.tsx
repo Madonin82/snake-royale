@@ -19,6 +19,7 @@ import {
   applyThinkTimeModel,
   createThinkTimeModel,
   getThinkTimeLockEvents,
+  getPlanningEnteredEvents,
   ThinkTimeEvent,
   transitionThinkTime,
 } from './game/thinkTime';
@@ -213,6 +214,17 @@ export const App: React.FC = () => {
     p2: { startTime: thinkRef.current.sessions.p2.planningStartedAt },
   };
 
+  const maybeOpenPlanningSessions = useCallback(() => {
+    const mode = playModeRef.current;
+    const events = getPlanningEnteredEvents(
+      stateRef.current,
+      locksRef.current,
+      mode,
+      Date.now(),
+    );
+    for (const event of events) applyThinkTransition(event);
+  }, [applyThinkTransition]);
+
   const commitLocks = useCallback((nextLocks: { p1: boolean; p2: boolean }) => {
     const previousLocks = locksRef.current;
     locksRef.current = nextLocks;
@@ -243,7 +255,8 @@ export const App: React.FC = () => {
       }
       applyThinkTransition(event);
     }
-  }, [applyThinkTransition]);
+    maybeOpenPlanningSessions();
+  }, [applyThinkTransition, maybeOpenPlanningSessions]);
 
   const getTargetKey = useCallback((playerSlot: 1 | 2): 'p1' | 'p2' => {
     if (playModeRef.current === 'SOLO_AI') return 'p1';
@@ -1237,6 +1250,7 @@ export const App: React.FC = () => {
     stateRef.current = initial;
     setGameState(initial);
     clearLocks();
+    maybeOpenPlanningSessions();
     sentTickRef.current = -1;
     lastStateTickRef.current = -1;
     lastStateRevisionRef.current = -1;

@@ -6,6 +6,7 @@ import {
   applyThinkTimeModel,
   createThinkTimeModel,
   getThinkTimeLockEvents,
+  getPlanningEnteredEvents,
   transitionThinkTime,
 } from './thinkTime';
 import { createReplayDataObject } from './replayFile';
@@ -136,4 +137,83 @@ test('cancel closes a session without accruing automated-player time', () => {
   const state = applyThinkTimeModel(createInitialState(), model);
   assert.deepEqual(state.lastTurnTimes, null);
   assert.deepEqual(state.totalThinkTime, { p1: 0, p2: 0 });
+});
+
+test('RESET opens turn-one planning for both actionable local players and accrues on lock', () => {
+  let model = transitionThinkTime(createThinkTimeModel(), { type: 'RESET' });
+  const state = {
+    ...createInitialState(),
+    tick: 1,
+    readyConfirmed: { p1: true, p2: true },
+  };
+  const locks = { p1: false, p2: false };
+
+  for (const event of getPlanningEnteredEvents(state, locks, 'LOCAL_2P', 1000)) {
+    model = transitionThinkTime(model, event);
+  }
+  for (const event of getPlanningEnteredEvents(state, locks, 'LOCAL_2P', 1500)) {
+    model = transitionThinkTime(model, event);
+  }
+  assert.equal(model.sessions.p1.planningStartedAt, 1000);
+  assert.equal(model.sessions.p2.planningStartedAt, 1000);
+
+  for (const event of getThinkTimeLockEvents(locks, { p1: true, p2: true }, 2600)) {
+    model = transitionThinkTime(model, event);
+  }
+  const lockedState = applyThinkTimeModel(state, model);
+  assert.deepEqual(lockedState.lastTurnTimes, { p1: 1.6, p2: 1.6 });
+  assert.deepEqual(lockedState.totalThinkTime, { p1: 1.6, p2: 1.6 });
+});
+
+test('players wait for both readiness confirmations and turn one before planning', () => {
+  let model = transitionThinkTime(createThinkTimeModel(), { type: 'RESET' });
+  const state = {
+    ...createInitialState(),
+    tick: 1,
+    readyConfirmed: { p1: true, p2: false },
+  };
+  assert.deepEqual(getPlanningEnteredEvents(state, { p1: false, p2: false }, 'ONLINE_HOST', 1000), []);
+  assert.equal(model.sessions.p1.planningStartedAt, null);
+
+  const bothReadyAtTurnZero = {
+    ...state,
+    tick: 0,
+    readyConfirmed: { p1: true, p2: true },
+  };
+  assert.deepEqual(
+    getPlanningEnteredEvents(bothReadyAtTurnZero, { p1: false, p2: false }, 'ONLINE_HOST', 1100),
+    [],
+  );
+
+  const actionable = { ...bothReadyAtTurnZero, tick: 1 };
+  for (const event of getPlanningEnteredEvents(actionable, { p1: false, p2: false }, 'ONLINE_HOST', 1200)) {
+    model = transitionThinkTime(model, event);
+  }
+  assert.equal(model.sessions.p1.planningStartedAt, 1200);
+  assert.equal(model.sessions.p2.planningStartedAt, 1200);
+});
+
+test('SOLO_AI keeps P2 excluded through a complete planning window', () => {
+  let model = transitionThinkTime(createThinkTimeModel(), { type: 'RESET' });
+  const state = {
+    ...createInitialState(),
+    tick: 1,
+    readyConfirmed: { p1: true, p2: true },
+  };
+  for (const event of getPlanningEnteredEvents(state, { p1: false, p2: false }, 'SOLO_AI', 1000)) {
+    model = transitionThinkTime(model, event);
+  }
+  for (const event of getThinkTimeLockEvents(
+    { p1: false, p2: false },
+    { p1: true, p2: true },
+    2400,
+  )) {
+    if (event.player === 'p2') continue;
+    model = transitionThinkTime(model, event);
+  }
+
+  const finalState = applyThinkTimeModel(state, model);
+  assert.equal(finalState.totalThinkTime.p1, 1.4);
+  assert.equal(finalState.totalThinkTime.p2, 0);
+  assert.equal(finalState.lastTurnTimes?.p2, 0);
 });

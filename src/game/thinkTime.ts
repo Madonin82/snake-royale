@@ -1,4 +1,4 @@
-import { GameState } from '../types/game';
+import { GameState, PlayMode } from '../types/game';
 
 export type ThinkPlayer = 'p1' | 'p2';
 
@@ -116,6 +116,34 @@ export function getThinkTimeLockEvents(
     } else if (previous[player] && !next[player]) {
       events.push({ type: 'PLANNING_ENTERED', player, at });
     }
+  }
+  return events;
+}
+
+export function getPlanningEnteredEvents(
+  state: GameState,
+  locks: { p1: boolean; p2: boolean },
+  mode: PlayMode,
+  at: number,
+): ThinkTimeLockEvent[] {
+  if (
+    mode === 'ONLINE_JOIN' ||
+    mode === 'ONLINE_SPECTATOR' ||
+    !state.turnBased ||
+    state.tick < 1 ||
+    state.phase === 'OVER' ||
+    !state.readyConfirmed?.p1 ||
+    !state.readyConfirmed?.p2
+  ) return [];
+
+  const events: ThinkTimeLockEvent[] = [];
+  for (const player of ['p1', 'p2'] as const) {
+    if (
+      (mode === 'SOLO_AI' && player === 'p2') ||
+      locks[player] ||
+      !state.snakes[player]?.isAlive
+    ) continue;
+    events.push({ type: 'PLANNING_ENTERED', player, at });
   }
   return events;
 }
