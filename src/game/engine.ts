@@ -10,7 +10,7 @@ export const GAMEBOY_COLORS = {
 };
 
 export const DEFAULT_SETTINGS: GameSettings = {
-  gridSize: 12,
+  gridSize: 8,
   tickRate: 8,
   turnBased: true,
   thinkTimeSeconds: null,
