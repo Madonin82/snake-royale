@@ -137,6 +137,7 @@ export const App: React.FC = () => {
   thinkTimeRemainingRef.current = thinkTimeRemaining;
   const thinkTimeEndsRef = useRef<{ p1: number | null; p2: number | null }>({ p1: null, p2: null });
   const lastThinkTimeTickRef = useRef<{ p1: number | null; p2: number | null }>({ p1: null, p2: null });
+  const notifiedPlanningWindowRef = useRef<{ p1: boolean; p2: boolean }>({ p1: false, p2: false });
   const sentTickRef = useRef<number>(-1);
   const activeMatchRef = useRef<MatchIdentity | null>(null);
   const lastStateRevisionRef = useRef<number>(-1);
@@ -302,6 +303,7 @@ export const App: React.FC = () => {
   const setLock = useCallback((who: 'p1' | 'p2') => {
     thinkTimeEndsRef.current = { ...thinkTimeEndsRef.current, [who]: null };
     lastThinkTimeTickRef.current = { ...lastThinkTimeTickRef.current, [who]: null };
+    notifiedPlanningWindowRef.current = { ...notifiedPlanningWindowRef.current, [who]: false };
     setThinkTimeRemaining(prev => ({ ...prev, [who]: null }));
     commitLocks({ ...locksRef.current, [who]: true });
     if (playModeRef.current === 'ONLINE_HOST' || playModeRef.current === 'ONLINE_SERVER') {
@@ -312,6 +314,7 @@ export const App: React.FC = () => {
   const clearLocks = useCallback(() => {
     thinkTimeEndsRef.current = { p1: null, p2: null };
     lastThinkTimeTickRef.current = { p1: null, p2: null };
+    notifiedPlanningWindowRef.current = { p1: false, p2: false };
     thinkTimeRemainingRef.current = { p1: null, p2: null };
     setThinkTimeRemaining({ p1: null, p2: null });
     locksRef.current = { p1: false, p2: false };
@@ -458,12 +461,20 @@ export const App: React.FC = () => {
   }, [maybeAdvanceTurn, setLock]);
 
   useEffect(() => {
-    if (!settings.turnBased || settings.thinkTimeSeconds === null) {
+    if (!settings.turnBased) {
+      thinkTimeEndsRef.current = { p1: null, p2: null };
+      lastThinkTimeTickRef.current = { p1: null, p2: null };
+      thinkTimeRemainingRef.current = { p1: null, p2: null };
+      notifiedPlanningWindowRef.current = { p1: false, p2: false };
+      setThinkTimeRemaining({ p1: null, p2: null });
+      return;
+    }
+
+    if (settings.thinkTimeSeconds === null) {
       thinkTimeEndsRef.current = { p1: null, p2: null };
       lastThinkTimeTickRef.current = { p1: null, p2: null };
       thinkTimeRemainingRef.current = { p1: null, p2: null };
       setThinkTimeRemaining({ p1: null, p2: null });
-      return;
     }
 
     const clearCountdown = (who: 'p1' | 'p2') => {
@@ -505,22 +516,30 @@ export const App: React.FC = () => {
           locksRef.current[who]
         ) {
           clearCountdown(who);
+          if (notifiedPlanningWindowRef.current[who]) {
+            notifiedPlanningWindowRef.current = { ...notifiedPlanningWindowRef.current, [who]: false };
+          }
           return;
         }
 
         if (thinkTimeEndsRef.current[who] === null) {
           if (moveBuffersRef.current[who].length > 0) return;
 
-          const endsAt = Date.now() + settings.thinkTimeSeconds! * 1000;
-          thinkTimeEndsRef.current = { ...thinkTimeEndsRef.current, [who]: endsAt };
-          const initialCount = settings.thinkTimeSeconds!;
-          lastThinkTimeTickRef.current = { ...lastThinkTimeTickRef.current, [who]: initialCount };
-          thinkTimeRemainingRef.current = { ...thinkTimeRemainingRef.current, [who]: initialCount };
-          setThinkTimeRemaining({ ...thinkTimeRemainingRef.current });
-          soundEngine.playThinkTimeTick();
-          if (isOwnSeat) {
-            const slot = mode === 'LOCAL_2P' && who === 'p2' ? 2 : 1;
-            gamepadController.rumble(slot);
+          if (settings.thinkTimeSeconds !== null) {
+            const endsAt = Date.now() + settings.thinkTimeSeconds * 1000;
+            thinkTimeEndsRef.current = { ...thinkTimeEndsRef.current, [who]: endsAt };
+            const initialCount = settings.thinkTimeSeconds;
+            lastThinkTimeTickRef.current = { ...lastThinkTimeTickRef.current, [who]: initialCount };
+            thinkTimeRemainingRef.current = { ...thinkTimeRemainingRef.current, [who]: initialCount };
+            setThinkTimeRemaining({ ...thinkTimeRemainingRef.current });
+          }
+          if (!notifiedPlanningWindowRef.current[who]) {
+            notifiedPlanningWindowRef.current = { ...notifiedPlanningWindowRef.current, [who]: true };
+            soundEngine.playThinkTimeTick();
+            if (isOwnSeat) {
+              const slot = mode === 'LOCAL_2P' && who === 'p2' ? 2 : 1;
+              gamepadController.rumble(slot);
+            }
           }
           return;
         }
