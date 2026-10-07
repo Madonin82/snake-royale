@@ -39,8 +39,8 @@ export interface GameState {
   tick: number;
   turnBased: boolean; // copied from settings at match start (host is authoritative in online play)
   phaseTurnsRemaining: number; // turn-based only: turns left in race phase / turns until next ring closes
-  lastTurnTimes: { p1: number; p2: number } | null; // turn-based only: seconds each player took to lock last turn (set by App, travels with synced state)
-  totalThinkTime: { p1: number; p2: number }; // turn-based only: cumulative seconds spent thinking this match
+  lastTurnTimes: { p1: number; p2: number } | null; // Turn-based seconds spent planning before the most recent lock.
+  totalThinkTime: { p1: number; p2: number }; // Turn-based cumulative planning seconds, synchronized in game state.
   phase: GamePhase;
   phaseTimeRemaining: number; // in milliseconds
   phaseEndTime: number; // timestamp
