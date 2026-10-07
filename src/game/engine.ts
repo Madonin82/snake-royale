@@ -330,17 +330,26 @@ export function processGameTick(
   const nextHeadP2 = getNextHeadPosition(p2.body[0], p2.direction);
 
   // 4. CHECK COLLISIONS
+  // Detect token consumption BEFORE collisions: a snake that eats this tick
+  // does not vacate its tail, so the tail counts as body for collision purposes.
+  const p1WillGrow = state.tokens.some(t => t.x === nextHeadP1.x && t.y === nextHeadP1.y);
+  const p2WillGrow = state.tokens.some(t => t.x === nextHeadP2.x && t.y === nextHeadP2.y);
+
   // Check Wall / Shrink Arena bounds
   const p1HitWall = !isCellInArena(nextHeadP1, settings.gridSize, state.ringInset);
   const p2HitWall = !isCellInArena(nextHeadP2, settings.gridSize, state.ringInset);
 
-  // Check Self Collision (excluding tail if not eating a token this tick, but for head collision against existing body)
-  const p1HitSelf = p1.body.slice(0, -1).some(seg => seg.x === nextHeadP1.x && seg.y === nextHeadP1.y);
-  const p2HitSelf = p2.body.slice(0, -1).some(seg => seg.x === nextHeadP2.x && seg.y === nextHeadP2.y);
+  // Check Self Collision (tail excluded unless growing this tick)
+  const p1SelfBody = p1WillGrow ? p1.body : p1.body.slice(0, -1);
+  const p2SelfBody = p2WillGrow ? p2.body : p2.body.slice(0, -1);
+  const p1HitSelf = p1SelfBody.some(seg => seg.x === nextHeadP1.x && seg.y === nextHeadP1.y);
+  const p2HitSelf = p2SelfBody.some(seg => seg.x === nextHeadP2.x && seg.y === nextHeadP2.y);
 
-  // Check Opponent Body Collision
-  const p1HitP2Body = p2.body.slice(0, -1).some(seg => seg.x === nextHeadP1.x && seg.y === nextHeadP1.y);
-  const p2HitP1Body = p1.body.slice(0, -1).some(seg => seg.x === nextHeadP2.x && seg.y === nextHeadP2.y);
+  // Check Opponent Body Collision (opponent's tail counts if they are growing)
+  const p2BodyToCheck = p2WillGrow ? p2.body : p2.body.slice(0, -1);
+  const p1BodyToCheck = p1WillGrow ? p1.body : p1.body.slice(0, -1);
+  const p1HitP2Body = p2BodyToCheck.some(seg => seg.x === nextHeadP1.x && seg.y === nextHeadP1.y);
+  const p2HitP1Body = p1BodyToCheck.some(seg => seg.x === nextHeadP2.x && seg.y === nextHeadP2.y);
 
   // Check Head-on Collision
   const headOnSameCell = nextHeadP1.x === nextHeadP2.x && nextHeadP1.y === nextHeadP2.y;
