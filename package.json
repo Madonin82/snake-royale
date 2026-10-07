@@ -8,6 +8,7 @@
     "build": "vite build",
     "preview": "vite preview",
     "lint": "tsc --noEmit",
+    "test:ai-bridge": "node --import tsx --test src/game/aiBridge.test.ts",
     "test:network": "node --import tsx --test src/game/networkProtocol.test.ts",
     "test:think-time": "node --import tsx --test src/game/thinkTime.test.ts"
   },

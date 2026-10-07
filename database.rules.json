@@ -5,6 +5,23 @@
         ".read": "auth != null",
         ".write": "auth != null"
       }
+    },
+    "bridges": {
+      "$roomId": {
+        "$seat": {
+          ".read": "auth != null && ($seat == 'p1' || $seat == 'p2') && auth.uid == root.child('rooms/' + $roomId + '/' + $seat + 'Uid').val()",
+          ".write": "auth != null && ($seat == 'p1' || $seat == 'p2') && auth.uid == root.child('rooms/' + $roomId + '/' + $seat + 'Uid').val()",
+          ".validate": "newData.hasChildren(['seq', 'matchId']) && newData.child('seq').isNumber() && newData.child('seq').val() % 1 == 0 && newData.child('matchId').isString() && (!newData.child('moves').exists() || newData.child('moves').isList()) && (!newData.child('lock').exists() || newData.child('lock').isBoolean())",
+          "moves": {
+            "$moveIndex": {
+              ".validate": "newData.isString() && (newData.val() == 'UP' || newData.val() == 'DOWN' || newData.val() == 'LEFT' || newData.val() == 'RIGHT')"
+            }
+          },
+          "$other": {
+            ".validate": false
+          }
+        }
+      }
     }
   }
 }

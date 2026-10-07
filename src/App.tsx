@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { CompactGameState, Direction, GameSettings, GameState, LatencyReport, PlayMode, Position } from './types/game';
+import { onValue, ref } from 'firebase/database';
 import {
   createInitialState,
   DEFAULT_SETTINGS,
@@ -10,8 +11,10 @@ import {
 } from './game/engine';
 import { calculateAIMove } from './game/ai';
 import { cloneGameState, toCompactGameState } from './game/aiBridge';
+import { shouldApplyRtdbBridgeCommand } from './game/aiBridgeRtdb';
 import { gamepadController, GamepadMenuAction } from './game/gamepad';
 import { networkManager } from './game/network';
+import { rtdb } from './firebase';
 import { canAcceptState, canAdoptMatch, isCurrentMatch, isNewerSequence, MatchIdentity } from './game/networkProtocol';
 import { normalizeGameState } from './game/normalize';
 import { exportReplayToFile, parseAndValidateReplayData } from './game/replayFile';
@@ -142,6 +145,7 @@ export const App: React.FC = () => {
   const activeMatchRef = useRef<MatchIdentity | null>(null);
   const lastStateRevisionRef = useRef<number>(-1);
   const lastInputSequenceRef = useRef<{ p1: number; p2: number }>({ p1: 0, p2: 0 });
+  const lastBridgeCommandSequencesRef = useRef<Record<string, number>>({});
   const startNewMatchRef = useRef<() => void>(() => {});
   // BUGFIX 7: tracks the last STATE_SYNC tick processed on the guest so the
   // buffer drain runs exactly once per completed step. Duplicate, stale, or
@@ -708,6 +712,36 @@ export const App: React.FC = () => {
     if (!seat) return;
     handleBufferLock(seat === 'p1' ? 1 : 2, seat);
   }, [getBridgeSeat, handleBufferLock]);
+
+  useEffect(() => {
+    if (
+      !onlineRoomId ||
+      (playMode !== 'ONLINE_HOST' && playMode !== 'ONLINE_JOIN')
+    ) return;
+
+    const seat = getBridgeSeat();
+    if (!seat || onlineRole !== seat) return;
+
+    const commandPath = `bridges/${onlineRoomId}/${seat}`;
+    const commandRef = ref(rtdb, commandPath);
+    const unsubscribe = onValue(
+      commandRef,
+      snapshot => {
+        const command = snapshot.val();
+        const lastAppliedSeq = lastBridgeCommandSequencesRef.current[commandPath] ?? -1;
+        if (!shouldApplyRtdbBridgeCommand(command, activeMatchRef.current?.matchId ?? null, lastAppliedSeq)) {
+          return;
+        }
+
+        if (command.moves) queueBridgeMoves(command.moves);
+        if (command.lock) lockBridgeSeat();
+        lastBridgeCommandSequencesRef.current[commandPath] = command.seq;
+      },
+      error => console.error(`AI bridge RTDB listener failed for ${commandPath}:`, error),
+    );
+
+    return unsubscribe;
+  }, [getBridgeSeat, lockBridgeSeat, onlineRole, onlineRoomId, playMode, queueBridgeMoves]);
 
   const selectBridgeSeat = useCallback((seat: 'p1' | 'p2') => {
     const mode = playModeRef.current;
