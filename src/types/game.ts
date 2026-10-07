@@ -59,6 +59,44 @@ export interface GameState {
   readyConfirmed?: { p1: boolean; p2: boolean };
 }
 
+export interface CompactSnakeState {
+  body: Position[];
+  direction: Direction;
+  score: number;
+  isAlive: boolean;
+}
+
+export interface CompactGameState {
+  tick: number;
+  phase: GamePhase;
+  turnBased: boolean;
+  phaseTurnsRemaining: number;
+  phaseTimeRemaining: number;
+  round: number;
+  ringInset: number;
+  isTelegraphingShrink: boolean;
+  telegraphRingInset: number;
+  tokens: Position[];
+  snakes: {
+    p1: CompactSnakeState;
+    p2: CompactSnakeState;
+  };
+  locks: { p1: boolean; p2: boolean };
+  winner: GameState['winner'];
+}
+
+export interface SnakeAiBridge {
+  getSeat: () => 'p1' | 'p2' | null;
+  getState: (opts?: { compact?: boolean }) => GameState | CompactGameState;
+  queueMoves: (moves: Direction[]) => Direction[];
+  lock: () => void;
+  selectSeat: (seat: 'p1' | 'p2') => void;
+  onState: (
+    cb: (state: GameState | CompactGameState) => void,
+    opts?: { compact?: boolean },
+  ) => () => void;
+}
+
 export type PlayMode = 'SOLO_AI' | 'LOCAL_2P' | 'ONLINE_HOST' | 'ONLINE_JOIN' | 'ONLINE_SERVER' | 'ONLINE_SPECTATOR' | 'VIRTUAL_BOT';
 
 export interface LatencySample {
@@ -89,4 +127,10 @@ export interface NetworkInputPayload {
   dir: Direction;
   tick: number;
   clientTime: number;
+}
+
+declare global {
+  interface Window {
+    __SNAKE_AI__?: SnakeAiBridge;
+  }
 }

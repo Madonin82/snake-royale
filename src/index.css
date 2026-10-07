@@ -9,6 +9,14 @@
   }
 }
 
+.snake-ai-mode *,
+.snake-ai-mode *::before,
+.snake-ai-mode *::after {
+  animation: none !important;
+  transition: none !important;
+  scroll-behavior: auto !important;
+}
+
 /* Custom CRT scanline effect */
 .crt-overlay {
   position: relative;

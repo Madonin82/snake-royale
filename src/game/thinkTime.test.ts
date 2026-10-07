@@ -37,6 +37,33 @@ test('human click-lock transitions accrue the same timer state', () => {
   assert.deepEqual(model.lastTurnTimes, { p1: 1, p2: 0 });
 });
 
+test('bridge-controlled P2 accrues think time in SOLO_AI after built-in AI takeover', () => {
+  const state = createInitialState();
+  state.tick = 1;
+  state.readyConfirmed = { p1: true, p2: true };
+
+  const builtInAiEvents = getPlanningEnteredEvents(
+    state,
+    { p1: false, p2: false },
+    'SOLO_AI',
+    100,
+  );
+  assert.deepEqual(builtInAiEvents.map(event => event.player), ['p1']);
+
+  const bridgeEvents = getPlanningEnteredEvents(
+    state,
+    { p1: false, p2: false },
+    'SOLO_AI',
+    100,
+    false,
+  );
+  assert.deepEqual(bridgeEvents.map(event => event.player), ['p1', 'p2']);
+
+  let model = transitionThinkTime(createThinkTimeModel(), bridgeEvents[1]);
+  model = transitionThinkTime(model, { type: 'LOCK_LANDED', player: 'p2', at: 1600 });
+  assert.equal(applyThinkTimeModel(state, model).totalThinkTime.p2, 1.5);
+});
+
 test('retained post-tick locks stay paused, then re-enter planning when the buffer drains', () => {
   let model = createThinkTimeModel();
   model = transitionThinkTime(model, { type: 'PLANNING_ENTERED', player: 'p1', at: 100 });

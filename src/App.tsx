@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
-import { Direction, GameSettings, GameState, LatencyReport, PlayMode, Position } from './types/game';
+import { CompactGameState, Direction, GameSettings, GameState, LatencyReport, PlayMode, Position } from './types/game';
 import {
   createInitialState,
   DEFAULT_SETTINGS,
@@ -9,6 +9,7 @@ import {
   queueSnakeDirection,
 } from './game/engine';
 import { calculateAIMove } from './game/ai';
+import { cloneGameState, toCompactGameState } from './game/aiBridge';
 import { gamepadController, GamepadMenuAction } from './game/gamepad';
 import { networkManager } from './game/network';
 import { canAcceptState, canAdoptMatch, isCurrentMatch, isNewerSequence, MatchIdentity } from './game/networkProtocol';
@@ -59,7 +60,12 @@ function computeCommittedPath(snake: any, buffer: Direction[]): Position[] {
   return path;
 }
 
+function createLobbyState(settings: GameSettings): GameState {
+  return { ...createInitialState(settings), phase: 'LOBBY' };
+}
+
 export const App: React.FC = () => {
+  const aiMode = useMemo(() => new URLSearchParams(window.location.search).get('ai') === '1', []);
   const [settings, setSettings] = useState<GameSettings>(DEFAULT_SETTINGS);
   const [playMode, setPlayMode] = useState<PlayMode>('SOLO_AI');
   const [inLobby, setInLobby] = useState<boolean>(true);
@@ -70,7 +76,7 @@ export const App: React.FC = () => {
   const [hasP2, setHasP2] = useState<boolean>(false);
   const [spectatorsCount, setSpectatorsCount] = useState<number>(0);
 
-  const [gameState, setGameState] = useState<GameState>(() => createInitialState(DEFAULT_SETTINGS));
+  const [gameState, setGameState] = useState<GameState>(() => createLobbyState(DEFAULT_SETTINGS));
   const [latencyModalOpen, setLatencyModalOpen] = useState<boolean>(false);
   const [settingsModalOpen, setSettingsModalOpen] = useState<boolean>(false);
   const [latencyReport, setLatencyReport] = useState<LatencyReport>(() => networkManager.getLatencyReport());
@@ -187,6 +193,12 @@ export const App: React.FC = () => {
   const stateRef = useRef<GameState>(gameState);
   stateRef.current = gameState;
 
+  const bridgeSeatRef = useRef<'p1' | 'p2'>('p1');
+  const soloAiP2OverriddenRef = useRef(false);
+  const dispatchAiState = useCallback((state: GameState = stateRef.current) => {
+    window.dispatchEvent(new CustomEvent<GameState>('snake-ai-state', { detail: cloneGameState(state) }));
+  }, []);
+
   const settingsRef = useRef<GameSettings>(settings);
   settingsRef.current = settings;
 
@@ -195,6 +207,16 @@ export const App: React.FC = () => {
 
   const onlineRoleRef = useRef<'p1' | 'p2' | 'spectator' | 'server' | null>(onlineRole);
   onlineRoleRef.current = onlineRole;
+
+  const isBuiltInAiActive = useCallback(
+    () => playModeRef.current === 'SOLO_AI' && !soloAiP2OverriddenRef.current,
+    [],
+  );
+
+  useEffect(() => {
+    document.documentElement.classList.toggle('snake-ai-mode', aiMode);
+    return () => document.documentElement.classList.remove('snake-ai-mode');
+  }, [aiMode]);
 
   // Active menu handler ref for zero-re-render gamepad/keyboard dispatch
   const activeHandlerRef = useRef<((action: GamepadMenuAction) => void) | null>(null);
@@ -221,44 +243,55 @@ export const App: React.FC = () => {
       locksRef.current,
       mode,
       Date.now(),
+      isBuiltInAiActive(),
     );
     for (const event of events) applyThinkTransition(event);
-  }, [applyThinkTransition]);
+  }, [applyThinkTransition, isBuiltInAiActive]);
 
-  const commitLocks = useCallback((nextLocks: { p1: boolean; p2: boolean }) => {
+  const commitLocks = useCallback((
+    nextLocks: { p1: boolean; p2: boolean },
+    emitState = true,
+  ) => {
     const previousLocks = locksRef.current;
     locksRef.current = nextLocks;
     setLocks(nextLocks);
 
     const mode = playModeRef.current;
     const events = getThinkTimeLockEvents(previousLocks, nextLocks, Date.now());
-    if (mode === 'ONLINE_SPECTATOR') return;
     if (mode === 'ONLINE_JOIN') {
       const ownSeat = onlineRoleRef.current;
-      if (ownSeat !== 'p1' && ownSeat !== 'p2') return;
+      if (ownSeat === 'p1' || ownSeat === 'p2') {
+        for (const event of events) {
+          if (event.player !== ownSeat) continue;
+          applyThinkTransition(
+            event.type === 'PLANNING_ENTERED'
+              ? event
+              : { type: 'CANCEL', player: ownSeat },
+          );
+        }
+      }
+    } else if (mode !== 'ONLINE_SPECTATOR') {
       for (const event of events) {
-        if (event.player !== ownSeat) continue;
-        applyThinkTransition(
-          event.type === 'PLANNING_ENTERED'
-            ? event
-            : { type: 'CANCEL', player: ownSeat },
-        );
+        if (event.player === 'p2' && isBuiltInAiActive()) continue;
+        if (event.type === 'PLANNING_ENTERED') {
+          const state = stateRef.current;
+          if (state.phase === 'OVER' || !state.snakes[event.player]?.isAlive) continue;
+        }
+        applyThinkTransition(event);
       }
-      return;
+      maybeOpenPlanningSessions();
     }
+    if (emitState) dispatchAiState();
+  }, [applyThinkTransition, dispatchAiState, isBuiltInAiActive, maybeOpenPlanningSessions]);
 
-    for (const event of events) {
-      if (mode === 'SOLO_AI' && event.player === 'p2') continue;
-      if (event.type === 'PLANNING_ENTERED') {
-        const state = stateRef.current;
-        if (state.phase === 'OVER' || !state.snakes[event.player]?.isAlive) continue;
-      }
-      applyThinkTransition(event);
-    }
-    maybeOpenPlanningSessions();
-  }, [applyThinkTransition, maybeOpenPlanningSessions]);
-
-  const getTargetKey = useCallback((playerSlot: 1 | 2): 'p1' | 'p2' => {
+  const getTargetKey = useCallback((
+    playerSlot: 1 | 2,
+    bridgeSeat?: 'p1' | 'p2',
+  ): 'p1' | 'p2' => {
+    if (
+      bridgeSeat &&
+      (playModeRef.current === 'SOLO_AI' || playModeRef.current === 'LOCAL_2P')
+    ) return bridgeSeat;
     if (playModeRef.current === 'SOLO_AI') return 'p1';
     if (playModeRef.current === 'ONLINE_HOST' || playModeRef.current === 'ONLINE_SERVER') return 'p1';
     if (playModeRef.current === 'ONLINE_JOIN') return onlineRoleRef.current === 'p1' ? 'p1' : 'p2';
@@ -326,7 +359,7 @@ export const App: React.FC = () => {
     const bothReady = !isOnline || (current.readyConfirmed?.p1 && current.readyConfirmed?.p2);
     if (!bothReady) return;
 
-    if (playModeRef.current === 'SOLO_AI' && !locksRef.current.p2) {
+    if (isBuiltInAiActive() && !locksRef.current.p2) {
       const p2Buf = [...moveBuffersRef.current.p2];
       const p2Snake = current.snakes.p2;
       if (p2Buf.length === 0) {
@@ -379,10 +412,11 @@ export const App: React.FC = () => {
       p2: newP2Buf.length > 0 ? locksRef.current.p2 : false,
     };
     stateRef.current = nextState;
-    commitLocks(nextLocks);
+    commitLocks(nextLocks, false);
 
     setGameState(nextState);
     setMatchHistory(prev => [...prev, nextState]);
+    dispatchAiState(nextState);
 
     if (playModeRef.current === 'ONLINE_HOST' || playModeRef.current === 'ONLINE_SERVER') {
       networkManager.broadcastState(nextState, locksRef.current);
@@ -393,13 +427,18 @@ export const App: React.FC = () => {
       ((moveBuffersRef.current.p1.length > 0 && moveBuffersRef.current.p2.length > 0) ||
        (playModeRef.current === 'SOLO_AI' && !locksRef.current.p2));
 
-    if (canProgress) {
+    if (canProgress && aiMode) {
+      queueMicrotask(() => {
+        turnTimeoutRef.current = null;
+        maybeAdvanceTurn();
+      });
+    } else if (canProgress) {
       turnTimeoutRef.current = setTimeout(() => {
         turnTimeoutRef.current = null;
         maybeAdvanceTurn();
       }, 550);
     }
-  }, [applyThinkTransition, commitLocks, playTickEvents]);
+  }, [aiMode, applyThinkTransition, commitLocks, dispatchAiState, isBuiltInAiActive, playTickEvents]);
 
   const autoLockPlayer = useCallback((who: 'p1' | 'p2') => {
     if (locksRef.current[who]) return;
@@ -450,13 +489,13 @@ export const App: React.FC = () => {
       (['p1', 'p2'] as const).forEach(who => {
         const isOwnSeat =
           mode === 'LOCAL_2P' ||
-          (mode === 'SOLO_AI' && who === 'p1') ||
+          (mode === 'SOLO_AI' && (who === 'p1' || !isBuiltInAiActive())) ||
           (mode === 'ONLINE_HOST' && who === 'p1') ||
           (mode === 'ONLINE_JOIN' && onlineRoleRef.current === who);
         const isAuthority =
           mode !== 'ONLINE_JOIN' &&
           mode !== 'ONLINE_SPECTATOR' &&
-          !(mode === 'SOLO_AI' && who === 'p2');
+          !(mode === 'SOLO_AI' && who === 'p2' && isBuiltInAiActive());
         const snake = current.snakes[who];
 
         if (
@@ -513,6 +552,7 @@ export const App: React.FC = () => {
     replayActive,
     settings.thinkTimeSeconds,
     settings.turnBased,
+    isBuiltInAiActive,
   ]);
 
   const handleBufferUndo = useCallback((playerSlot: 1 | 2) => {
@@ -540,10 +580,13 @@ export const App: React.FC = () => {
     soundEngine.playTick();
   }, [inLobby, inOnlineLobby, getTargetKey]);
 
-  const handleBufferLock = useCallback((playerSlot: 1 | 2) => {
+  const handleBufferLock = useCallback((
+    playerSlot: 1 | 2,
+    bridgeSeat?: 'p1' | 'p2',
+  ) => {
     const current = stateRef.current;
     if (current.phase === 'OVER' || inLobby || inOnlineLobby || !settingsRef.current.turnBased) return;
-    const targetKey = getTargetKey(playerSlot);
+    const targetKey = getTargetKey(playerSlot, bridgeSeat);
     const buf = moveBuffersRef.current[targetKey];
     if (buf.length === 0 || locksRef.current[targetKey]) return;
 
@@ -561,31 +604,34 @@ export const App: React.FC = () => {
     maybeAdvanceTurn();
   }, [inLobby, inOnlineLobby, maybeAdvanceTurn, setLock, getTargetKey]);
 
-  const handleDirectionInput = useCallback((playerSlot: 1 | 2, dir: Direction) => {
+  const handleDirectionInput = useCallback((
+    playerSlot: 1 | 2,
+    dir: Direction,
+    bridgeSeat?: 'p1' | 'p2',
+  ): boolean => {
     const current = stateRef.current;
-    if (current.phase === 'OVER' || inLobby || inOnlineLobby) return;
-    if (playModeRef.current === 'ONLINE_SERVER' || playModeRef.current === 'ONLINE_SPECTATOR') return;
+    if (current.phase === 'OVER' || inLobby || inOnlineLobby) return false;
+    if (playModeRef.current === 'ONLINE_SERVER' || playModeRef.current === 'ONLINE_SPECTATOR') return false;
 
-    const targetKey = getTargetKey(playerSlot);
+    const targetKey = getTargetKey(playerSlot, bridgeSeat);
 
     const currentSnake = current.snakes[targetKey];
-    if (!currentSnake || !currentSnake.isAlive) return;
-
+    if (!currentSnake || !currentSnake.isAlive) return false;
     soundEngine.playTick();
 
     if (settingsRef.current.turnBased) {
-      if (locksRef.current[targetKey]) return;
+      if (locksRef.current[targetKey]) return false;
 
       const buf = [...moveBuffersRef.current[targetKey]];
-      if (buf.length >= currentSnake.body.length) return;
+      if (buf.length >= currentSnake.body.length) return false;
 
       const lastDir = buf.length > 0 ? buf[buf.length - 1] : currentSnake.direction;
-      if (isOppositeDirection(lastDir, dir)) return;
+      if (isOppositeDirection(lastDir, dir)) return false;
 
       buf.push(dir);
       moveBuffersRef.current = { ...moveBuffersRef.current, [targetKey]: buf };
       setMoveBuffers({ ...moveBuffersRef.current });
-      return;
+      return true;
     }
 
     if (playModeRef.current === 'ONLINE_JOIN') {
@@ -595,16 +641,93 @@ export const App: React.FC = () => {
         ...prev,
         snakes: { ...prev.snakes, [targetKey]: snakeCopy }
       }));
-      return;
+      return true;
     }
 
-    queueSnakeDirection(stateRef.current.snakes[targetKey], dir);
+    if (!queueSnakeDirection(stateRef.current.snakes[targetKey], dir)) return false;
     const snakeCopy = { ...current.snakes[targetKey], queuedDirection: dir };
     setGameState(prev => ({
       ...prev,
       snakes: { ...prev.snakes, [targetKey]: snakeCopy }
     }));
-  }, [inLobby, inOnlineLobby]);
+    return true;
+  }, [getTargetKey, inLobby, inOnlineLobby]);
+
+  const getBridgeSeat = useCallback((): 'p1' | 'p2' | null => {
+    const mode = playModeRef.current;
+    if (mode === 'LOCAL_2P' || mode === 'SOLO_AI') return bridgeSeatRef.current;
+    if (mode === 'ONLINE_HOST') return 'p1';
+    if (mode === 'ONLINE_JOIN') {
+      return onlineRoleRef.current === 'p1' || onlineRoleRef.current === 'p2'
+        ? onlineRoleRef.current
+        : null;
+    }
+    if (mode === 'ONLINE_SERVER' || mode === 'ONLINE_SPECTATOR') return null;
+    return 'p1';
+  }, []);
+
+  const queueBridgeMoves = useCallback((moves: Direction[]): Direction[] => {
+    const seat = getBridgeSeat();
+    if (!seat) return [];
+
+    const accepted: Direction[] = [];
+    const slot: 1 | 2 = seat === 'p1' ? 1 : 2;
+    for (const direction of moves) {
+      if (!['UP', 'DOWN', 'LEFT', 'RIGHT'].includes(direction)) continue;
+      const snake = stateRef.current.snakes[seat];
+      if (
+        settingsRef.current.turnBased &&
+        moveBuffersRef.current[seat].length >= snake.body.length
+      ) break;
+      if (handleDirectionInput(slot, direction, seat)) accepted.push(direction);
+    }
+    return accepted;
+  }, [getBridgeSeat, handleDirectionInput]);
+
+  const lockBridgeSeat = useCallback(() => {
+    const seat = getBridgeSeat();
+    if (!seat) return;
+    handleBufferLock(seat === 'p1' ? 1 : 2, seat);
+  }, [getBridgeSeat, handleBufferLock]);
+
+  const selectBridgeSeat = useCallback((seat: 'p1' | 'p2') => {
+    const mode = playModeRef.current;
+    if (mode !== 'LOCAL_2P' && mode !== 'SOLO_AI') return;
+    bridgeSeatRef.current = seat;
+    if (mode === 'SOLO_AI' && seat === 'p2') soloAiP2OverriddenRef.current = true;
+  }, []);
+
+  const subscribeAiState = useCallback((
+    cb: (state: GameState | CompactGameState) => void,
+    opts?: { compact?: boolean },
+  ) => {
+    const listener = (event: Event) => {
+      const state = (event as CustomEvent<GameState>).detail;
+      cb(opts?.compact ? toCompactGameState(state, locksRef.current) : state);
+    };
+    window.addEventListener('snake-ai-state', listener);
+    return () => window.removeEventListener('snake-ai-state', listener);
+  }, []);
+
+  useEffect(() => {
+    const bridge = {
+      getSeat: getBridgeSeat,
+      getState: (opts?: { compact?: boolean }) => {
+        const state = stateRef.current;
+        return opts?.compact
+          ? toCompactGameState(state, locksRef.current)
+          : cloneGameState(state);
+      },
+      queueMoves: queueBridgeMoves,
+      lock: lockBridgeSeat,
+      selectSeat: selectBridgeSeat,
+      onState: subscribeAiState,
+    };
+    window.__SNAKE_AI__ = bridge;
+    return () => {
+      if (window.__SNAKE_AI__ === bridge) delete window.__SNAKE_AI__;
+    };
+  }, [getBridgeSeat, lockBridgeSeat, queueBridgeMoves, selectBridgeSeat, subscribeAiState]);
 
   const handleUpdateSettings = useCallback((newVals: Partial<GameSettings>) => {
     setSettings(prev => {
@@ -632,9 +755,10 @@ export const App: React.FC = () => {
       setSeries({ p1: 0, p2: 0, draws: 0 });
       setPlayerNames({ p1: 'PLAYER 1', p2: 'PLAYER 2' });
     }
-    const initial = createInitialState(settingsRef.current);
+    const initial = createLobbyState(settingsRef.current);
     stateRef.current = initial;
     setGameState(initial);
+    dispatchAiState(initial);
     setInLobby(true);
     setInOnlineLobby(false);
     setReplayActive(false);
@@ -1001,6 +1125,7 @@ export const App: React.FC = () => {
               setInOnlineLobby(false);
               setInLobby(false);
             }
+            dispatchAiState(stateRef.current);
           }
           break;
         }
@@ -1087,7 +1212,7 @@ export const App: React.FC = () => {
     return () => {
       unsubscribe();
     };
-  }, [inOnlineLobby, clearLocks, maybeAdvanceTurn, setLock, adoptRoomSettings, commitLocks, applyThinkTransition]);
+  }, [inOnlineLobby, clearLocks, maybeAdvanceTurn, setLock, adoptRoomSettings, commitLocks, applyThinkTransition, dispatchAiState]);
 
   // Latency Report Polling
   useEffect(() => {
@@ -1153,7 +1278,7 @@ export const App: React.FC = () => {
         playModeRef.current === 'ONLINE_HOST' || playModeRef.current === 'ONLINE_SERVER';
       if (isOnlineAuthority && (!current.readyConfirmed?.p1 || !current.readyConfirmed?.p2)) return;
 
-      if (playModeRef.current === 'SOLO_AI') {
+      if (isBuiltInAiActive()) {
         const aiDir = calculateAIMove(
           current,
           settingsRef.current.gridSize,
@@ -1173,8 +1298,10 @@ export const App: React.FC = () => {
       if (events.deathOccurred) soundEngine.playCrash();
       if (events.matchEnded) soundEngine.playVictory();
 
+      stateRef.current = nextState;
       setGameState(nextState);
       setMatchHistory(prev => [...prev, nextState]);
+      dispatchAiState(nextState);
 
       if (playModeRef.current === 'ONLINE_HOST' || playModeRef.current === 'ONLINE_SERVER') {
         networkManager.broadcastState(nextState);
@@ -1182,7 +1309,7 @@ export const App: React.FC = () => {
     }, tickIntervalMs);
 
     return () => clearInterval(intervalId);
-  }, [inLobby, inOnlineLobby, playMode, settings.tickRate, settings.turnBased]);
+  }, [dispatchAiState, inLobby, inOnlineLobby, isBuiltInAiActive, playMode, settings.tickRate, settings.turnBased]);
 
   // Series scorebook
   useEffect(() => {
@@ -1220,6 +1347,7 @@ export const App: React.FC = () => {
 
   const startNewMatch = () => {
     activeHandlerRef.current = null;
+    soloAiP2OverriddenRef.current = playMode === 'SOLO_AI' && bridgeSeatRef.current === 'p2';
     const me = displayName.trim();
     let matchNames = { p1: 'PLAYER 1', p2: 'PLAYER 2' };
     if (playMode === 'SOLO_AI') {
@@ -1251,6 +1379,7 @@ export const App: React.FC = () => {
     setGameState(initial);
     clearLocks();
     maybeOpenPlanningSessions();
+    dispatchAiState(initial);
     sentTickRef.current = -1;
     lastStateTickRef.current = -1;
     lastStateRevisionRef.current = -1;
@@ -1269,12 +1398,14 @@ export const App: React.FC = () => {
   startNewMatchRef.current = startNewMatch;
 
   const handleStartSolo = (diff: 'EASY' | 'MEDIUM' | 'HARD') => {
+    bridgeSeatRef.current = 'p1';
     setSettings(prev => ({ ...prev, botDifficulty: diff }));
     setPlayMode('SOLO_AI');
     startNewMatch();
   };
 
   const handleStartLocal2P = () => {
+    bridgeSeatRef.current = 'p1';
     setPlayMode('LOCAL_2P');
     startNewMatch();
   };
@@ -1537,6 +1668,7 @@ export const App: React.FC = () => {
                   controlSeat={playMode === 'ONLINE_JOIN' && onlineRole === 'p2' ? 'p2' : 'p1'}
                   onDirection={(dir) => handleDirectionInput(1, dir)}
                   interactionEnabled={!replayActive}
+                  animationsDisabled={aiMode}
                 />
                 {!replayActive && (playMode === 'ONLINE_HOST' || playMode === 'ONLINE_JOIN' || playMode === 'ONLINE_SERVER') && !(displayState.readyConfirmed?.p1 && displayState.readyConfirmed?.p2) && (
                   <div className="absolute inset-0 bg-[#0F380F]/90 backdrop-blur-xs flex flex-col items-center justify-center p-3 z-20 font-mono text-[#9BBC0F]">
