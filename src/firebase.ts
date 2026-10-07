@@ -19,7 +19,7 @@ export const auth = getAuth(app);
 export const db = getFirestore(app);
 export const rtdb = getDatabase(app);
 
-export const ADMIN_UIDS = ['REPLACE_WITH_JIMMY_GOOGLE_UID'];
+export const ADMIN_UIDS = ['UV4T0gFhciXwOLY19CJ1yma3ZMg2'];
 
 function waitForInitialAuthState(): Promise<void> {
   return new Promise((resolve, reject) => {
