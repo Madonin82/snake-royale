@@ -1,7 +1,9 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { GameSettings } from '../types/game';
 import { soundEngine } from '../audio/soundEngine';
 import { GamepadMenuAction } from '../game/gamepad';
+import { ADMIN_UIDS, auth, signOutToAnonymous } from '../firebase';
+import { GoogleAuthProvider, onAuthStateChanged, signInWithPopup, User } from 'firebase/auth';
 import { Settings, Volume2, VolumeX, X, Grid, Gauge, Tv } from 'lucide-react';
 
 interface SettingsModalProps {
@@ -22,16 +24,58 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
   onRegisterHandler,
 }) => {
   const [focusIndex, setFocusIndex] = useState<number>(0);
+  const [authUser, setAuthUser] = useState<User | null>(auth.currentUser);
+  const [authBusy, setAuthBusy] = useState<boolean>(false);
+  const [authError, setAuthError] = useState<string | null>(null);
 
-  type SettingsRow = 'STYLE' | 'TURNS' | 'GRID' | 'TICKS' | 'THINK_TIME' | 'SOUND' | 'CRT' | 'CLOSE';
+  type SettingsRow = 'STYLE' | 'TURNS' | 'GRID' | 'TICKS' | 'THINK_TIME' | 'SOUND' | 'CRT' | 'ACCOUNT' | 'CLOSE';
 
   const rows: SettingsRow[] = isOnlineGuest
-    ? ['SOUND', 'CRT', 'CLOSE']
+    ? ['SOUND', 'CRT', 'ACCOUNT', 'CLOSE']
     : settings.turnBased
-    ? ['STYLE', 'TURNS', 'GRID', 'THINK_TIME', 'SOUND', 'CRT', 'CLOSE']
-    : ['STYLE', 'GRID', 'TICKS', 'SOUND', 'CRT', 'CLOSE'];
+    ? ['STYLE', 'TURNS', 'GRID', 'THINK_TIME', 'SOUND', 'CRT', 'ACCOUNT', 'CLOSE']
+    : ['STYLE', 'GRID', 'TICKS', 'SOUND', 'CRT', 'ACCOUNT', 'CLOSE'];
 
   const currentRow = rows[focusIndex] || rows[0];
+  const signedInUser = authUser && !authUser.isAnonymous ? authUser : null;
+
+  useEffect(() => {
+    if (!isOpen) return;
+    return onAuthStateChanged(auth, setAuthUser, (error) => {
+      setAuthError(`Authentication state failed: ${error.message}`);
+    });
+  }, [isOpen]);
+
+  const handleGoogleSignIn = useCallback(async () => {
+    setAuthBusy(true);
+    setAuthError(null);
+    try {
+      await signInWithPopup(auth, new GoogleAuthProvider());
+    } catch (error) {
+      const code = typeof error === 'object' && error !== null && 'code' in error
+        ? String(error.code)
+        : '';
+      if (code !== 'auth/popup-closed-by-user' && code !== 'auth/cancelled-popup-request') {
+        const message = error instanceof Error ? error.message : String(error);
+        setAuthError(`Google sign-in failed: ${message}`);
+      }
+    } finally {
+      setAuthBusy(false);
+    }
+  }, []);
+
+  const handleSignOut = useCallback(async () => {
+    setAuthBusy(true);
+    setAuthError(null);
+    try {
+      await signOutToAnonymous();
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      setAuthError(`Sign out failed: ${message}`);
+    } finally {
+      setAuthBusy(false);
+    }
+  }, []);
 
   useEffect(() => {
     if (!isOpen) return;
@@ -101,6 +145,12 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
           }
           case 'CRT':
             onUpdateSettings({ crtFilterEnabled: !settings.crtFilterEnabled });
+            break;
+          case 'ACCOUNT':
+            if (!authBusy) {
+              if (signedInUser) void handleSignOut();
+              else void handleGoogleSignIn();
+            }
             break;
           case 'CLOSE':
             onClose();
@@ -175,7 +225,20 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
     return () => {
       onRegisterHandler?.(null);
     };
-  }, [isOpen, currentRow, settings, rows.length, onUpdateSettings, onClose, onRegisterHandler, isOnlineGuest]);
+  }, [
+    isOpen,
+    currentRow,
+    settings,
+    rows.length,
+    onUpdateSettings,
+    onClose,
+    onRegisterHandler,
+    isOnlineGuest,
+    authBusy,
+    signedInUser,
+    handleSignOut,
+    handleGoogleSignIn,
+  ]);
 
   if (!isOpen) return null;
 
@@ -466,6 +529,43 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
             >
               {settings.crtFilterEnabled ? 'ON' : 'OFF'}
             </button>
+          </div>
+
+          {/* Optional account sign-in */}
+          <div
+            className={`flex flex-col gap-1 p-2 border transition-all ${
+              currentRow === 'ACCOUNT'
+                ? 'bg-[#8BAC0F] border-[#0F380F] ring-2 ring-[#0F380F]'
+                : 'bg-[#8BAC0F] border-[#0F380F]'
+            }`}
+            onClick={() => setFocusIndex(rows.indexOf('ACCOUNT'))}
+          >
+            <div className="flex items-center justify-between gap-2">
+              <div className="flex min-w-0 items-center gap-1">
+                {currentRow === 'ACCOUNT' && <span className="animate-pulse">►</span>}
+                <span>ACCOUNT:</span>
+                {signedInUser && (
+                  <span className="truncate">
+                    {signedInUser.displayName || signedInUser.email || 'Google account'}
+                  </span>
+                )}
+                {signedInUser && ADMIN_UIDS.includes(signedInUser.uid) && (
+                  <span className="shrink-0 bg-[#0F380F] text-[#9BBC0F] px-1 text-[9px]">ADMIN ✓</span>
+                )}
+              </div>
+              <button
+                type="button"
+                disabled={authBusy}
+                onClick={() => {
+                  if (signedInUser) void handleSignOut();
+                  else void handleGoogleSignIn();
+                }}
+                className="shrink-0 px-2 py-1 border border-[#0F380F] font-black cursor-pointer disabled:cursor-wait disabled:opacity-60"
+              >
+                {authBusy ? 'PLEASE WAIT…' : signedInUser ? 'SIGN OUT' : 'SIGN IN WITH GOOGLE'}
+              </button>
+            </div>
+            {authError && <div role="status" className="text-[9px] font-bold">{authError}</div>}
           </div>
         </div>
 
