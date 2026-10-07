@@ -125,6 +125,7 @@ export function getPlanningEnteredEvents(
   locks: { p1: boolean; p2: boolean },
   mode: PlayMode,
   at: number,
+  builtInAiActive = mode === 'SOLO_AI',
 ): ThinkTimeLockEvent[] {
   if (
     mode === 'ONLINE_JOIN' ||
@@ -139,7 +140,7 @@ export function getPlanningEnteredEvents(
   const events: ThinkTimeLockEvent[] = [];
   for (const player of ['p1', 'p2'] as const) {
     if (
-      (mode === 'SOLO_AI' && player === 'p2') ||
+      (builtInAiActive && player === 'p2') ||
       locks[player] ||
       !state.snakes[player]?.isAlive
     ) continue;

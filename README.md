@@ -44,6 +44,12 @@ A tiny competitive Snake game for two players: race for tokens on a small board,
 
 The simulation authority (host or server) publishes match-tagged, revisioned snapshots to `rooms/{roomId}/state/current`. State and input messages use both WebRTC (when available) and Firebase RTDB fallback; clients deduplicate them by match and sequence so delayed packets from an earlier match cannot roll the board back. Online real-time simulation waits for both players to confirm readiness. Each player writes only their own input doc; spectators register a small presence doc under `rooms/{roomId}/spectators/`. Anonymous Firebase Auth gives every client a UID — no sign-up.
 
+## Automated play
+
+Append `?ai=1` to disable cosmetic animations and turn pacing. The page exposes `window.__SNAKE_AI__` with `getSeat()`, `getState({ compact: true })`, `queueMoves([...])`, `lock()`, `selectSeat('p1' | 'p2')`, and `onState(callback, { compact: true })`. State updates are also dispatched as `snake-ai-state` window events, with the current `GameState` in `event.detail`.
+
+The bridge controls only its assigned online seat. In local modes, `selectSeat` switches between P1 and P2; selecting P2 in Solo vs AI disables the built-in P2 AI for the rest of that match. `queueMoves` uses the normal move validation and returns the directions that were accepted.
+
 ## Run it locally
 
 ```bash

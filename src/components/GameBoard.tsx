@@ -9,10 +9,12 @@ interface GameBoardProps {
   controlSeat: 'p1' | 'p2';
   onDirection: (direction: Direction) => void;
   interactionEnabled: boolean;
+  animationsDisabled?: boolean;
 }
 
 export const GameBoard: React.FC<GameBoardProps> = ({
   gameState, settings, lockedPaths, controlSeat, onDirection, interactionEnabled,
+  animationsDisabled = false,
 }) => {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const pointerStartRef = useRef<{ id: number; x: number; y: number } | null>(null);
@@ -67,7 +69,7 @@ export const GameBoard: React.FC<GameBoardProps> = ({
     if (gameState.isTelegraphingShrink) {
       const telegraphInset = gameState.telegraphRingInset;
       // Pulse blink every 200ms
-      const blinkState = Math.floor(Date.now() / 200) % 2 === 0;
+      const blinkState = !animationsDisabled && Math.floor(Date.now() / 200) % 2 === 0;
       if (blinkState) {
         ctx.fillStyle = GAMEBOY_COLORS.DARK;
         for (let x = 0; x < gridSize; x++) {
@@ -84,7 +86,7 @@ export const GameBoard: React.FC<GameBoardProps> = ({
     }
 
     // 5. Render Tokens (Escalating Round Tokens)
-    const tokenBlink = Math.floor(Date.now() / 250) % 2 === 0;
+    const tokenBlink = !animationsDisabled && Math.floor(Date.now() / 250) % 2 === 0;
     for (const token of gameState.tokens) {
       renderToken(ctx, token.x * cellSize, token.y * cellSize, cellSize, tokenBlink);
     }
@@ -114,7 +116,7 @@ export const GameBoard: React.FC<GameBoardProps> = ({
     ctx.lineWidth = 4;
     ctx.strokeRect(2, 2, boardPixelSize - 4, boardPixelSize - 4);
 
-  }, [gameState, settings, lockedPaths]);
+  }, [gameState, settings, lockedPaths, animationsDisabled]);
 
   const handlePointerDown = (event: ReactPointerEvent<HTMLCanvasElement>) => {
     if (!interactionEnabled || event.pointerType !== 'touch' ||
