@@ -14,6 +14,15 @@ import { networkManager } from './game/network';
 import { canAcceptState, canAdoptMatch, isCurrentMatch, isNewerSequence, MatchIdentity } from './game/networkProtocol';
 import { normalizeGameState } from './game/normalize';
 import { exportReplayToFile, parseAndValidateReplayData } from './game/replayFile';
+import {
+  adoptThinkTimeSnapshot,
+  applyThinkTimeModel,
+  createThinkTimeModel,
+  getThinkTimeLockEvents,
+  getPlanningEnteredEvents,
+  ThinkTimeEvent,
+  transitionThinkTime,
+} from './game/thinkTime';
 import { soundEngine } from './audio/soundEngine';
 import { GameBoard } from './components/GameBoard';
 import { Hud } from './components/Hud';
@@ -190,72 +199,64 @@ export const App: React.FC = () => {
   // Active menu handler ref for zero-re-render gamepad/keyboard dispatch
   const activeHandlerRef = useRef<((action: GamepadMenuAction) => void) | null>(null);
 
-  // THINK CLOCK — per-player, per-decision-window timing.
-  // A session runs only while the player's buffer is empty and accepting input.
-  // It pauses the moment they lock; time accrues only for completed windows.
-  // Driven by lock transitions (see the locks effect below), so every mode
-  // (local, solo, online host/join) is handled in one place.
-  interface ThinkSession { accum: number; sessionStart: number | null }
-  const thinkRef = useRef<{ p1: ThinkSession; p2: ThinkSession }>({
-    p1: { accum: 0, sessionStart: null },
-    p2: { accum: 0, sessionStart: null },
-  });
-  const [thinkSessions, setThinkSessions] = useState({
-    p1: { startTime: null as number | null },
-    p2: { startTime: null as number | null },
-  });
-
-  const thinkSessionStart = useCallback((who: 'p1' | 'p2') => {
-    const t = thinkRef.current[who];
-    if (t.sessionStart !== null) return;
-    const current = stateRef.current;
-    if (current.phase === 'OVER') return;
-    const snake = current.snakes[who];
-    if (!snake || !snake.isAlive) return;
-    t.sessionStart = Date.now();
-    const startTime = t.sessionStart;
-    setThinkSessions(prev => ({ ...prev, [who]: { startTime } }));
+  // The think-time model is the sole source of last-turn and cumulative times.
+  const thinkRef = useRef(createThinkTimeModel());
+  const applyThinkTransition = useCallback((event: ThinkTimeEvent) => {
+    const nextModel = transitionThinkTime(thinkRef.current, event);
+    if (nextModel === thinkRef.current) return;
+    thinkRef.current = nextModel;
+    const nextState = applyThinkTimeModel(stateRef.current, nextModel);
+    stateRef.current = nextState;
+    setGameState(prev => applyThinkTimeModel(prev, nextModel));
   }, []);
+  const thinkSessions = {
+    p1: { startTime: thinkRef.current.sessions.p1.planningStartedAt },
+    p2: { startTime: thinkRef.current.sessions.p2.planningStartedAt },
+  };
 
-  const thinkSessionEnd = useCallback((who: 'p1' | 'p2') => {
-    const t = thinkRef.current[who];
-    if (t.sessionStart === null) return;
-    const dt = parseFloat(((Date.now() - t.sessionStart) / 1000).toFixed(1));
-    t.accum = parseFloat((t.accum + dt).toFixed(1));
-    t.sessionStart = null;
-    setThinkSessions(prev => ({ ...prev, [who]: { startTime: null } }));
-    const accum = t.accum;
-    setGameState(prev => ({
-      ...prev,
-      totalThinkTime: { ...prev.totalThinkTime, [who]: accum },
-      lastTurnTimes: { ...(prev.lastTurnTimes || { p1: 0, p2: 0 }), [who]: dt },
-    }));
-  }, []);
+  const maybeOpenPlanningSessions = useCallback(() => {
+    const mode = playModeRef.current;
+    const events = getPlanningEnteredEvents(
+      stateRef.current,
+      locksRef.current,
+      mode,
+      Date.now(),
+    );
+    for (const event of events) applyThinkTransition(event);
+  }, [applyThinkTransition]);
 
-  // Ends a session WITHOUT accruing (AI locks, game-over cleanup).
-  const thinkSessionCancel = useCallback((who: 'p1' | 'p2') => {
-    const t = thinkRef.current[who];
-    if (t.sessionStart === null) return;
-    t.sessionStart = null;
-    setThinkSessions(prev => ({ ...prev, [who]: { startTime: null } }));
-  }, []);
+  const commitLocks = useCallback((nextLocks: { p1: boolean; p2: boolean }) => {
+    const previousLocks = locksRef.current;
+    locksRef.current = nextLocks;
+    setLocks(nextLocks);
 
-  // Lock transitions drive the think sessions.
-  const prevLocksRef = useRef({ p1: false, p2: false });
-  // Tracks whether think sessions were started for the current match.
-  // Sessions start on the first tick after both players are ready (not at
-  // match setup), so a player who confirms ready early isn't timed while
-  // waiting for their opponent.
-  const thinkStartedRef = useRef(false);
-  useEffect(() => {
-    (['p1', 'p2'] as const).forEach(who => {
-      const was = prevLocksRef.current[who];
-      const is = locks[who];
-      if (!was && is) thinkSessionEnd(who);
-      else if (was && !is) thinkSessionStart(who);
-    });
-    prevLocksRef.current = { ...locks };
-  }, [locks, thinkSessionStart, thinkSessionEnd]);
+    const mode = playModeRef.current;
+    const events = getThinkTimeLockEvents(previousLocks, nextLocks, Date.now());
+    if (mode === 'ONLINE_SPECTATOR') return;
+    if (mode === 'ONLINE_JOIN') {
+      const ownSeat = onlineRoleRef.current;
+      if (ownSeat !== 'p1' && ownSeat !== 'p2') return;
+      for (const event of events) {
+        if (event.player !== ownSeat) continue;
+        applyThinkTransition(
+          event.type === 'PLANNING_ENTERED'
+            ? event
+            : { type: 'CANCEL', player: ownSeat },
+        );
+      }
+      return;
+    }
+
+    for (const event of events) {
+      if (mode === 'SOLO_AI' && event.player === 'p2') continue;
+      if (event.type === 'PLANNING_ENTERED') {
+        const state = stateRef.current;
+        if (state.phase === 'OVER' || !state.snakes[event.player]?.isAlive) continue;
+      }
+      applyThinkTransition(event);
+    }
+    maybeOpenPlanningSessions();
+  }, [applyThinkTransition, maybeOpenPlanningSessions]);
 
   const getTargetKey = useCallback((playerSlot: 1 | 2): 'p1' | 'p2' => {
     if (playModeRef.current === 'SOLO_AI') return 'p1';
@@ -269,13 +270,11 @@ export const App: React.FC = () => {
     thinkTimeEndsRef.current = { ...thinkTimeEndsRef.current, [who]: null };
     lastThinkTimeTickRef.current = { ...lastThinkTimeTickRef.current, [who]: null };
     setThinkTimeRemaining(prev => ({ ...prev, [who]: null }));
-    locksRef.current = { ...locksRef.current, [who]: true };
-    setLocks(locksRef.current);
-    // Think session ends via the locks-transition effect.
+    commitLocks({ ...locksRef.current, [who]: true });
     if (playModeRef.current === 'ONLINE_HOST' || playModeRef.current === 'ONLINE_SERVER') {
       networkManager.broadcastState(stateRef.current, locksRef.current);
     }
-  }, []);
+  }, [commitLocks]);
 
   const clearLocks = useCallback(() => {
     thinkTimeEndsRef.current = { p1: null, p2: null };
@@ -284,15 +283,9 @@ export const App: React.FC = () => {
     setThinkTimeRemaining({ p1: null, p2: null });
     locksRef.current = { p1: false, p2: false };
     setLocks(locksRef.current);
-    // New match: reset accumulators. Think sessions open on the first tick
-    // after both players are ready (see maybeAdvanceTurn).
-    thinkRef.current.p1 = { accum: 0, sessionStart: null };
-    thinkRef.current.p2 = { accum: 0, sessionStart: null };
-    setThinkSessions({ p1: { startTime: null }, p2: { startTime: null } });
-    prevLocksRef.current = { p1: false, p2: false };
-    thinkStartedRef.current = false;
+    applyThinkTransition({ type: 'RESET' });
     clearMoveBuffers();
-  }, [clearMoveBuffers, thinkSessionStart]);
+  }, [applyThinkTransition, clearMoveBuffers]);
 
   const playTickEvents = useCallback((events: {
     tokenEatenP1: boolean;
@@ -333,14 +326,6 @@ export const App: React.FC = () => {
     const bothReady = !isOnline || (current.readyConfirmed?.p1 && current.readyConfirmed?.p2);
     if (!bothReady) return;
 
-    // Think sessions open on the first tick after both players are ready,
-    // but turn 0 is a freebie — the clock starts at turn 1.
-    if (!thinkStartedRef.current && current.tick >= 1) {
-      thinkSessionStart('p1');
-      thinkSessionStart('p2');
-      thinkStartedRef.current = true;
-    }
-
     if (playModeRef.current === 'SOLO_AI' && !locksRef.current.p2) {
       const p2Buf = [...moveBuffersRef.current.p2];
       const p2Snake = current.snakes.p2;
@@ -367,11 +352,8 @@ export const App: React.FC = () => {
       }
       moveBuffersRef.current = { ...moveBuffersRef.current, p2: p2Buf };
       setMoveBuffers({ ...moveBuffersRef.current });
-      locksRef.current = { ...locksRef.current, p2: true };
-      setLocks(locksRef.current);
-      // AI doesn't accrue think time — close any open session silently.
-      // (The locks-transition effect will see sessionStart already null.)
-      thinkSessionCancel('p2');
+      commitLocks({ ...locksRef.current, p2: true });
+      applyThinkTransition({ type: 'CANCEL', player: 'p2' });
     }
 
     const p1Buf = moveBuffersRef.current.p1;
@@ -385,8 +367,6 @@ export const App: React.FC = () => {
     queueSnakeDirection(current.snakes.p2, nextP2Dir);
 
     const { nextState, events } = processGameTick(stateRef.current, s, 0);
-    // Think time accrues per decision window on lock (thinkSessionEnd),
-    // not per executed tick — nothing to add here.
     playTickEvents(events);
 
     const newP1Buf = [...moveBuffersRef.current.p1];
@@ -394,11 +374,12 @@ export const App: React.FC = () => {
     moveBuffersRef.current = { p1: newP1Buf, p2: newP2Buf };
     setMoveBuffers({ p1: newP1Buf, p2: newP2Buf });
 
-    locksRef.current = {
+    const nextLocks = {
       p1: newP1Buf.length > 0 ? locksRef.current.p1 : false,
       p2: newP2Buf.length > 0 ? locksRef.current.p2 : false,
     };
-    setLocks(locksRef.current);
+    stateRef.current = nextState;
+    commitLocks(nextLocks);
 
     setGameState(nextState);
     setMatchHistory(prev => [...prev, nextState]);
@@ -418,7 +399,7 @@ export const App: React.FC = () => {
         maybeAdvanceTurn();
       }, 550);
     }
-  }, [playTickEvents, thinkSessionCancel]);
+  }, [applyThinkTransition, commitLocks, playTickEvents]);
 
   const autoLockPlayer = useCallback((who: 'p1' | 'p2') => {
     if (locksRef.current[who]) return;
@@ -651,7 +632,9 @@ export const App: React.FC = () => {
       setSeries({ p1: 0, p2: 0, draws: 0 });
       setPlayerNames({ p1: 'PLAYER 1', p2: 'PLAYER 2' });
     }
-    setGameState(createInitialState(settingsRef.current));
+    const initial = createInitialState(settingsRef.current);
+    stateRef.current = initial;
+    setGameState(initial);
     setInLobby(true);
     setInOnlineLobby(false);
     setReplayActive(false);
@@ -954,27 +937,26 @@ export const App: React.FC = () => {
             lastStateRevisionRef.current = msg.stateRevision;
             lastStateTickRef.current = safeState.tick;
 
-            setGameState(safeState);
+            const snapshot = adoptThinkTimeSnapshot(thinkRef.current, safeState);
+            thinkRef.current = snapshot.model;
+            stateRef.current = snapshot.state;
+            setGameState(snapshot.state);
             setMatchHistory(prev => {
-              if (prev.length === 0 || safeState.tick > prev[prev.length - 1].tick) {
-                return [...prev, safeState];
+              if (prev.length === 0 || snapshot.state.tick > prev[prev.length - 1].tick) {
+                return [...prev, snapshot.state];
               }
-              if (safeState.tick === prev[prev.length - 1].tick) {
-                return [...prev.slice(0, -1), safeState];
+              if (snapshot.state.tick === prev[prev.length - 1].tick) {
+                return [...prev.slice(0, -1), snapshot.state];
               }
               return prev;
             });
 
             if (msg.locks) {
               const myRole = onlineRoleRef.current;
-              setLocks(prevLocks => ({
-                p1: myRole === 'p1' ? (moveBuffersRef.current.p1.length > 0 ? prevLocks.p1 : msg.locks.p1) : msg.locks.p1,
-                p2: myRole === 'p2' ? (moveBuffersRef.current.p2.length > 0 ? prevLocks.p2 : msg.locks.p2) : msg.locks.p2,
-              }));
-              locksRef.current = {
+              commitLocks({
                 p1: myRole === 'p1' ? (moveBuffersRef.current.p1.length > 0 ? locksRef.current.p1 : msg.locks.p1) : msg.locks.p1,
                 p2: myRole === 'p2' ? (moveBuffersRef.current.p2.length > 0 ? locksRef.current.p2 : msg.locks.p2) : msg.locks.p2,
-              };
+              });
             }
 
             if (isNewTick && settingsRef.current.turnBased && playModeRef.current === 'ONLINE_JOIN' && onlineRoleRef.current) {
@@ -994,15 +976,25 @@ export const App: React.FC = () => {
                   }
                 }
                 if (moveBuffersRef.current[myRole].length === 0) {
-                  locksRef.current = { ...locksRef.current, [myRole]: false };
-                  setLocks({ ...locksRef.current });
+                  commitLocks({ ...locksRef.current, [myRole]: false });
                 }
               }
             }
 
-            if (settingsRef.current.turnBased && playModeRef.current === 'ONLINE_SPECTATOR' && msg.locks) {
-              setLocks(msg.locks);
-              locksRef.current = msg.locks;
+            if (
+              playModeRef.current === 'ONLINE_JOIN' &&
+              (onlineRoleRef.current === 'p1' || onlineRoleRef.current === 'p2') &&
+              !locksRef.current[onlineRoleRef.current] &&
+              snapshot.state.readyConfirmed?.p1 &&
+              snapshot.state.readyConfirmed?.p2 &&
+              snapshot.state.phase !== 'OVER' &&
+              snapshot.state.snakes[onlineRoleRef.current].isAlive
+            ) {
+              applyThinkTransition({
+                type: 'PLANNING_ENTERED',
+                player: onlineRoleRef.current,
+                at: Date.now(),
+              });
             }
 
             if (inOnlineLobby) {
@@ -1043,7 +1035,6 @@ export const App: React.FC = () => {
             }
             if (settingsRef.current.turnBased) {
               setLock(key);
-              thinkSessionEnd(key);
               maybeAdvanceTurn();
             }
           }
@@ -1096,7 +1087,7 @@ export const App: React.FC = () => {
     return () => {
       unsubscribe();
     };
-  }, [inOnlineLobby, clearLocks, maybeAdvanceTurn, setLock, adoptRoomSettings]);
+  }, [inOnlineLobby, clearLocks, maybeAdvanceTurn, setLock, adoptRoomSettings, commitLocks, applyThinkTransition]);
 
   // Latency Report Polling
   useEffect(() => {
@@ -1256,8 +1247,10 @@ export const App: React.FC = () => {
     setReplayActive(false);
     setReplayIdx(0);
     setReplayPlaying(false);
+    stateRef.current = initial;
     setGameState(initial);
     clearLocks();
+    maybeOpenPlanningSessions();
     sentTickRef.current = -1;
     lastStateTickRef.current = -1;
     lastStateRevisionRef.current = -1;
@@ -1429,7 +1422,10 @@ export const App: React.FC = () => {
         }));
       }
       setMatchHistory(parsed.states);
-      setGameState(parsed.states[0]);
+      const snapshot = adoptThinkTimeSnapshot(thinkRef.current, parsed.states[0]);
+      thinkRef.current = snapshot.model;
+      stateRef.current = snapshot.state;
+      setGameState(snapshot.state);
       setReplayActive(true);
       setReplayIdx(0);
       setReplayPlaying(true);

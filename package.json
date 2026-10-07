@@ -8,7 +8,8 @@
     "build": "vite build",
     "preview": "vite preview",
     "lint": "tsc --noEmit",
-    "test:network": "node --import tsx --test src/game/networkProtocol.test.ts"
+    "test:network": "node --import tsx --test src/game/networkProtocol.test.ts",
+    "test:think-time": "node --import tsx --test src/game/thinkTime.test.ts"
   },
   "dependencies": {
     "express": "^4.21.2",

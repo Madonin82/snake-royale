@@ -1,5 +1,6 @@
 import { Direction, GamePhase, GameSettings, GameState, Position, Snake } from '../types/game';
 import { soundEngine } from '../audio/soundEngine';
+import { createInitialThinkTimeValues } from './thinkTime';
 
 export const GAMEBOY_COLORS = {
   DARKEST: '#0F380F',   // P1 snake, closed ring, borders, deep text
@@ -93,8 +94,7 @@ export function createInitialState(
     tick: 0,
     turnBased: settings.turnBased,
     phaseTurnsRemaining: settings.turnBased ? settings.raceTurns : 0,
-    lastTurnTimes: null,
-    totalThinkTime: { p1: 0, p2: 0 },
+    ...createInitialThinkTimeValues(),
     phase: 'RACING',
     phaseTimeRemaining: raceDurationMs,
     phaseEndTime: now + raceDurationMs,
