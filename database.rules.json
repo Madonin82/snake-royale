@@ -6,12 +6,18 @@
         ".write": "auth != null"
       }
     },
+    "bridgeSecrets": {
+      "$roomId": {
+        ".read": "auth.uid == root.child('rooms/' + $roomId + '/p1Uid').val()",
+        ".write": "auth.uid == root.child('rooms/' + $roomId + '/p1Uid').val() && !data.exists()"
+      }
+    },
     "bridges": {
       "$roomId": {
         "$seat": {
           ".read": "auth != null && ($seat == 'p1' || $seat == 'p2') && auth.uid == root.child('rooms/' + $roomId + '/' + $seat + 'Uid').val()",
-          ".write": "auth != null && ($seat == 'p1' || $seat == 'p2') && auth.uid == root.child('rooms/' + $roomId + '/' + $seat + 'Uid').val()",
-          ".validate": "newData.hasChildren(['seq', 'matchId']) && newData.child('seq').isNumber() && newData.child('seq').val() % 1 == 0 && newData.child('matchId').isString() && (!newData.child('lock').exists() || newData.child('lock').isBoolean())",
+          ".write": "auth != null && ($seat == 'p1' || $seat == 'p2') && (auth.uid == root.child('rooms/' + $roomId + '/' + $seat + 'Uid').val() || (root.child('bridgeSecrets/' + $roomId).exists() && newData.child('secret').exists() && newData.child('secret').val() == root.child('bridgeSecrets/' + $roomId).val()))",
+          ".validate": "newData.hasChildren(['seq', 'matchId']) && newData.child('seq').isNumber() && newData.child('seq').val() % 1 == 0 && newData.child('matchId').isString() && (!newData.child('lock').exists() || newData.child('lock').isBoolean()) && (!newData.child('secret').exists() || newData.child('secret').isString())",
           "moves": {
             "$moveIndex": {
               ".validate": "newData.isString() && (newData.val() == 'UP' || newData.val() == 'DOWN' || newData.val() == 'LEFT' || newData.val() == 'RIGHT')"

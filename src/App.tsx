@@ -74,6 +74,7 @@ export const App: React.FC = () => {
   const [inLobby, setInLobby] = useState<boolean>(true);
   const [inOnlineLobby, setInOnlineLobby] = useState<boolean>(false);
   const [onlineRoomId, setOnlineRoomId] = useState<string>('');
+  const [bridgeSecret, setBridgeSecret] = useState<string | null>(null);
   const [onlineRole, setOnlineRole] = useState<'p1' | 'p2' | 'spectator' | 'server' | null>(null);
   const [hasP1, setHasP1] = useState<boolean>(false);
   const [hasP2, setHasP2] = useState<boolean>(false);
@@ -805,6 +806,7 @@ export const App: React.FC = () => {
   const handleReturnToLobby = useCallback(() => {
     if (playModeRef.current === 'ONLINE_HOST' || playModeRef.current === 'ONLINE_JOIN' || playModeRef.current === 'ONLINE_SERVER' || playModeRef.current === 'ONLINE_SPECTATOR') {
       networkManager.disconnect();
+      setBridgeSecret(null);
       setSeries({ p1: 0, p2: 0, draws: 0 });
       setPlayerNames({ p1: 'PLAYER 1', p2: 'PLAYER 2' });
     }
@@ -1465,6 +1467,7 @@ export const App: React.FC = () => {
 
   const handleCreateOnlineRoom = async () => {
     setJoinError(null);
+    setBridgeSecret(null);
     const code = Math.random().toString(36).substring(2, 6).toUpperCase();
     setOnlineRoomId(code);
     setPlayMode('ONLINE_HOST');
@@ -1480,11 +1483,13 @@ export const App: React.FC = () => {
       setInLobby(true);
       return;
     }
+    setBridgeSecret(networkManager.getBridgeSecret());
     setOnlineRole('p1');
   };
 
   const handleCreateServerRoom = async () => {
     setJoinError(null);
+    setBridgeSecret(null);
     const code = Math.random().toString(36).substring(2, 6).toUpperCase();
     setOnlineRoomId(code);
     setPlayMode('ONLINE_SERVER');
@@ -1500,12 +1505,14 @@ export const App: React.FC = () => {
       setInLobby(true);
       return;
     }
+    setBridgeSecret(networkManager.getBridgeSecret());
     setOnlineRole('server');
   };
 
   const handleJoinOnlineRoom = async (code: string) => {
     const roomCode = code.toUpperCase().trim();
     setJoinError(null);
+    setBridgeSecret(null);
     setOnlineRoomId(roomCode);
     setPlayMode('ONLINE_JOIN');
     setInOnlineLobby(true);
@@ -1527,6 +1534,7 @@ export const App: React.FC = () => {
       setInLobby(true);
       return;
     }
+    setBridgeSecret(networkManager.getBridgeSecret());
     setOnlineRole(assigned);
 
     // BUGFIX 8: one explicit member-state sync after connect, so the lobby
@@ -1547,6 +1555,7 @@ export const App: React.FC = () => {
   const handleSpectateRoom = async (code: string) => {
     const roomCode = code.toUpperCase().trim();
     if (!roomCode) return;
+    setBridgeSecret(null);
     setOnlineRoomId(roomCode);
     setPlayMode('ONLINE_SPECTATOR');
     setInOnlineLobby(true);
@@ -1554,6 +1563,7 @@ export const App: React.FC = () => {
 
     const ok = await networkManager.connect(roomCode, 'spectator', displayName.trim() || undefined);
     if (ok) {
+      setBridgeSecret(networkManager.getBridgeSecret());
       setOnlineRole('spectator');
     } else {
       const error = networkManager.getLastConnectionError();
@@ -1566,6 +1576,7 @@ export const App: React.FC = () => {
 
   const handleLeaveRoom = () => {
     networkManager.disconnect();
+    setBridgeSecret(null);
     setInOnlineLobby(false);
     setInLobby(true);
   };
@@ -1685,6 +1696,7 @@ export const App: React.FC = () => {
           ) : inOnlineLobby ? (
             <OnlineRoomLobby
               roomId={onlineRoomId}
+              bridgeSecret={bridgeSecret}
               role={onlineRole}
               hasP1={hasP1}
               hasP2={hasP2}

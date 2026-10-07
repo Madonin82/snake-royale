@@ -6,6 +6,7 @@ import { soundEngine } from '../audio/soundEngine';
 
 interface OnlineRoomLobbyProps {
   roomId: string;
+  bridgeSecret: string | null;
   role: 'p1' | 'p2' | 'spectator' | 'server' | null;
   hasP1: boolean;
   hasP2: boolean;
@@ -22,6 +23,7 @@ interface OnlineRoomLobbyProps {
 
 export const OnlineRoomLobby: React.FC<OnlineRoomLobbyProps> = ({
   roomId,
+  bridgeSecret,
   role,
   hasP1,
   hasP2,
@@ -36,6 +38,7 @@ export const OnlineRoomLobby: React.FC<OnlineRoomLobbyProps> = ({
   onRegisterHandler,
 }) => {
   const [copied, setCopied] = useState(false);
+  const [secretCopied, setSecretCopied] = useState(false);
 
   const isHost = role === 'p1';
   const isServer = role === 'server';
@@ -54,6 +57,14 @@ export const OnlineRoomLobby: React.FC<OnlineRoomLobbyProps> = ({
     navigator.clipboard.writeText(roomId);
     setCopied(true);
     setTimeout(() => setCopied(false), 2000);
+  };
+
+  const handleCopyBridgeSecret = () => {
+    if (!bridgeSecret) return;
+    soundEngine.playMenuSelect();
+    navigator.clipboard.writeText(bridgeSecret);
+    setSecretCopied(true);
+    setTimeout(() => setSecretCopied(false), 2000);
   };
 
   useEffect(() => {
@@ -191,6 +202,27 @@ export const OnlineRoomLobby: React.FC<OnlineRoomLobbyProps> = ({
           <span className="text-[9px] bg-[#0F380F] text-[#9BBC0F] px-1 font-bold">[A] COPY</span>
         )}
       </div>
+
+      {isHost && bridgeSecret && (
+        <div className="p-2.5 border-2 border-[#0F380F] bg-[#8BAC0F] text-center flex flex-col items-center gap-1.5">
+          <div className="text-[11px] font-bold uppercase tracking-wider">
+            BRIDGE SECRET (SHARE WITH AI AGENT):
+          </div>
+          <div className="flex items-center gap-2">
+            <span className="text-xl font-black tracking-widest bg-[#9BBC0F] px-3 py-1 border-2 border-[#0F380F]">
+              {bridgeSecret}
+            </span>
+            <button
+              onClick={handleCopyBridgeSecret}
+              className="bg-[#0F380F] hover:bg-[#306230] text-[#9BBC0F] p-2 border-2 border-[#0F380F] cursor-pointer shadow-[2px_2px_0px_#0F380F]"
+              title="Copy Bridge Secret"
+            >
+              {secretCopied ? <Check className="w-5 h-5" /> : <Copy className="w-5 h-5" />}
+            </button>
+          </div>
+          {secretCopied && <span className="text-[10px] font-bold">COPIED TO CLIPBOARD!</span>}
+        </div>
+      )}
 
       {/* Adopted Host Rules Banner */}
       <div className="bg-[#8BAC0F] p-2 border-2 border-[#0F380F] flex flex-col gap-1">
