@@ -13,8 +13,29 @@ import {
 
 type MessageHandler = (data: any) => void;
 
+const BRIDGE_SECRET_ALPHABET = 'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnpqrstuvwxyz23456789';
+
+function generateBridgeSecret(): string {
+  const secret: string[] = [];
+  const randomValues = new Uint8Array(16);
+  const maxUnbiasedByte = Math.floor(256 / BRIDGE_SECRET_ALPHABET.length) * BRIDGE_SECRET_ALPHABET.length;
+
+  while (secret.length < 12) {
+    crypto.getRandomValues(randomValues);
+    for (const value of randomValues) {
+      if (value < maxUnbiasedByte) {
+        secret.push(BRIDGE_SECRET_ALPHABET[value % BRIDGE_SECRET_ALPHABET.length]);
+        if (secret.length === 12) break;
+      }
+    }
+  }
+
+  return secret.join('');
+}
+
 export class NetworkManager {
   private roomId: string = '';
+  private bridgeSecret: string | null = null;
   private role: 'p1' | 'p2' | 'spectator' | 'server' | null = null;
   private uid: string | null = null;
   private activeMatchId: string | null = null;
@@ -94,6 +115,7 @@ export class NetworkManager {
       let series = { p1: 0, p2: 0, draws: 0 };
       let roomStatus = 'lobby';
       let roomSettings = hostSettings;
+      let createdRoom = false;
 
       if (!roomSnap.exists()) {
         if (requestedRole === 'spectator') {
@@ -106,6 +128,7 @@ export class NetworkManager {
         p1Name = this.role === 'p1' && cleanName ? cleanName : null;
         p2Name = this.role === 'p2' && cleanName ? cleanName : null;
 
+        createdRoom = true;
         await set(roomRef, {
           createdAt: Date.now(),
           p1Uid: this.role === 'p1' ? uid : null,
@@ -124,6 +147,10 @@ export class NetworkManager {
           matchId: null,
           lastActive: Date.now(),
         });
+        if (this.role === 'p1') {
+          this.bridgeSecret = generateBridgeSecret();
+          await set(ref(rtdb, `bridgeSecrets/${this.roomId}`), this.bridgeSecret);
+        }
       } else if (requestedRole === 'server') {
         this.role = 'server';
         const data = roomSnap.val() || {};
@@ -397,6 +424,16 @@ export class NetworkManager {
       // 4. Initialize WebRTC P2P Signaling in the background
       if (this.role === 'p1' || this.role === 'p2') {
         this.setupWebRtcSignaling();
+      }
+
+      if (!createdRoom) {
+        try {
+          const bridgeSecretSnap = await get(ref(rtdb, `bridgeSecrets/${this.roomId}`));
+          const bridgeSecret = bridgeSecretSnap.val();
+          this.bridgeSecret = typeof bridgeSecret === 'string' ? bridgeSecret : null;
+        } catch {
+          // Non-host room members are expected to be denied access to this host-only value.
+        }
       }
 
       return true;
@@ -697,6 +734,7 @@ export class NetworkManager {
 
     this.isConnected = false;
     this.isRtdbConnected = false;
+    this.bridgeSecret = null;
     this.role = null;
     this.uid = null;
     this.roomId = '';
@@ -745,6 +783,10 @@ export class NetworkManager {
 
   public getRoomId(): string {
     return this.roomId;
+  }
+
+  public getBridgeSecret(): string | null {
+    return this.bridgeSecret;
   }
 
   public getIsConnected(): boolean {
