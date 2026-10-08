@@ -146,7 +146,7 @@ export const App: React.FC = () => {
   const activeMatchRef = useRef<MatchIdentity | null>(null);
   const lastStateRevisionRef = useRef<number>(-1);
   const lastInputSequenceRef = useRef<{ p1: number; p2: number }>({ p1: 0, p2: 0 });
-  const lastBridgeCommandSequencesRef = useRef<Record<string, number>>({});
+  const lastBridgeCommandSequencesRef = useRef<Record<string, { matchId: string; seq: number }>>({});
   const startNewMatchRef = useRef<() => void>(() => {});
   // BUGFIX 7: tracks the last STATE_SYNC tick processed on the guest so the
   // buffer drain runs exactly once per completed step. Duplicate, stale, or
@@ -729,14 +729,15 @@ export const App: React.FC = () => {
       commandRef,
       snapshot => {
         const command = snapshot.val();
-        const lastAppliedSeq = lastBridgeCommandSequencesRef.current[commandPath] ?? -1;
+        const lastAppliedEntry = lastBridgeCommandSequencesRef.current[commandPath];
+        const lastAppliedSeq = lastAppliedEntry?.matchId === command?.matchId ? lastAppliedEntry.seq : -1;
         if (!shouldApplyRtdbBridgeCommand(command, activeMatchRef.current?.matchId ?? null, lastAppliedSeq)) {
           return;
         }
 
         if (command.moves) queueBridgeMoves(command.moves);
         if (command.lock) lockBridgeSeat();
-        lastBridgeCommandSequencesRef.current[commandPath] = command.seq;
+        lastBridgeCommandSequencesRef.current[commandPath] = { matchId: command.matchId, seq: command.seq };
       },
       error => console.error(`AI bridge RTDB listener failed for ${commandPath}:`, error),
     );
