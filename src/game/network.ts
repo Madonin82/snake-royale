@@ -961,7 +961,7 @@ export class NetworkManager {
     return { matchId, matchNumber };
   }
 
-  public broadcastState(state: GameState, locks?: { p1: boolean; p2: boolean }) {
+  public broadcastState(state: GameState, locks?: Record<string, boolean>) {
     if (!this.isConnected || (this.role !== 'p1' && this.role !== 'server')) return;
     if (!this.activeMatchId) return;
 

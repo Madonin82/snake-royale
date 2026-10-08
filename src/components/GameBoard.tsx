@@ -5,7 +5,7 @@ import { GAMEBOY_COLORS } from '../game/engine';
 interface GameBoardProps {
   gameState: GameState;
   settings: GameSettings;
-  lockedPaths?: { p1?: Position[]; p2?: Position[] };
+  lockedPaths?: Record<string, Position[] | undefined>;
   controlSeat: 'p1' | 'p2';
   onDirection: (direction: Direction) => void;
   interactionEnabled: boolean;
@@ -101,27 +101,32 @@ export const GameBoard: React.FC<GameBoardProps> = ({
 
     // 6. Render Stamped Locked Paths (Subtle planned path shading)
     if (lockedPaths) {
-      if (lockedPaths.p1) {
-        ctx.fillStyle = 'rgba(15, 56, 15, 0.22)';
-        for (const pos of lockedPaths.p1) {
-          ctx.fillRect(pos.x * cellSize + 6, pos.y * cellSize + 6, cellSize - 12, cellSize - 12);
-        }
-      }
-      if (lockedPaths.p2) {
-        ctx.fillStyle = 'rgba(48, 98, 48, 0.28)';
-        for (const pos of lockedPaths.p2) {
+      for (const snake of gameState.snakes) {
+        const path = lockedPaths[snake.id];
+        if (!path) continue;
+        ctx.fillStyle = snake.id === 'p1' ? 'rgba(15, 56, 15, 0.22)' : 'rgba(48, 98, 48, 0.28)';
+        for (const pos of path) {
           ctx.fillRect(pos.x * cellSize + 6, pos.y * cellSize + 6, cellSize - 12, cellSize - 12);
         }
       }
     }
 
     // 7. Render Snakes
-    renderSnake(ctx, gameState.snakes.p1, cellSize, '#0F380F', '#8BAC0F', 'P1');
-    renderSnake(ctx, gameState.snakes.p2, cellSize, '#306230', '#9BBC0F', 'P2');
+    for (const snake of gameState.snakes) {
+      const isFirst = gameState.snakes[0]?.id === snake.id;
+      renderSnake(
+        ctx,
+        snake,
+        cellSize,
+        isFirst ? GAMEBOY_COLORS.DARKEST : GAMEBOY_COLORS.DARK,
+        isFirst ? GAMEBOY_COLORS.LIGHT : GAMEBOY_COLORS.LIGHTEST,
+        snake.id,
+      );
+    }
 
     // 8. Mark dead snake heads after the sprites so the death marker stays visible.
     if (gameState.phase === 'OVER') {
-      for (const snake of [gameState.snakes.p1, gameState.snakes.p2]) {
+      for (const snake of gameState.snakes) {
         const pos = snake.deathPosition || snake.body[0];
         if (!snake.isAlive && pos) {
           renderDeathMarker(ctx, pos.x * cellSize, pos.y * cellSize, cellSize);
@@ -159,7 +164,8 @@ export const GameBoard: React.FC<GameBoardProps> = ({
 
     const canvas = canvasRef.current;
     const rect = canvas?.getBoundingClientRect();
-    const snake = gameState.snakes[controlSeat];
+    const snake = gameState.snakes.find(candidate => candidate.id === controlSeat);
+    if (!snake) return;
     const head = snake.body[0];
     if (!canvas || !rect || !head) return;
     const contentLeft = rect.left + canvas.clientLeft;

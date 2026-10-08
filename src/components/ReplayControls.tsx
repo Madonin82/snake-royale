@@ -45,8 +45,8 @@ export const ReplayControls: React.FC<ReplayControlsProps> = ({
   const matchStats = computeMatchStats(matchHistory, turnDecisions);
   const turnLedgerEntries = computeTurnLedger(matchHistory, turnDecisions);
   const finalState = matchHistory[matchHistory.length - 1] || matchHistory[0];
-  const p1 = finalState?.snakes?.p1 || { name: 'PLAYER 1', score: 0 };
-  const p2 = finalState?.snakes?.p2 || { name: 'PLAYER 2', score: 0 };
+  const p1 = finalState?.snakes?.find(snake => snake.id === 'p1') ?? finalState?.snakes?.[0] ?? { name: 'PLAYER 1', score: 0 };
+  const p2 = finalState?.snakes?.find(snake => snake.id === 'p2') ?? finalState?.snakes?.[1] ?? { name: 'PLAYER 2', score: 0 };
 
   useEffect(() => {
     const handleAction = (action: GamepadMenuAction) => {

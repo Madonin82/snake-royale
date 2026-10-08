@@ -3,7 +3,7 @@ import { normalizeGameState } from './normalize';
 
 export interface TurnDecision {
   tick: number;
-  seat: 'p1' | 'p2';
+  seat: string;
   // Online clients only observe their own queue; opponent queues are fog-of-war by design.
   // A replay exported by one client may therefore omit opponent decisions; merge both exports.
   queue: Direction[];
@@ -23,9 +23,10 @@ export interface ReplayFileObject {
     thinkTimeSeconds?: number | null;
   };
   result: {
-    winner: 'p1' | 'p2' | 'DRAW' | null;
+    winner: string | 'DRAW' | null;
     p1Score: number;
     p2Score: number;
+    scores: Record<string, number>;
   };
   states: GameState[];
   decisions: TurnDecision[];
@@ -42,8 +43,9 @@ export function createReplayDataObject(
   const now = new Date();
   const pad = (n: number) => String(n).padStart(2, '0');
   const winner = finalState ? finalState.winner : null;
-  const p1Score = finalState ? finalState.snakes.p1.score : 0;
-  const p2Score = finalState ? finalState.snakes.p2.score : 0;
+  const scores = Object.fromEntries((finalState?.snakes ?? []).map(snake => [snake.id, snake.score]));
+  const p1Score = finalState?.snakes[0]?.score ?? 0;
+  const p2Score = finalState?.snakes[1]?.score ?? 0;
 
   return {
     format: 'snake-royale-replay',
@@ -60,6 +62,7 @@ export function createReplayDataObject(
       winner,
       p1Score,
       p2Score,
+      scores,
     },
     states: matchHistory,
     decisions,
@@ -137,7 +140,8 @@ export function parseAndValidateReplayData(rawText: string): {
     const validDecisions = Array.isArray(obj.decisions) && obj.decisions.every((decision: any) =>
       decision &&
       Number.isSafeInteger(decision.tick) &&
-      (decision.seat === 'p1' || decision.seat === 'p2') &&
+      typeof decision.seat === 'string' &&
+      decision.seat.length > 0 &&
       Array.isArray(decision.queue) &&
       decision.queue.every((direction: unknown) => validDirections.includes(direction as Direction)) &&
       typeof decision.lockedAt === 'number' &&

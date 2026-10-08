@@ -1,5 +1,6 @@
 import { DEFAULT_SETTINGS, createInitialState, getNextHeadPosition, spawnTokens } from '../game/engine';
 import { Direction, GameSettings, GameState, Position } from '../types/game';
+import { withLegacySnakeAccessors } from '../game/snakeArray';
 import { CampaignLevel } from './levelSchema';
 
 let campaignPlaytestLevel: CampaignLevel | null = null;
@@ -110,8 +111,8 @@ export function createCampaignPlaytestState(
     new Set(p1Body.map(position => `${position.x},${position.y}`)),
   );
   const initial = createInitialState(settings, playerNames);
-  const p1 = { ...initial.snakes.p1, body: p1Body, direction: level.playerSpawn.direction };
-  const p2 = { ...initial.snakes.p2, body: p2Body, direction: level.opponentSpawn.direction };
+  const p1 = { ...initial.snakes.find(snake => snake.id === 'p1')!, body: p1Body, direction: level.playerSpawn.direction };
+  const p2 = { ...initial.snakes.find(snake => snake.id === 'p2')!, body: p2Body, direction: level.opponentSpawn.direction };
   const occupied = new Set([...p1Body, ...p2Body].map(position => `${position.x},${position.y}`));
   const tokens = level.tokens.positions.length > 0
     ? level.tokens.positions.map(position => ({ ...position }))
@@ -135,7 +136,7 @@ export function createCampaignPlaytestState(
   return {
     ...initial,
     phase: 'RACING',
-    snakes: { p1, p2 },
+    snakes: withLegacySnakeAccessors([p1, p2]),
     tokens,
     walls,
   };

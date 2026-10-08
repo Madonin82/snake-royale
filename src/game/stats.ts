@@ -17,6 +17,8 @@ export interface PlayerMatchStats {
 export interface MatchSummaryStats {
   totalTurns: number;
   durationFormatted: string;
+  scores: Record<string, number[]>;
+  playerStats: Record<string, PlayerMatchStats>;
   p1Scores: number[];
   p2Scores: number[];
   p1Stats: PlayerMatchStats;
@@ -25,7 +27,7 @@ export interface MatchSummaryStats {
 
 export interface TurnLedgerEntry {
   tick: number;
-  seat: 'p1' | 'p2';
+  seat: string;
   playerName: string;
   arrows: string[];
   lockTimeMs: number;
@@ -47,10 +49,10 @@ export function computeTurnLedger(
     const prevState = i > 0 ? matchHistory[i - 1] : null;
     const tick = currentState.tick;
 
-    for (const seat of ['p1', 'p2'] as const) {
+    for (const snake of currentState.snakes ?? []) {
+      const seat = snake.id;
       const decision = sortedDecisions.find(d => d.tick === tick && d.seat === seat);
-      const snake = currentState.snakes?.[seat];
-      const prevSnake = prevState?.snakes?.[seat];
+      const prevSnake = prevState?.snakes?.find(candidate => candidate.id === seat);
       if (!snake) continue;
 
       const scoreDelta = prevSnake ? snake.score - prevSnake.score : snake.score;
@@ -103,29 +105,23 @@ export function computeMatchStats(
 ): MatchSummaryStats {
   const finalState = matchHistory[matchHistory.length - 1] || matchHistory[0] || {
     tick: 0,
-    snakes: {
-      p1: { score: 0, body: [], isAlive: true },
-      p2: { score: 0, body: [], isAlive: true },
-    },
-    totalThinkTime: { p1: 0, p2: 0 },
+    snakes: [],
+    totalThinkTime: {},
     phase: 'OVER',
     winner: null,
   };
 
-  const p1 = finalState.snakes.p1;
-  const p2 = finalState.snakes.p2;
-
-  const p1TurnTimes: number[] = [];
-  const p2TurnTimes: number[] = [];
+  const turnTimes: Record<string, number[]> = {};
   for (const st of matchHistory) {
     if (st.lastTurnTimes) {
-      if (st.lastTurnTimes.p1 > 0) p1TurnTimes.push(st.lastTurnTimes.p1);
-      if (st.lastTurnTimes.p2 > 0) p2TurnTimes.push(st.lastTurnTimes.p2);
+      for (const [id, seconds] of Object.entries(st.lastTurnTimes)) {
+        if (seconds > 0) (turnTimes[id] ??= []).push(seconds);
+      }
     }
   }
 
-  const getLockStats = (seat: 'p1' | 'p2'): PlayerMatchStats => {
-    const times = seat === 'p1' ? p1TurnTimes : p2TurnTimes;
+  const getLockStats = (seat: string): PlayerMatchStats => {
+    const times = turnTimes[seat] ?? [];
     const seatDecisions = decisions.filter(d => d.seat === seat);
     const autoLocks = seatDecisions.filter(d => d.autoLock).length;
     const totalDecisions = seatDecisions.length;
@@ -138,7 +134,7 @@ export function computeMatchStats(
     const queueLens = seatDecisions.map(d => d.queue.length);
     const avgQueue = queueLens.length > 0 ? (queueLens.reduce((a, b) => a + b, 0) / queueLens.length).toFixed(1) : '—';
 
-    const snake = seat === 'p1' ? p1 : p2;
+    const snake = finalState.snakes.find(candidate => candidate.id === seat);
     let cause = 'Survived';
     if (snake && !snake.isAlive) {
       if (snake.deathReason === 'WALL') cause = 'Wall collision';
@@ -164,13 +160,19 @@ export function computeMatchStats(
     };
   };
 
-  const p1Scores = matchHistory.map(s => s.snakes?.p1?.score ?? 0);
-  const p2Scores = matchHistory.map(s => s.snakes?.p2?.score ?? 0);
+  const playerIds = finalState.snakes.map(snake => snake.id);
+  const p1Id = playerIds[0] ?? 'p1';
+  const p2Id = playerIds[1] ?? 'p2';
+  const scores = Object.fromEntries(playerIds.map(id => [
+    id,
+    matchHistory.map(state => state.snakes?.find(snake => snake.id === id)?.score ?? 0),
+  ]));
+  const playerStats = Object.fromEntries(playerIds.map(id => [id, getLockStats(id)]));
+  const p1Scores = scores[p1Id] ?? [];
+  const p2Scores = scores[p2Id] ?? [];
   const totalTurns = finalState.tick ?? matchHistory.length;
 
-  const totalThinkP1 = finalState.totalThinkTime?.p1 || 0;
-  const totalThinkP2 = finalState.totalThinkTime?.p2 || 0;
-  const maxThink = Math.max(totalThinkP1, totalThinkP2);
+  const maxThink = Math.max(0, ...Object.values(finalState.totalThinkTime ?? {}));
   const durationSecs = Math.ceil(maxThink);
   const mins = Math.floor(durationSecs / 60);
   const secs = durationSecs % 60;
@@ -179,9 +181,11 @@ export function computeMatchStats(
   return {
     totalTurns,
     durationFormatted,
+    scores,
+    playerStats,
     p1Scores,
     p2Scores,
-    p1Stats: getLockStats('p1'),
-    p2Stats: getLockStats('p2'),
+    p1Stats: getLockStats(p1Id),
+    p2Stats: getLockStats(p2Id),
   };
 }

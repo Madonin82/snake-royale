@@ -218,24 +218,27 @@ const GameApp: React.FC<{ campaignPlaytestLevel: CampaignLevel | null }> = ({ ca
     return () => clearInterval(id);
   }, [replayActive, replayPlaying, replaySpeed, matchHistory.length]);
 
-  const [moveBuffers, setMoveBuffers] = useState<{ p1: Direction[]; p2: Direction[] }>({ p1: [], p2: [] });
-  const moveBuffersRef = useRef<{ p1: Direction[]; p2: Direction[] }>({ p1: [], p2: [] });
+  const stateRef = useRef<GameState>(gameState);
+  stateRef.current = gameState;
+  const [moveBuffers, setMoveBuffers] = useState<Record<string, Direction[]>>({ p1: [], p2: [] });
+  const moveBuffersRef = useRef<Record<string, Direction[]>>({ p1: [], p2: [] });
   moveBuffersRef.current = moveBuffers;
 
   const clearMoveBuffers = useCallback(() => {
-    moveBuffersRef.current = { p1: [], p2: [] };
-    setMoveBuffers({ p1: [], p2: [] });
+    const emptyBuffers = Object.fromEntries(stateRef.current.snakes.map(snake => [snake.id, []]));
+    moveBuffersRef.current = emptyBuffers;
+    setMoveBuffers(emptyBuffers);
   }, []);
 
   // TURN-BASED MOVE LOCKS
-  const locksRef = useRef<{ p1: boolean; p2: boolean }>({ p1: false, p2: false });
-  const [locks, setLocks] = useState<{ p1: boolean; p2: boolean }>({ p1: false, p2: false });
-  const [thinkTimeRemaining, setThinkTimeRemaining] = useState<{ p1: number | null; p2: number | null }>({ p1: null, p2: null });
+  const locksRef = useRef<Record<string, boolean>>({ p1: false, p2: false });
+  const [locks, setLocks] = useState<Record<string, boolean>>({ p1: false, p2: false });
+  const [thinkTimeRemaining, setThinkTimeRemaining] = useState<Record<string, number | null>>({ p1: null, p2: null });
   const thinkTimeRemainingRef = useRef(thinkTimeRemaining);
   thinkTimeRemainingRef.current = thinkTimeRemaining;
-  const thinkTimeEndsRef = useRef<{ p1: number | null; p2: number | null }>({ p1: null, p2: null });
-  const lastThinkTimeTickRef = useRef<{ p1: number | null; p2: number | null }>({ p1: null, p2: null });
-  const notifiedPlanningWindowRef = useRef<{ p1: boolean; p2: boolean }>({ p1: false, p2: false });
+  const thinkTimeEndsRef = useRef<Record<string, number | null>>({ p1: null, p2: null });
+  const lastThinkTimeTickRef = useRef<Record<string, number | null>>({ p1: null, p2: null });
+  const notifiedPlanningWindowRef = useRef<Record<string, boolean>>({ p1: false, p2: false });
   const sentTickRef = useRef<number>(-1);
   const activeMatchRef = useRef<MatchIdentity | null>(null);
   const lastStateRevisionRef = useRef<number>(-1);
@@ -276,20 +279,19 @@ const GameApp: React.FC<{ campaignPlaytestLevel: CampaignLevel | null }> = ({ ca
     const baseState = replayActive ? (matchHistory[replayIdx] ?? gameState) : gameState;
     const stateCopy: GameState = {
       ...baseState,
-      snakes: {
-        p1: { ...baseState.snakes.p1, body: [...baseState.snakes.p1.body] },
-        p2: { ...baseState.snakes.p2, body: [...baseState.snakes.p2.body] },
-      },
+      snakes: baseState.snakes.map(snake => ({ ...snake, body: [...snake.body] })),
     };
     if (settings.turnBased && !replayActive) {
       const showP1 = playMode === 'LOCAL_2P' || viewerSeat === 'p1';
       const showP2 = playMode === 'LOCAL_2P' || viewerSeat === 'p2';
 
       if (showP1 && !locks.p1 && moveBuffers.p1.length > 0) {
-        stateCopy.snakes.p1.body = computePreviewSnake(gameState.snakes.p1, moveBuffers.p1);
+        const snake = stateCopy.snakes.find(candidate => candidate.id === 'p1');
+        if (snake) snake.body = computePreviewSnake(snake, moveBuffers.p1);
       }
       if (showP2 && !locks.p2 && moveBuffers.p2.length > 0) {
-        stateCopy.snakes.p2.body = computePreviewSnake(gameState.snakes.p2, moveBuffers.p2);
+        const snake = stateCopy.snakes.find(candidate => candidate.id === 'p2');
+        if (snake) snake.body = computePreviewSnake(snake, moveBuffers.p2);
       }
     }
     return stateCopy;
@@ -302,13 +304,14 @@ const GameApp: React.FC<{ campaignPlaytestLevel: CampaignLevel | null }> = ({ ca
     const showP2 = playMode === 'LOCAL_2P' || viewerSeat === 'p2';
 
     return {
-      p1: showP1 && locks.p1 && moveBuffers.p1.length > 0 ? computeCommittedPath(gameState.snakes.p1, moveBuffers.p1) : undefined,
-      p2: showP2 && locks.p2 && moveBuffers.p2.length > 0 ? computeCommittedPath(gameState.snakes.p2, moveBuffers.p2) : undefined,
+      p1: showP1 && locks.p1 && moveBuffers.p1.length > 0
+        ? computeCommittedPath(gameState.snakes.find(snake => snake.id === 'p1')!, moveBuffers.p1)
+        : undefined,
+      p2: showP2 && locks.p2 && moveBuffers.p2.length > 0
+        ? computeCommittedPath(gameState.snakes.find(snake => snake.id === 'p2')!, moveBuffers.p2)
+        : undefined,
     };
   }, [settings.turnBased, replayActive, locks, moveBuffers, gameState, playMode, viewerSeat]);
-
-  const stateRef = useRef<GameState>(gameState);
-  stateRef.current = gameState;
 
   const bridgeSeatRef = useRef<'p1' | 'p2'>('p1');
   const soloAiP2OverriddenRef = useRef(false);
@@ -348,10 +351,9 @@ const GameApp: React.FC<{ campaignPlaytestLevel: CampaignLevel | null }> = ({ ca
     stateRef.current = nextState;
     setGameState(prev => applyThinkTimeModel(prev, nextModel));
   }, []);
-  const thinkSessions = {
-    p1: { startTime: thinkRef.current.sessions.p1.planningStartedAt },
-    p2: { startTime: thinkRef.current.sessions.p2.planningStartedAt },
-  };
+  const thinkSessions = Object.fromEntries(Object.entries(thinkRef.current.sessions).map(([id, session]) =>
+    [id, { startTime: session.planningStartedAt }],
+  ));
 
   const maybeOpenPlanningSessions = useCallback(() => {
     const mode = playModeRef.current;
@@ -366,7 +368,7 @@ const GameApp: React.FC<{ campaignPlaytestLevel: CampaignLevel | null }> = ({ ca
   }, [applyThinkTransition, isBuiltInAiActive]);
 
   const commitLocks = useCallback((
-    nextLocks: { p1: boolean; p2: boolean },
+    nextLocks: Record<string, boolean>,
     emitState = true,
   ) => {
     const previousLocks = locksRef.current;
@@ -392,7 +394,7 @@ const GameApp: React.FC<{ campaignPlaytestLevel: CampaignLevel | null }> = ({ ca
         if (event.player === 'p2' && isBuiltInAiActive()) continue;
         if (event.type === 'PLANNING_ENTERED') {
           const state = stateRef.current;
-          if (state.phase === 'OVER' || !state.snakes[event.player]?.isAlive) continue;
+          if (state.phase === 'OVER' || !state.snakes.find(snake => snake.id === event.player)?.isAlive) continue;
         }
         applyThinkTransition(event);
       }
@@ -416,7 +418,7 @@ const GameApp: React.FC<{ campaignPlaytestLevel: CampaignLevel | null }> = ({ ca
     return 'p1';
   }, []);
 
-  const setLock = useCallback((who: 'p1' | 'p2', isAuto = false) => {
+  const setLock = useCallback((who: string, isAuto = false) => {
     thinkTimeEndsRef.current = { ...thinkTimeEndsRef.current, [who]: null };
     lastThinkTimeTickRef.current = { ...lastThinkTimeTickRef.current, [who]: null };
     notifiedPlanningWindowRef.current = { ...notifiedPlanningWindowRef.current, [who]: false };
@@ -435,26 +437,26 @@ const GameApp: React.FC<{ campaignPlaytestLevel: CampaignLevel | null }> = ({ ca
   }, [commitLocks]);
 
   const clearLocks = useCallback(() => {
-    thinkTimeEndsRef.current = { p1: null, p2: null };
-    lastThinkTimeTickRef.current = { p1: null, p2: null };
-    notifiedPlanningWindowRef.current = { p1: false, p2: false };
-    thinkTimeRemainingRef.current = { p1: null, p2: null };
-    setThinkTimeRemaining({ p1: null, p2: null });
-    locksRef.current = { p1: false, p2: false };
+    const playerIds = stateRef.current.snakes.map(snake => snake.id);
+    thinkTimeEndsRef.current = Object.fromEntries(playerIds.map(id => [id, null]));
+    lastThinkTimeTickRef.current = Object.fromEntries(playerIds.map(id => [id, null]));
+    notifiedPlanningWindowRef.current = Object.fromEntries(playerIds.map(id => [id, false]));
+    thinkTimeRemainingRef.current = Object.fromEntries(playerIds.map(id => [id, null]));
+    setThinkTimeRemaining(thinkTimeRemainingRef.current);
+    locksRef.current = Object.fromEntries(playerIds.map(id => [id, false]));
     setLocks(locksRef.current);
     applyThinkTransition({ type: 'RESET' });
     clearMoveBuffers();
   }, [applyThinkTransition, clearMoveBuffers]);
 
   const playTickEvents = useCallback((events: {
-    tokenEatenP1: boolean;
-    tokenEatenP2: boolean;
+    tokenEaten: Record<string, boolean>;
     shrinkTelegraphStarted: boolean;
     ringShrunk: boolean;
     deathOccurred: boolean;
     matchEnded: boolean;
   }) => {
-    if (events.tokenEatenP1 || events.tokenEatenP2) soundEngine.playTokenEat();
+    if (Object.values(events.tokenEaten).some(Boolean)) soundEngine.playTokenEat();
     if (events.shrinkTelegraphStarted) soundEngine.playShrinkWarning();
     if (events.ringShrunk) soundEngine.playRingShrunk();
     if (events.deathOccurred) soundEngine.playCrash();
@@ -482,18 +484,26 @@ const GameApp: React.FC<{ campaignPlaytestLevel: CampaignLevel | null }> = ({ ca
     const s = settingsRef.current;
     if (!s.turnBased || current.phase === 'OVER') return;
     const isOnline = playModeRef.current === 'ONLINE_HOST' || playModeRef.current === 'ONLINE_JOIN' || playModeRef.current === 'ONLINE_SERVER';
-    const bothReady = !isOnline || (current.readyConfirmed?.p1 && current.readyConfirmed?.p2);
+    const bothReady = !isOnline || current.snakes
+      .filter(snake => snake.isAlive)
+      .every(snake => current.readyConfirmed?.[snake.id]);
     if (!bothReady) return;
 
-    if (isBuiltInAiActive() && !locksRef.current.p2) {
+    if (isBuiltInAiActive() && !locksRef.current.p2 && current.snakes.some(snake => snake.id === 'p2' && snake.isAlive)) {
       const p2Buf = [...moveBuffersRef.current.p2];
-      const p2Snake = current.snakes.p2;
+      const p2Snake = current.snakes.find(snake => snake.id === 'p2');
+      if (!p2Snake) return;
       if (p2Buf.length === 0) {
         let curDir = p2Snake.direction;
         let simBody = [...p2Snake.body];
         const planLen = Math.min(3, p2Snake.body.length);
         for (let i = 0; i < planLen; i++) {
-          const aiDir = calculateAIMove({ ...current, snakes: { ...current.snakes, p2: { ...p2Snake, body: simBody, direction: curDir } } }, s.gridSize, 'p2', s.botDifficulty);
+          const aiDir = calculateAIMove({
+            ...current,
+            snakes: current.snakes.map(snake => snake.id === 'p2'
+              ? { ...snake, body: simBody, direction: curDir }
+              : snake),
+          }, s.gridSize, 'p2', s.botDifficulty);
           if (aiDir && !isOppositeDirection(curDir, aiDir)) {
             p2Buf.push(aiDir);
             curDir = aiDir;
@@ -523,28 +533,31 @@ const GameApp: React.FC<{ campaignPlaytestLevel: CampaignLevel | null }> = ({ ca
       applyThinkTransition({ type: 'CANCEL', player: 'p2' });
     }
 
-    const p1Buf = moveBuffersRef.current.p1;
-    const p2Buf = moveBuffersRef.current.p2;
-
-    if (!locksRef.current.p1 || !locksRef.current.p2) return;
-    const nextP1Dir = p1Buf.shift() || current.snakes.p1.direction;
-    const nextP2Dir = p2Buf.shift() || current.snakes.p2.direction;
-
-    queueSnakeDirection(current.snakes.p1, nextP1Dir);
-    queueSnakeDirection(current.snakes.p2, nextP2Dir);
+    for (const snake of current.snakes) {
+      if (!snake.isAlive) continue;
+      if (!locksRef.current[snake.id]) return;
+    }
+    for (const snake of current.snakes) {
+      if (!snake.isAlive) continue;
+      const buffer = moveBuffersRef.current[snake.id] ?? [];
+      const direction = buffer.shift() || snake.direction;
+      queueSnakeDirection(snake, direction);
+    }
 
     const { nextState, events } = processGameTick(stateRef.current, s, 0);
     playTickEvents(events);
 
-    const newP1Buf = [...moveBuffersRef.current.p1];
-    const newP2Buf = [...moveBuffersRef.current.p2];
-    moveBuffersRef.current = { p1: newP1Buf, p2: newP2Buf };
-    setMoveBuffers({ p1: newP1Buf, p2: newP2Buf });
+    const nextBuffers = Object.fromEntries(nextState.snakes.map(snake => [
+      snake.id,
+      snake.isAlive ? [...(moveBuffersRef.current[snake.id] ?? [])] : [],
+    ]));
+    moveBuffersRef.current = nextBuffers;
+    setMoveBuffers(nextBuffers);
 
-    const nextLocks = {
-      p1: newP1Buf.length > 0 ? locksRef.current.p1 : false,
-      p2: newP2Buf.length > 0 ? locksRef.current.p2 : false,
-    };
+    const nextLocks = Object.fromEntries(nextState.snakes.map(snake => [
+      snake.id,
+      snake.isAlive && nextBuffers[snake.id].length > 0 && locksRef.current[snake.id],
+    ]));
     stateRef.current = nextState;
     commitLocks(nextLocks, false);
 
@@ -558,7 +571,7 @@ const GameApp: React.FC<{ campaignPlaytestLevel: CampaignLevel | null }> = ({ ca
 
     const canProgress =
       nextState.phase !== 'OVER' &&
-      ((moveBuffersRef.current.p1.length > 0 && moveBuffersRef.current.p2.length > 0) ||
+      (nextState.snakes.filter(snake => snake.isAlive).every(snake => moveBuffersRef.current[snake.id]?.length > 0) ||
        (playModeRef.current === 'SOLO_AI' && !locksRef.current.p2));
 
     if (canProgress && aiMode) {
@@ -574,7 +587,7 @@ const GameApp: React.FC<{ campaignPlaytestLevel: CampaignLevel | null }> = ({ ca
     }
   }, [aiMode, applyThinkTransition, commitLocks, dispatchAiState, isBuiltInAiActive, playTickEvents]);
 
-  const autoLockPlayer = useCallback((who: 'p1' | 'p2') => {
+  const autoLockPlayer = useCallback((who: string) => {
     if (locksRef.current[who]) return;
     const current = stateRef.current;
     const buffer = moveBuffersRef.current[who];
@@ -638,7 +651,7 @@ const GameApp: React.FC<{ campaignPlaytestLevel: CampaignLevel | null }> = ({ ca
           mode !== 'ONLINE_JOIN' &&
           mode !== 'ONLINE_SPECTATOR' &&
           !(mode === 'SOLO_AI' && who === 'p2' && isBuiltInAiActive());
-        const snake = current.snakes[who];
+        const snake = current.snakes.find(candidate => candidate.id === who);
 
         if (
           !matchActive ||
@@ -765,7 +778,7 @@ const GameApp: React.FC<{ campaignPlaytestLevel: CampaignLevel | null }> = ({ ca
 
     const targetKey = getTargetKey(playerSlot, bridgeSeat);
 
-    const currentSnake = current.snakes[targetKey];
+    const currentSnake = current.snakes.find(snake => snake.id === targetKey);
     if (!currentSnake || !currentSnake.isAlive) return false;
     soundEngine.playTick();
 
@@ -786,19 +799,19 @@ const GameApp: React.FC<{ campaignPlaytestLevel: CampaignLevel | null }> = ({ ca
 
     if (playModeRef.current === 'ONLINE_JOIN') {
       networkManager.sendInput(dir, current.tick);
-      const snakeCopy = { ...current.snakes[targetKey], queuedDirection: dir };
+      const snakeCopy = { ...current.snakes.find(snake => snake.id === targetKey)!, queuedDirection: dir };
       setGameState(prev => ({
         ...prev,
-        snakes: { ...prev.snakes, [targetKey]: snakeCopy }
+        snakes: prev.snakes.map(snake => snake.id === targetKey ? snakeCopy : snake),
       }));
       return true;
     }
 
-    if (!queueSnakeDirection(stateRef.current.snakes[targetKey], dir)) return false;
-    const snakeCopy = { ...current.snakes[targetKey], queuedDirection: dir };
+    if (!queueSnakeDirection(currentSnake, dir)) return false;
+    const snakeCopy = { ...currentSnake, queuedDirection: dir };
     setGameState(prev => ({
       ...prev,
-      snakes: { ...prev.snakes, [targetKey]: snakeCopy }
+      snakes: prev.snakes.map(snake => snake.id === targetKey ? snakeCopy : snake),
     }));
     return true;
   }, [getTargetKey, inLobby, inOnlineLobby]);
@@ -824,7 +837,8 @@ const GameApp: React.FC<{ campaignPlaytestLevel: CampaignLevel | null }> = ({ ca
     const slot: 1 | 2 = seat === 'p1' ? 1 : 2;
     for (const direction of moves) {
       if (!['UP', 'DOWN', 'LEFT', 'RIGHT'].includes(direction)) continue;
-      const snake = stateRef.current.snakes[seat];
+      const snake = stateRef.current.snakes.find(candidate => candidate.id === seat);
+      if (!snake) return [];
       if (
         settingsRef.current.turnBased &&
         moveBuffersRef.current[seat].length >= snake.body.length
@@ -1303,10 +1317,11 @@ const GameApp: React.FC<{ campaignPlaytestLevel: CampaignLevel | null }> = ({ ca
               playModeRef.current === 'ONLINE_JOIN' &&
               (onlineRoleRef.current === 'p1' || onlineRoleRef.current === 'p2') &&
               !locksRef.current[onlineRoleRef.current] &&
-              snapshot.state.readyConfirmed?.p1 &&
-              snapshot.state.readyConfirmed?.p2 &&
+              snapshot.state.snakes
+                .filter(snake => snake.isAlive)
+                .every(snake => snapshot.state.readyConfirmed?.[snake.id]) &&
               snapshot.state.phase !== 'OVER' &&
-              snapshot.state.snakes[onlineRoleRef.current].isAlive
+              snapshot.state.snakes.find(snake => snake.id === onlineRoleRef.current)?.isAlive
             ) {
               applyThinkTransition({
                 type: 'PLANNING_ENTERED',
@@ -1342,7 +1357,8 @@ const GameApp: React.FC<{ campaignPlaytestLevel: CampaignLevel | null }> = ({ ca
             const current = stateRef.current;
             networkManager.recordTickLag(msg.tick, current.tick);
             const key = msg.role === 'p1' ? 'p1' : 'p2';
-            const snake = current.snakes[key];
+            const snake = current.snakes.find(candidate => candidate.id === key);
+            if (!snake) break;
             const buf = [...moveBuffersRef.current[key]];
             if (buf.length < snake.body.length) {
               const lastDir = buf.length > 0 ? buf[buf.length - 1] : snake.direction;
@@ -1369,10 +1385,10 @@ const GameApp: React.FC<{ campaignPlaytestLevel: CampaignLevel | null }> = ({ ca
           if (msg.ready) {
             setGameState(prev => ({
               ...prev,
-              readyConfirmed: {
-                p1: !!msg.ready.p1,
-                p2: !!msg.ready.p2,
-              }
+              readyConfirmed: Object.fromEntries(prev.snakes.map(snake => [
+                snake.id,
+                !!msg.ready[snake.id],
+              ])),
             }));
           }
           break;
@@ -1381,7 +1397,7 @@ const GameApp: React.FC<{ campaignPlaytestLevel: CampaignLevel | null }> = ({ ca
         case 'READY_CONFIRM': {
           if (msg.role) {
             setGameState(prev => {
-              const cur = prev.readyConfirmed || { p1: false, p2: false };
+              const cur = prev.readyConfirmed || Object.fromEntries(prev.snakes.map(snake => [snake.id, false]));
               const updated = { ...cur, [msg.role]: true };
               return { ...prev, readyConfirmed: updated };
             });
@@ -1423,26 +1439,15 @@ const GameApp: React.FC<{ campaignPlaytestLevel: CampaignLevel | null }> = ({ ca
       phase: gameState.phase,
       round: gameState.round,
       gridSize: settings.gridSize,
-      snakes: {
-        p1: {
-          head: gameState.snakes.p1.body[0] || { x: 0, y: 0 },
-          body: gameState.snakes.p1.body,
-          facing: gameState.snakes.p1.direction,
-          score: gameState.snakes.p1.score,
-          length: gameState.snakes.p1.body.length,
-          locked: locks.p1,
-          isAlive: gameState.snakes.p1.isAlive,
-        },
-        p2: {
-          head: gameState.snakes.p2.body[0] || { x: 0, y: 0 },
-          body: gameState.snakes.p2.body,
-          facing: gameState.snakes.p2.direction,
-          score: gameState.snakes.p2.score,
-          length: gameState.snakes.p2.body.length,
-          locked: locks.p2,
-          isAlive: gameState.snakes.p2.isAlive,
-        }
-      },
+      snakes: Object.fromEntries(gameState.snakes.map(snake => [snake.id, {
+        head: snake.body[0] || { x: 0, y: 0 },
+        body: snake.body,
+        facing: snake.direction,
+        score: snake.score,
+        length: snake.body.length,
+        locked: locks[snake.id] ?? false,
+        isAlive: snake.isAlive,
+      }])),
       tokens: gameState.tokens,
       ringInset: gameState.ringInset,
       gameOver: gameState.phase === 'OVER',
@@ -1470,7 +1475,7 @@ const GameApp: React.FC<{ campaignPlaytestLevel: CampaignLevel | null }> = ({ ca
       if (current.phase === 'OVER') return;
       const isOnlineAuthority =
         playModeRef.current === 'ONLINE_HOST' || playModeRef.current === 'ONLINE_SERVER';
-      if (isOnlineAuthority && (!current.readyConfirmed?.p1 || !current.readyConfirmed?.p2)) return;
+      if (isOnlineAuthority && current.snakes.some(snake => !current.readyConfirmed?.[snake.id])) return;
 
       if (isBuiltInAiActive()) {
         const aiDir = calculateAIMove(
@@ -1480,13 +1485,14 @@ const GameApp: React.FC<{ campaignPlaytestLevel: CampaignLevel | null }> = ({ ca
           settingsRef.current.botDifficulty
         );
         if (aiDir) {
-          queueSnakeDirection(current.snakes.p2, aiDir);
+          const bot = current.snakes.find(snake => snake.id === 'p2');
+          if (bot) queueSnakeDirection(bot, aiDir);
         }
       }
 
       const { nextState, events } = processGameTick(current, settingsRef.current, tickIntervalMs);
 
-      if (events.tokenEatenP1 || events.tokenEatenP2) soundEngine.playTokenEat();
+      if (Object.values(events.tokenEaten).some(Boolean)) soundEngine.playTokenEat();
       if (events.shrinkTelegraphStarted) soundEngine.playShrinkWarning();
       if (events.ringShrunk) soundEngine.playRingShrunk();
       if (events.deathOccurred) soundEngine.playCrash();
@@ -1513,7 +1519,7 @@ const GameApp: React.FC<{ campaignPlaytestLevel: CampaignLevel | null }> = ({ ca
     seriesCountedRef.current = true;
     const w = gameState.winner;
     if (playMode === 'ONLINE_HOST' || playMode === 'ONLINE_SERVER') {
-      networkManager.recordSeriesResult(w);
+      if (w === 'p1' || w === 'p2' || w === 'DRAW') networkManager.recordSeriesResult(w);
     } else {
       setSeries(prev => ({
         p1: prev.p1 + (w === 'p1' ? 1 : 0),
@@ -1529,7 +1535,7 @@ const GameApp: React.FC<{ campaignPlaytestLevel: CampaignLevel | null }> = ({ ca
     const mySeat = onlineRoleRef.current === 'p2' ? 'p2' : 'p1';
 
     setGameState(prev => {
-      const cur = prev.readyConfirmed || { p1: false, p2: false };
+      const cur = prev.readyConfirmed || Object.fromEntries(prev.snakes.map(snake => [snake.id, false]));
       if (cur[mySeat]) return prev;
       const updated = { ...cur, [mySeat]: true };
       return { ...prev, readyConfirmed: updated };
@@ -1564,9 +1570,9 @@ const GameApp: React.FC<{ campaignPlaytestLevel: CampaignLevel | null }> = ({ ca
       ? createCampaignPlaytestState(campaignPlaytestLevel, settingsRef.current, matchNames)
       : createInitialState(settingsRef.current, matchNames);
     if (isOnline) {
-      initial.readyConfirmed = { p1: false, p2: false };
+      initial.readyConfirmed = Object.fromEntries(initial.snakes.map(snake => [snake.id, false]));
     } else {
-      initial.readyConfirmed = { p1: true, p2: true };
+      initial.readyConfirmed = Object.fromEntries(initial.snakes.map(snake => [snake.id, true]));
     }
     seriesCountedRef.current = false;
     setMatchHistory([initial]);
@@ -1795,6 +1801,7 @@ const GameApp: React.FC<{ campaignPlaytestLevel: CampaignLevel | null }> = ({ ca
   // Single-screen match layout: when a match (or replay) is on screen, the
   // root <main> becomes a locked viewport (100dvh, no scroll).
   const isMatchView = !inLobby && !inOnlineLobby;
+  const controlsSnake = gameState.snakes.find(snake => snake.id === getTargetKey(1))!;
 
   return (
     <main className={`h-[100dvh] overflow-hidden flex flex-col items-center justify-between p-1.5 sm:p-3 [@media(max-height:500px)]:p-1 ${settings.crtFilterEnabled ? 'crt-overlay' : ''}`}>
@@ -1961,9 +1968,9 @@ const GameApp: React.FC<{ campaignPlaytestLevel: CampaignLevel | null }> = ({ ca
                     onClear={() => handleBufferClear(1)}
                     queue={settings.turnBased
                       ? moveBuffers[getTargetKey(1)]
-                      : [gameState.snakes[getTargetKey(1)].queuedDirection]
+                      : [controlsSnake.queuedDirection]
                         .filter((direction): direction is Direction => direction !== null)}
-                    queueLimit={gameState.snakes[getTargetKey(1)].body.length}
+                    queueLimit={controlsSnake.body.length}
                     locked={locks[getTargetKey(1)]}
                     turnBased={settings.turnBased}
                   />

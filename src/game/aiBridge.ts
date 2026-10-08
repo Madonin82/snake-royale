@@ -1,4 +1,5 @@
 import { CompactGameState, GameState } from '../types/game';
+import { withLegacySnakeAccessors } from './snakeArray';
 
 export function cloneGameState(state: GameState): GameState {
   return {
@@ -7,17 +8,17 @@ export function cloneGameState(state: GameState): GameState {
     totalThinkTime: { ...state.totalThinkTime },
     tokens: state.tokens.map(token => ({ ...token })),
     walls: state.walls?.map(wall => ({ ...wall })),
-    snakes: {
-      p1: { ...state.snakes.p1, body: state.snakes.p1.body.map(position => ({ ...position })) },
-      p2: { ...state.snakes.p2, body: state.snakes.p2.body.map(position => ({ ...position })) },
-    },
+    snakes: withLegacySnakeAccessors(state.snakes.map(snake => ({
+      ...snake,
+      body: snake.body.map(position => ({ ...position })),
+    }))),
     readyConfirmed: state.readyConfirmed ? { ...state.readyConfirmed } : undefined,
   };
 }
 
 export function toCompactGameState(
   state: GameState,
-  locks: { p1: boolean; p2: boolean },
+  locks: Record<string, boolean>,
 ): CompactGameState {
   return {
     tick: state.tick,
@@ -30,20 +31,12 @@ export function toCompactGameState(
     isTelegraphingShrink: state.isTelegraphingShrink,
     telegraphRingInset: state.telegraphRingInset,
     tokens: state.tokens.map(token => ({ ...token })),
-    snakes: {
-      p1: {
-        body: state.snakes.p1.body.map(position => ({ ...position })),
-        direction: state.snakes.p1.direction,
-        score: state.snakes.p1.score,
-        isAlive: state.snakes.p1.isAlive,
-      },
-      p2: {
-        body: state.snakes.p2.body.map(position => ({ ...position })),
-        direction: state.snakes.p2.direction,
-        score: state.snakes.p2.score,
-        isAlive: state.snakes.p2.isAlive,
-      },
-    },
+    snakes: Object.fromEntries(state.snakes.map(snake => [snake.id, {
+      body: snake.body.map(position => ({ ...position })),
+      direction: snake.direction,
+      score: snake.score,
+      isAlive: snake.isAlive,
+    }])),
     locks: { ...locks },
     winner: state.winner,
   };

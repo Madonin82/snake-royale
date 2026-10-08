@@ -9,11 +9,11 @@ interface HudProps {
   onOpenLatencyHarness: () => void;
   onOpenSettings: () => void;
   gamepadCount: number;
-  locks?: { p1: boolean; p2: boolean };
-  thinkSessions?: { p1: { startTime: number | null }; p2: { startTime: number | null } };
-  thinkTimeRemaining?: { p1: number | null; p2: number | null };
+  locks?: Record<string, boolean>;
+  thinkSessions?: Record<string, { startTime: number | null }>;
+  thinkTimeRemaining?: Record<string, number | null>;
   viewerSeat?: 'p1' | 'p2' | null;
-  moveBuffers?: { p1: Direction[]; p2: Direction[] };
+  moveBuffers?: Record<string, Direction[]>;
   replayActive?: boolean;
 }
 
@@ -30,8 +30,6 @@ export const Hud: React.FC<HudProps> = ({
   moveBuffers,
   replayActive = false,
 }) => {
-  const { p1, p2 } = gameState.snakes;
-
   // Who is "you" on this screen, per seat — drives the (YOU) tags.
   const seatTag = (seat: 'p1' | 'p2'): string => {
     if (playMode === 'ONLINE_SERVER' || playMode === 'ONLINE_SPECTATOR') return seat === 'p1' ? '(P1)' : '(P2)';
@@ -58,11 +56,12 @@ export const Hud: React.FC<HudProps> = ({
     return m > 0 ? `${m}:${s < 10 ? '0' : ''}${s}` : `${s}s`;
   };
   const thinkLabel = (who: 'p1' | 'p2') => {
-    const snake = who === 'p1' ? p1 : p2;
+    const snake = gameState.snakes.find(candidate => candidate.id === who);
+    if (!snake) return who;
     if (!thinkSessions) return snake.name;
     const session = thinkSessions[who];
     const locked = isLocked(who);
-    const lastTurn = gameState.lastTurnTimes ? (who === 'p1' ? gameState.lastTurnTimes.p1 : gameState.lastTurnTimes.p2) : null;
+    const lastTurn = gameState.lastTurnTimes?.[who] ?? null;
     if (locked) {
       return `${snake.name} ✓ ${lastTurn !== null ? `${lastTurn.toFixed(1)}s` : ''}`;
     }
@@ -72,7 +71,7 @@ export const Hud: React.FC<HudProps> = ({
 
   const isLocked = (who: 'p1' | 'p2') => {
     if (!locks) return false;
-    return who === 'p1' ? locks.p1 : locks.p2;
+    return locks[who] ?? false;
   };
 
   const isLocalSeat = (seat: 'p1' | 'p2'): boolean => {
@@ -168,12 +167,13 @@ export const Hud: React.FC<HudProps> = ({
   };
 
   const renderDesktopPlayerPanel = (who: 'p1' | 'p2') => {
-    const snake = who === 'p1' ? p1 : p2;
+    const snake = gameState.snakes.find(candidate => candidate.id === who);
+    if (!snake) return null;
     const locked = isLocked(who);
     const canSeeMoves = replayActive || playMode === 'LOCAL_2P' || viewerSeat === who;
-    const lastTurn = gameState.lastTurnTimes ? (who === 'p1' ? gameState.lastTurnTimes.p1 : gameState.lastTurnTimes.p2) : null;
-    const totalThink = gameState.totalThinkTime ? (who === 'p1' ? gameState.totalThinkTime.p1 : gameState.totalThinkTime.p2) : 0;
-    const buffer = moveBuffers ? (who === 'p1' ? moveBuffers.p1 : moveBuffers.p2) : [];
+    const lastTurn = gameState.lastTurnTimes?.[who] ?? null;
+    const totalThink = gameState.totalThinkTime?.[who] ?? 0;
+    const buffer = moveBuffers?.[who] ?? [];
     const countdown = thinkTimeRemaining?.[who] ?? null;
 
     return (
@@ -251,13 +251,14 @@ export const Hud: React.FC<HudProps> = ({
   const renderMobileCards = (
     <div className="mobile-cards-area grid grid-cols-2 gap-2 w-full font-mono text-[#0F380F] shrink-0">
       {(['p1', 'p2'] as const).map((who) => {
-        const snake = who === 'p1' ? p1 : p2;
+        const snake = gameState.snakes.find(candidate => candidate.id === who);
+        if (!snake) return null;
         const locked = isLocked(who);
-        const buffer = moveBuffers ? (who === 'p1' ? moveBuffers.p1 : moveBuffers.p2) : [];
+        const buffer = moveBuffers?.[who] ?? [];
         const local = replayActive || isLocalSeat(who);
         const countdown = thinkTimeRemaining?.[who] ?? null;
-        const lastTurn = gameState.lastTurnTimes ? (who === 'p1' ? gameState.lastTurnTimes.p1 : gameState.lastTurnTimes.p2) : null;
-        const totalThink = gameState.totalThinkTime ? (who === 'p1' ? gameState.totalThinkTime.p1 : gameState.totalThinkTime.p2) : 0;
+        const lastTurn = gameState.lastTurnTimes?.[who] ?? null;
+        const totalThink = gameState.totalThinkTime?.[who] ?? 0;
         return (
           <div key={who} className="bg-[#9BBC0F] p-2 border-2 border-[#0F380F] flex flex-col justify-between shadow-[2px_2px_0px_#0F380F] min-w-0 overflow-hidden">
             <div className="shrink-0">
@@ -343,7 +344,8 @@ export const Hud: React.FC<HudProps> = ({
 
       <div className="portrait-opponents hidden w-full items-center gap-1 border-2 border-[#0F380F] bg-[#9BBC0F] px-1 py-0.5 font-mono text-[10px] font-bold text-[#0F380F]">
         {(['p1', 'p2'] as const).map((who) => {
-          const snake = who === 'p1' ? p1 : p2;
+          const snake = gameState.snakes.find(candidate => candidate.id === who);
+          if (!snake) return null;
           return (
             <div key={who} className="flex min-w-0 flex-1 items-center gap-1">
               <span className={`h-2 w-2 shrink-0 border border-[#0F380F] ${who === 'p1' ? 'bg-[#0F380F]' : 'bg-[#306230]'}`} />
