@@ -37,6 +37,7 @@ import { SettingsModal } from './components/SettingsModal';
 import { MatchEndModal } from './components/MatchEndModal';
 import { ControlsOverlay } from './components/ControlsOverlay';
 import { ReplayControls } from './components/ReplayControls';
+import { LevelEditor } from './editor/LevelEditor';
 import { ArrowLeft, Volume2, VolumeX } from 'lucide-react';
 
 function computePreviewSnake(snake: any, buffer: Direction[]): Position[] {
@@ -68,6 +69,20 @@ function createLobbyState(settings: GameSettings): GameState {
 }
 
 export const App: React.FC = () => {
+  const [currentHash, setCurrentHash] = useState<string>(() => window.location.hash);
+
+  useEffect(() => {
+    const handleHashChange = () => {
+      setCurrentHash(window.location.hash);
+    };
+    window.addEventListener('hashchange', handleHashChange);
+    return () => window.removeEventListener('hashchange', handleHashChange);
+  }, []);
+
+  if (currentHash === '#/level-editor') {
+    return <LevelEditor />;
+  }
+
   const aiMode = useMemo(() => new URLSearchParams(window.location.search).get('ai') === '1', []);
   const initialRoomParam = useMemo(() => new URLSearchParams(window.location.search).get('room') || '', []);
   const [settings, setSettings] = useState<GameSettings>(DEFAULT_SETTINGS);
