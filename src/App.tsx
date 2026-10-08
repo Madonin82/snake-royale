@@ -69,6 +69,7 @@ function createLobbyState(settings: GameSettings): GameState {
 
 export const App: React.FC = () => {
   const aiMode = useMemo(() => new URLSearchParams(window.location.search).get('ai') === '1', []);
+  const initialRoomParam = useMemo(() => new URLSearchParams(window.location.search).get('room') || '', []);
   const [settings, setSettings] = useState<GameSettings>(DEFAULT_SETTINGS);
   const [playMode, setPlayMode] = useState<PlayMode>('SOLO_AI');
   const [inLobby, setInLobby] = useState<boolean>(true);
@@ -179,16 +180,32 @@ export const App: React.FC = () => {
     return 'p1';
   }, [playMode, onlineRole]);
 
+  const replayDecisionQueues = useMemo(() => {
+    if (!replayActive) return null;
+    const baseState = matchHistory[replayIdx] ?? gameState;
+    const currentTick = baseState.tick;
+    const decisions = turnDecisionsRef.current;
+    let p1Queue: Direction[] = [];
+    let p2Queue: Direction[] = [];
+    for (const d of decisions) {
+      if (d.tick === currentTick) {
+        if (d.seat === 'p1') p1Queue = d.queue;
+        else if (d.seat === 'p2') p2Queue = d.queue;
+      }
+    }
+    return { p1: p1Queue, p2: p2Queue };
+  }, [replayActive, matchHistory, replayIdx, gameState]);
+
   const displayState = useMemo(() => {
-    if (replayActive) return matchHistory[replayIdx] ?? gameState;
+    const baseState = replayActive ? (matchHistory[replayIdx] ?? gameState) : gameState;
     const stateCopy: GameState = {
-      ...gameState,
+      ...baseState,
       snakes: {
-        p1: { ...gameState.snakes.p1, body: [...gameState.snakes.p1.body] },
-        p2: { ...gameState.snakes.p2, body: [...gameState.snakes.p2.body] },
+        p1: { ...baseState.snakes.p1, body: [...baseState.snakes.p1.body] },
+        p2: { ...baseState.snakes.p2, body: [...baseState.snakes.p2.body] },
       },
     };
-    if (settings.turnBased) {
+    if (settings.turnBased && !replayActive) {
       const showP1 = playMode === 'LOCAL_2P' || viewerSeat === 'p1';
       const showP2 = playMode === 'LOCAL_2P' || viewerSeat === 'p2';
 
@@ -203,7 +220,8 @@ export const App: React.FC = () => {
   }, [replayActive, matchHistory, replayIdx, gameState, moveBuffers, locks, settings.turnBased, playMode, viewerSeat]);
 
   const lockedPaths = useMemo(() => {
-    if (!settings.turnBased) return undefined;
+    if (!settings.turnBased || replayActive) return undefined;
+
     const showP1 = playMode === 'LOCAL_2P' || viewerSeat === 'p1';
     const showP2 = playMode === 'LOCAL_2P' || viewerSeat === 'p2';
 
@@ -211,7 +229,7 @@ export const App: React.FC = () => {
       p1: showP1 && locks.p1 && moveBuffers.p1.length > 0 ? computeCommittedPath(gameState.snakes.p1, moveBuffers.p1) : undefined,
       p2: showP2 && locks.p2 && moveBuffers.p2.length > 0 ? computeCommittedPath(gameState.snakes.p2, moveBuffers.p2) : undefined,
     };
-  }, [settings.turnBased, locks, moveBuffers, gameState.snakes, playMode, viewerSeat]);
+  }, [settings.turnBased, replayActive, locks, moveBuffers, gameState, playMode, viewerSeat]);
 
   const stateRef = useRef<GameState>(gameState);
   stateRef.current = gameState;
@@ -1662,7 +1680,18 @@ export const App: React.FC = () => {
             : parsed.settings!.thinkTimeSeconds,
         }));
       }
-      setMatchHistory(parsed.states);
+      const uniqueStates: GameState[] = [];
+      const seenTicks = new Set<number>();
+      for (const st of parsed.states) {
+        if (!seenTicks.has(st.tick)) {
+          seenTicks.add(st.tick);
+          uniqueStates.push(st);
+        } else {
+          const idx = uniqueStates.findIndex(s => s.tick === st.tick);
+          if (idx !== -1) uniqueStates[idx] = st;
+        }
+      }
+      setMatchHistory(uniqueStates);
       turnDecisionsRef.current = parsed.decisions;
       agentDrivenRef.current = parsed.agentDriven;
       const snapshot = adoptThinkTimeSnapshot(thinkRef.current, parsed.states[0]);
@@ -1671,7 +1700,7 @@ export const App: React.FC = () => {
       setGameState(snapshot.state);
       setReplayActive(true);
       setReplayIdx(0);
-      setReplayPlaying(true);
+      setReplayPlaying(false);
       setInLobby(false);
       setInOnlineLobby(false);
       soundEngine.playMenuSelect();
@@ -1742,6 +1771,7 @@ export const App: React.FC = () => {
               onImportReplay={handleImportReplay}
               importError={importError}
               joinError={joinError}
+              initialRoom={initialRoomParam}
             />
           ) : inOnlineLobby ? (
             <OnlineRoomLobby
@@ -1772,8 +1802,9 @@ export const App: React.FC = () => {
                 locks={replayActive ? undefined : locks}
                 thinkSessions={replayActive ? undefined : thinkSessions}
                 thinkTimeRemaining={replayActive ? undefined : thinkTimeRemaining}
-                moveBuffers={moveBuffers}
+                moveBuffers={replayActive && replayDecisionQueues ? replayDecisionQueues : moveBuffers}
                 viewerSeat={viewerSeat}
+                replayActive={replayActive}
               />
               <div className="gameboard-area">
                 <GameBoard
@@ -1851,6 +1882,8 @@ export const App: React.FC = () => {
                     onExit={() => { setReplayActive(false); setReplayPlaying(false); }}
                     onExportReplay={handleExportReplay}
                     onRegisterHandler={(h) => { activeHandlerRef.current = h; }}
+                    matchHistory={matchHistory}
+                    turnDecisions={turnDecisionsRef.current}
                   />
                 )}
               </div>
@@ -1898,12 +1931,14 @@ export const App: React.FC = () => {
           onWatchReplay={() => {
             setReplayActive(true);
             setReplayIdx(0);
-            setReplayPlaying(true);
+            setReplayPlaying(false);
           }}
           onRematch={handleRematch}
           onReturnToLobby={handleReturnToLobby}
           onExportReplay={handleExportReplay}
           onRegisterHandler={(h) => { activeHandlerRef.current = h; }}
+          matchHistory={matchHistory}
+          turnDecisions={turnDecisionsRef.current}
         />
       )}
     </main>

@@ -1,7 +1,11 @@
-import React, { useEffect } from 'react';
-import { Pause, Play, X } from 'lucide-react';
+import React, { useState, useEffect } from 'react';
+import { Pause, Play, X, BarChart2 } from 'lucide-react';
 import { GamepadMenuAction } from '../game/gamepad';
 import { soundEngine } from '../audio/soundEngine';
+import { GameState } from '../types/game';
+import { TurnDecision } from '../game/replayFile';
+import { computeMatchStats, computeTurnLedger } from '../game/stats';
+import { Sparkline, TurnLedgerView } from './MatchEndModal';
 
 interface ReplayControlsProps {
   index: number; // current turn index (0-based)
@@ -14,6 +18,8 @@ interface ReplayControlsProps {
   onExit: () => void;
   onExportReplay?: () => void;
   onRegisterHandler?: (handler: ((action: GamepadMenuAction) => void) | null) => void;
+  matchHistory?: GameState[];
+  turnDecisions?: TurnDecision[];
 }
 
 export const ReplayControls: React.FC<ReplayControlsProps> = ({
@@ -27,11 +33,31 @@ export const ReplayControls: React.FC<ReplayControlsProps> = ({
   onExit,
   onExportReplay,
   onRegisterHandler,
+  matchHistory = [],
+  turnDecisions = [],
 }) => {
   const max = Math.max(0, total - 1);
+  const [statsOpen, setStatsOpen] = useState(false);
+  
+  const [expandedP1, setExpandedP1] = useState(true);
+  const [expandedP2, setExpandedP2] = useState(true);
+
+  const matchStats = computeMatchStats(matchHistory, turnDecisions);
+  const turnLedgerEntries = computeTurnLedger(matchHistory, turnDecisions);
+  const finalState = matchHistory[matchHistory.length - 1] || matchHistory[0];
+  const p1 = finalState?.snakes?.p1 || { name: 'PLAYER 1', score: 0 };
+  const p2 = finalState?.snakes?.p2 || { name: 'PLAYER 2', score: 0 };
 
   useEffect(() => {
     const handleAction = (action: GamepadMenuAction) => {
+      if (statsOpen) {
+        if (action === 'CANCEL' || action === 'CONFIRM' || action === 'START') {
+          soundEngine.playMenuBack();
+          setStatsOpen(false);
+        }
+        return;
+      }
+
       if (action === 'CANCEL') {
         soundEngine.playMenuBack();
         onExit();
@@ -71,16 +97,83 @@ export const ReplayControls: React.FC<ReplayControlsProps> = ({
     return () => {
       onRegisterHandler?.(null);
     };
-  }, [index, max, speed, onExit, onTogglePlay, onSeek, onSpeedChange, onRegisterHandler]);
+  }, [index, max, speed, statsOpen, onExit, onTogglePlay, onSeek, onSpeedChange, onRegisterHandler]);
 
   return (
-    <div className="w-full max-w-[340px] sm:max-w-[400px] md:max-w-[460px] bg-[#8BAC0F] border-2 border-[#0F380F] px-3 py-2 font-mono text-[#0F380F] flex flex-col gap-2">
+    <div className="w-full max-w-[360px] sm:max-w-[420px] md:max-w-[480px] bg-[#8BAC0F] border-2 border-[#0F380F] px-3 py-2 font-mono text-[#0F380F] flex flex-col gap-2 relative">
+      {statsOpen && (
+        <div className="absolute bottom-full mb-2 inset-x-0 bg-[#9BBC0F] border-4 border-[#0F380F] shadow-[4px_4px_0px_#0F380F] p-3 z-30 flex flex-col gap-2 text-left animate-fadeIn max-h-[70dvh] overflow-y-auto">
+          <div className="flex items-center justify-between border-b-2 border-[#0F380F] pb-1">
+            <span className="font-black text-xs uppercase">📊 Match Analytics & Stats</span>
+            <button
+              onClick={() => { soundEngine.playMenuBack(); setStatsOpen(false); }}
+              className="px-1.5 py-0.5 bg-[#8BAC0F] border border-[#0F380F] text-[10px] font-bold cursor-pointer"
+            >
+              ✕ CLOSE
+            </button>
+          </div>
+
+          <div className="flex flex-col sm:grid sm:grid-cols-2 gap-2">
+            {(['p1', 'p2'] as const).map((who) => {
+              const snake = who === 'p1' ? p1 : p2;
+              const stats = who === 'p1' ? matchStats.p1Stats : matchStats.p2Stats;
+              const isExpanded = who === 'p1' ? expandedP1 : expandedP2;
+
+              return (
+                <div
+                  key={who}
+                  className="p-2 border-2 border-[#0F380F] bg-[#8BAC0F]/85 flex flex-col items-center"
+                >
+                  <div
+                    onClick={() => {
+                      soundEngine.playMenuSelect();
+                      if (who === 'p1') setExpandedP1(prev => !prev);
+                      else setExpandedP2(prev => !prev);
+                    }}
+                    className="flex items-center justify-between w-full text-[11px] font-bold cursor-pointer hover:opacity-80"
+                    title="Tap to toggle panel"
+                  >
+                    <span className="truncate">{snake.name}</span>
+                    <span className="text-[9px] opacity-80">{isExpanded ? '▴ HIDE STATS' : '▾ SHOW STATS'}</span>
+                  </div>
+                  <div className="text-xl font-black mt-0.5 tabular-nums">{stats.score} PTS</div>
+
+                  {isExpanded && (
+                    <div className="mt-2 pt-1.5 border-t border-[#0F380F] w-full text-[10px] font-bold space-y-1 bg-[#8BAC0F]/50 p-1.5">
+                      <div className="flex justify-between"><span>Avg Lock:</span><span className="tabular-nums">{stats.avgLockTime}</span></div>
+                      <div className="flex justify-between"><span>Fast / Slow:</span><span className="tabular-nums">{stats.fastestLock} / {stats.slowestLock}</span></div>
+                      <div className="flex justify-between"><span>Auto-Locks:</span><span className="tabular-nums">{stats.autoLockPct}</span></div>
+                      <div className="flex justify-between"><span>Avg Queue:</span><span className="tabular-nums">{stats.avgQueueLen}</span></div>
+                      <div className="flex justify-between"><span>Outcome:</span><span className="truncate max-w-[110px]">{stats.causeOfDeath}</span></div>
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+
+          {/* Per-Turn Detail Ledger (with collapsible TURNS/TIME toggle row) */}
+          <TurnLedgerView entries={turnLedgerEntries} matchStats={matchStats} />
+        </div>
+      )}
+
       <div className="flex items-center justify-between text-[10px] font-black uppercase">
         <span>▶ Match Replay</span>
         <span>
           Turn {Math.min(index, max)} / {max}
         </span>
         <div className="flex items-center gap-1.5">
+          <button
+            onClick={() => {
+              soundEngine.playMenuSelect();
+              setStatsOpen(prev => !prev);
+            }}
+            className="flex items-center gap-1 bg-[#9BBC0F] hover:bg-[#0F380F] hover:text-[#9BBC0F] px-1.5 py-0.5 border border-[#0F380F] cursor-pointer"
+            title="View Match Analytics & Stats"
+          >
+            <BarChart2 className="w-3 h-3" />
+            <span>STATS</span>
+          </button>
           {onExportReplay && (
             <button
               onClick={() => {

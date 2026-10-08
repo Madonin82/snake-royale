@@ -25,6 +25,7 @@ interface LobbyViewProps {
   onImportReplay: (file: File) => void;
   importError: string | null;
   joinError: string | null;
+  initialRoom?: string;
 }
 
 type ScreenId = 'MAIN' | 'SOLO' | 'VERSUS' | 'ONLINE' | 'SETTINGS';
@@ -50,10 +51,11 @@ export const LobbyView: React.FC<LobbyViewProps> = ({
   onImportReplay,
   importError,
   joinError,
+  initialRoom = '',
 }) => {
-  const [screen, setScreen] = useState<ScreenId>('MAIN');
+  const [screen, setScreen] = useState<ScreenId>(initialRoom ? 'ONLINE' : 'MAIN');
   const [difficulty, setDifficulty] = useState<'EASY' | 'MEDIUM' | 'HARD'>(settings.botDifficulty || 'MEDIUM');
-  const [roomInput, setRoomInput] = useState('');
+  const [roomInput, setRoomInput] = useState(initialRoom);
   const [focusIndex, setFocusIndex] = useState<number>(0);
 
   const nameInputRef = useRef<HTMLInputElement>(null);
@@ -366,11 +368,9 @@ export const LobbyView: React.FC<LobbyViewProps> = ({
           {/* Title Header */}
           <div className="text-center border-b-4 [@media(max-height:500px)]:border-b-2 border-[#0F380F] pb-2 [@media(max-height:500px)]:pb-1 shrink-0">
             <div className="flex items-center justify-center gap-2">
-              <span className="text-xl [@media(max-height:500px)]:text-base">🐍</span>
               <h1 className="text-xl sm:text-2xl [@media(max-height:500px)]:text-base font-black uppercase tracking-wider font-['Press_Start_2P',monospace] text-[#0F380F]">
                 SNAKE ROYALE
               </h1>
-              <span className="text-xl [@media(max-height:500px)]:text-base">👑</span>
             </div>
             <div className="text-[11px] [@media(max-height:500px)]:text-[10px] font-bold mt-1 [@media(max-height:500px)]:mt-0.5 text-[#306230] uppercase tracking-widest">
               {settings.turnBased ? 'Turn-Based Strategy' : '2-Player Token Race'} • {settings.gridSize}×{settings.gridSize} Battle Arena

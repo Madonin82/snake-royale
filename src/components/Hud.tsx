@@ -14,6 +14,7 @@ interface HudProps {
   thinkTimeRemaining?: { p1: number | null; p2: number | null };
   viewerSeat?: 'p1' | 'p2' | null;
   moveBuffers?: { p1: Direction[]; p2: Direction[] };
+  replayActive?: boolean;
 }
 
 export const Hud: React.FC<HudProps> = ({
@@ -27,6 +28,7 @@ export const Hud: React.FC<HudProps> = ({
   thinkTimeRemaining,
   viewerSeat,
   moveBuffers,
+  replayActive = false,
 }) => {
   const { p1, p2 } = gameState.snakes;
 
@@ -88,6 +90,12 @@ export const Hud: React.FC<HudProps> = ({
   const formattedTime = `${minutes}:${seconds < 10 ? '0' : ''}${seconds}`;
   const portraitTimerSeat = viewerSeat ?? 'p1';
   const portraitCountdown = thinkTimeRemaining?.[portraitTimerSeat] ?? null;
+  const meanScore = Math.round((p1.score + p2.score) / 2);
+  const phaseInfo = isRacing
+    ? `RACE • ${gameState.phaseTurnsRemaining} LEFT`
+    : isShrinking
+    ? `SHRINK • RING IN ${gameState.phaseTurnsRemaining}`
+    : `GAME OVER`;
 
   const topStripContent = (
     <div className="top-strip-content h-9 [@media(max-height:540px)]:h-7 flex items-center justify-between gap-2 bg-[#8BAC0F] px-2.5 border-2 border-[#0F380F] text-xs font-bold tracking-wider w-full shadow-[2px_2px_0px_#0F380F] overflow-hidden shrink-0">
@@ -169,7 +177,7 @@ export const Hud: React.FC<HudProps> = ({
   const renderDesktopPlayerPanel = (who: 'p1' | 'p2') => {
     const snake = who === 'p1' ? p1 : p2;
     const locked = isLocked(who);
-    const canSeeMoves = playMode === 'LOCAL_2P' || viewerSeat === who;
+    const canSeeMoves = replayActive || playMode === 'LOCAL_2P' || viewerSeat === who;
     const lastTurn = gameState.lastTurnTimes ? (who === 'p1' ? gameState.lastTurnTimes.p1 : gameState.lastTurnTimes.p2) : null;
     const totalThink = gameState.totalThinkTime ? (who === 'p1' ? gameState.totalThinkTime.p1 : gameState.totalThinkTime.p2) : 0;
     const buffer = moveBuffers ? (who === 'p1' ? moveBuffers.p1 : moveBuffers.p2) : [];
@@ -253,7 +261,7 @@ export const Hud: React.FC<HudProps> = ({
         const snake = who === 'p1' ? p1 : p2;
         const locked = isLocked(who);
         const buffer = moveBuffers ? (who === 'p1' ? moveBuffers.p1 : moveBuffers.p2) : [];
-        const local = isLocalSeat(who);
+        const local = replayActive || isLocalSeat(who);
         const countdown = thinkTimeRemaining?.[who] ?? null;
         const lastTurn = gameState.lastTurnTimes ? (who === 'p1' ? gameState.lastTurnTimes.p1 : gameState.lastTurnTimes.p2) : null;
         const totalThink = gameState.totalThinkTime ? (who === 'p1' ? gameState.totalThinkTime.p1 : gameState.totalThinkTime.p2) : 0;
@@ -324,10 +332,10 @@ export const Hud: React.FC<HudProps> = ({
       <div className="top-strip-area w-full flex flex-col items-center">
         <div className="portrait-hud hidden w-full items-center justify-between gap-2 bg-[#8BAC0F] px-2 py-1 border-2 border-[#0F380F] font-mono text-[#0F380F]">
           <span className="min-w-0 truncate text-[10px] font-black tracking-tight">
-            {gameState.phase === 'RACING' ? 'RACE' : gameState.phase === 'SHRINKING' ? 'SHRINK' : 'OVER'}
+            {phaseInfo} · AVG {meanScore} PTS
           </span>
           <span className="shrink-0 text-[10px] font-bold">TURN {gameState.tick}</span>
-          <span className="shrink-0 min-w-[2.5rem] text-right text-3xl leading-none font-black tabular-nums">
+          <span className="shrink-0 min-w-[2.5rem] text-right text-2xl leading-none font-black tabular-nums">
             {gameState.turnBased ? portraitCountdown ?? '∞' : formattedTime}
           </span>
         </div>

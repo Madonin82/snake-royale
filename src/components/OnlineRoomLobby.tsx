@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { Copy, Check, Play, Users, ArrowLeft, Activity, Settings } from 'lucide-react';
 import { onAuthStateChanged, User } from 'firebase/auth';
+import { QRCodeSVG } from 'qrcode.react';
 import { GameSettings } from '../types/game';
 import { GamepadMenuAction } from '../game/gamepad';
 import { soundEngine } from '../audio/soundEngine';
@@ -200,10 +201,13 @@ export const OnlineRoomLobby: React.FC<OnlineRoomLobbyProps> = ({
           {currentBtn === 'COPY' && <span className="animate-pulse">►</span>}
           ROOM CODE (SHARE WITH OPPONENT):
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex items-center justify-center gap-2">
           <span className="text-3xl font-black tracking-widest bg-[#9BBC0F] px-4 py-0.5 border-2 border-[#0F380F]">
             {roomId}
           </span>
+          <div className="bg-white p-1 border-2 border-[#0F380F] shrink-0" title="Scan to join room">
+            <QRCodeSVG value={`https://madonin82.github.io/snake-royale/?room=${roomId}`} size={52} level="L" />
+          </div>
           <button
             onClick={handleCopy}
             className="bg-[#0F380F] hover:bg-[#306230] text-[#9BBC0F] p-2 border-2 border-[#0F380F] cursor-pointer shadow-[2px_2px_0px_#0F380F]"
