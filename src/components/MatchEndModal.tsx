@@ -134,8 +134,8 @@ export const MatchEndModal: React.FC<MatchEndModalProps> = ({
   }
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-xs font-mono select-none">
-      <div className="w-full max-w-sm bg-[#9BBC0F] border-4 border-[#0F380F] shadow-[8px_8px_0px_#0F380F] text-[#0F380F] p-4 flex flex-col gap-4 text-center">
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-2 sm:p-4 bg-black/80 backdrop-blur-xs font-mono select-none">
+      <div className="w-full max-w-sm max-h-[96dvh] bg-[#9BBC0F] border-4 border-[#0F380F] shadow-[8px_8px_0px_#0F380F] text-[#0F380F] p-3 sm:p-4 flex flex-col justify-between gap-2.5 text-center overflow-hidden">
         {/* Banner */}
         <div className="border-b-4 border-[#0F380F] pb-2">
           <div className="flex items-center justify-center gap-2">

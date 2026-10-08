@@ -129,8 +129,7 @@ export const GameBoard: React.FC<GameBoardProps> = ({
   }, [gameState, settings, lockedPaths, animationsDisabled]);
 
   const handlePointerDown = (event: ReactPointerEvent<HTMLCanvasElement>) => {
-    if (!interactionEnabled || event.pointerType !== 'touch' ||
-      !window.matchMedia('(max-width: 767px) and (orientation: portrait)').matches) return;
+    if (!interactionEnabled || event.pointerType !== 'touch') return;
     pointerStartRef.current = { id: event.pointerId, x: event.clientX, y: event.clientY };
     event.currentTarget.setPointerCapture(event.pointerId);
   };

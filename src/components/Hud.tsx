@@ -90,10 +90,10 @@ export const Hud: React.FC<HudProps> = ({
   const portraitCountdown = thinkTimeRemaining?.[portraitTimerSeat] ?? null;
 
   const topStripContent = (
-    <div className="top-strip-content flex items-center justify-between gap-2 bg-[#8BAC0F] px-3 py-1.5 border-2 border-[#0F380F] text-xs font-bold tracking-wider w-full shadow-[2px_2px_0px_#0F380F]">
-      <div className="flex items-center gap-1.5 flex-wrap min-w-0">
+    <div className="top-strip-content h-9 [@media(max-height:540px)]:h-7 flex items-center justify-between gap-2 bg-[#8BAC0F] px-2.5 border-2 border-[#0F380F] text-xs font-bold tracking-wider w-full shadow-[2px_2px_0px_#0F380F] overflow-hidden shrink-0">
+      <div className="flex items-center gap-1.5 flex-nowrap min-w-0 overflow-hidden">
         <span
-          className={`whitespace-nowrap px-1.5 py-0.5 border border-[#0F380F] text-[10px] ${
+          className={`shrink-0 whitespace-nowrap px-1.5 py-0.5 [@media(max-height:540px)]:py-0 border border-[#0F380F] text-[10px] leading-tight ${
             isRacing
               ? 'bg-[#0F380F] text-[#9BBC0F]'
               : isShrinking
@@ -107,47 +107,64 @@ export const Hud: React.FC<HudProps> = ({
             ? `PHASE 2: SHRINK ARENA`
             : `MATCH OVER`}
         </span>
-        {isRacing && (
-          <span className="whitespace-nowrap text-[10px] bg-[#9BBC0F] px-1 border border-[#0F380F]">
-            RND {gameState.round} ({gameState.tokens.length} 💎)
-          </span>
-        )}
+        <span className="shrink-0 whitespace-nowrap text-[10px] leading-tight bg-[#9BBC0F] px-1.5 py-0.5 [@media(max-height:540px)]:py-0 border border-[#0F380F] tabular-nums">
+          {isRacing ? `RND ${gameState.round} (${gameState.tokens.length} 💎)` : `RING ${gameState.ringInset}`}
+        </span>
       </div>
 
-      <div className="flex items-center gap-2 min-w-0">
+      <div className="flex items-center gap-1.5 shrink-0">
         {gameState.turnBased && (
           <span className="hidden lg:inline text-[9px] opacity-80 whitespace-nowrap">
             {gameState.phase === 'OVER' ? 'GAME!' : 'BOTH LOCK → BOARD STEPS'}
           </span>
         )}
 
-        <div className="whitespace-nowrap text-xs md:text-sm font-black tracking-widest bg-[#9BBC0F] px-2 py-0.5 border border-[#0F380F]">
+        <div className="whitespace-nowrap text-xs md:text-sm [@media(max-height:540px)]:text-[11px] leading-tight font-black tracking-widest bg-[#9BBC0F] px-2 py-0.5 [@media(max-height:540px)]:py-0 border border-[#0F380F] tabular-nums min-w-[8.5rem] text-center">
           {gameState.turnBased
-            ? `TURN ${gameState.tick} • ${gameState.phase === 'RACING' ? `${gameState.phaseTurnsRemaining} LEFT` : gameState.phase === 'SHRINKING' ? `RING IN ${gameState.phaseTurnsRemaining}` : '—'}`
+            ? `TURN ${gameState.tick} • ${gameState.phase === 'RACING' ? `${gameState.phaseTurnsRemaining} LEFT` : gameState.phase === 'SHRINKING' ? `RING IN ${gameState.phaseTurnsRemaining}` : 'OVER'}`
             : `⏱️ ${formattedTime}`}
         </div>
 
         {gamepadCount > 0 && (
-          <span className="hidden sm:flex items-center gap-1 text-[10px] text-[#0F380F] font-bold bg-[#9BBC0F] px-1 border border-[#0F380F]">
+          <span className="hidden sm:flex items-center gap-1 text-[10px] text-[#0F380F] font-bold bg-[#9BBC0F] px-1 border border-[#0F380F] tabular-nums">
             <Gamepad className="w-3 h-3" /> {gamepadCount}
           </span>
         )}
 
         <button
           onClick={onOpenLatencyHarness}
-          className="shrink-0 flex items-center gap-1 bg-[#9BBC0F] hover:bg-[#0F380F] hover:text-[#9BBC0F] text-[#0F380F] px-2 py-0.5 border border-[#0F380F] font-bold cursor-pointer transition-colors text-[10px]"
+          className="shrink-0 flex items-center gap-1 bg-[#9BBC0F] hover:bg-[#0F380F] hover:text-[#9BBC0F] text-[#0F380F] px-2 py-0.5 [@media(max-height:540px)]:py-0 border border-[#0F380F] font-bold cursor-pointer transition-colors text-[10px] leading-tight tabular-nums"
           title="Open Latency Diagnostic Suite & Diagnostics"
         >
-          <Activity className="w-3 h-3" />
-          <span className="hidden sm:inline">NET: {latencyReport.medianRtt > 0 ? `${latencyReport.medianRtt}ms` : 'DIAG'}</span>
-          {latencyReport.inputTickLagAvg > 0 && (
-            <span className="text-[9px] opacity-90">({latencyReport.inputTickLagAvg}t lag)</span>
-          )}
-          <Wifi className="w-2.5 h-2.5" />
+          <Activity className="w-3 h-3 shrink-0" />
+          <span className="hidden sm:inline whitespace-nowrap">
+            NET: {latencyReport.medianRtt > 0 ? `${latencyReport.medianRtt}ms` : 'DIAG'}
+          </span>
+          <Wifi className="w-2.5 h-2.5 shrink-0" />
         </button>
       </div>
     </div>
   );
+
+  const renderOutcomeBadge = (who: 'p1' | 'p2') => {
+    if (gameState.phase !== 'OVER' || !gameState.winner) return null;
+    const isWinner = gameState.winner === who;
+    const isDraw = gameState.winner === 'DRAW';
+    const label = isDraw ? 'DRAW' : isWinner ? '★ WIN' : '✕ LOSS';
+    return (
+      <span
+        className={`shrink-0 px-1.5 py-0.5 text-[10px] leading-none font-black uppercase tracking-wider border border-[#0F380F] ${
+          isWinner
+            ? 'bg-[#0F380F] text-[#9BBC0F]'
+            : isDraw
+            ? 'bg-[#306230] text-[#9BBC0F]'
+            : 'bg-[#8BAC0F] text-[#0F380F]'
+        }`}
+      >
+        {label}
+      </span>
+    );
+  };
 
   const renderDesktopPlayerPanel = (who: 'p1' | 'p2') => {
     const snake = who === 'p1' ? p1 : p2;
@@ -159,39 +176,44 @@ export const Hud: React.FC<HudProps> = ({
     const countdown = thinkTimeRemaining?.[who] ?? null;
 
     return (
-      <div className="bg-[#9BBC0F] p-3 border-2 border-[#0F380F] flex flex-col h-full min-h-0 overflow-hidden shadow-[2px_2px_0px_#0F380F] w-full font-mono text-[#0F380F]">
+      <div className="bg-[#9BBC0F] p-3 [@media(max-height:540px)]:p-2 border-2 border-[#0F380F] flex flex-col h-full min-h-0 overflow-hidden shadow-[2px_2px_0px_#0F380F] w-full font-mono text-[#0F380F]">
         <div className="shrink-0">
-          <div className="flex items-center justify-between text-xs font-bold mb-2">
+          <div className="flex items-center justify-between text-xs [@media(max-height:540px)]:text-[11px] font-bold mb-2 [@media(max-height:540px)]:mb-1 h-4">
             <span className="flex items-center gap-1.5 min-w-0">
-              <span className={`w-3 h-3 shrink-0 ${who === 'p1' ? 'bg-[#0F380F]' : 'bg-[#306230]'} inline-block border border-[#0F380F]`} />
+              <span className={`w-3 h-3 [@media(max-height:540px)]:w-2.5 [@media(max-height:540px)]:h-2.5 shrink-0 ${who === 'p1' ? 'bg-[#0F380F]' : 'bg-[#306230]'} inline-block border border-[#0F380F]`} />
               <span className="truncate">{snake.name} {seatTag(who)}</span>
             </span>
           </div>
 
-          <div className="flex items-baseline justify-between mb-3">
-            <div>
-              <span className="text-3xl font-black">{snake.score}</span>
+          <div className="flex items-center justify-between mb-2 [@media(max-height:540px)]:mb-1 h-8 [@media(max-height:540px)]:h-6">
+            <div className="flex items-baseline tabular-nums">
+              <span className="text-3xl [@media(max-height:540px)]:text-2xl leading-none font-black">{snake.score}</span>
               <span className="text-[10px] font-semibold uppercase tracking-tight ml-1">PTS</span>
             </div>
-            <span className="text-xs font-bold opacity-80">LEN: {snake.body.length}</span>
+            {renderOutcomeBadge(who)}
+            <span className="text-xs [@media(max-height:540px)]:text-[10px] font-bold opacity-80 tabular-nums">LEN: {snake.body.length}</span>
           </div>
 
-          {gameState.turnBased && gameState.phase !== 'OVER' && (
-            <div className="mb-3 p-2 bg-[#8BAC0F]/40 border border-[#0F380F] text-xs font-bold">
-              <div className={`flex items-center justify-between gap-1 ${locked ? 'text-[#0F380F] opacity-100 font-extrabold' : 'opacity-70'}`}>
-                <span className="truncate">
-                  {thinkLabel(who)} {locked ? '🔒 (LOCKED)' : countdown === null ? '✏️ (PLANNING)' : ''}
+          {gameState.turnBased && (
+            <div className="mb-2 [@media(max-height:540px)]:mb-1 p-1.5 [@media(max-height:540px)]:p-1 bg-[#8BAC0F]/40 border border-[#0F380F] text-xs [@media(max-height:540px)]:text-[10px] font-bold h-[52px] [@media(max-height:540px)]:h-[42px] flex flex-col justify-between overflow-hidden">
+              <div className={`flex items-center justify-between gap-1 h-6 [@media(max-height:540px)]:h-5 ${locked ? 'text-[#0F380F] opacity-100 font-extrabold' : 'opacity-80'}`}>
+                <span className="truncate tabular-nums">
+                  {gameState.phase === 'OVER'
+                    ? gameState.winner === 'DRAW'
+                      ? 'DRAW GAME'
+                      : gameState.winner === who
+                      ? '★ WINNER'
+                      : '✕ DEFEATED'
+                    : `${thinkLabel(who)} ${locked ? '🔒' : countdown === null ? '✏️' : ''}`}
                 </span>
-                {!locked && countdown !== null && (
-                  <span className="shrink-0 text-3xl leading-none font-black tabular-nums">{countdown}</span>
-                )}
+                <span className="shrink-0 w-9 text-right text-xl [@media(max-height:540px)]:text-base leading-none font-black tabular-nums">
+                  {!locked && countdown !== null && gameState.phase !== 'OVER' ? `${countdown}s` : ''}
+                </span>
               </div>
-              {lastTurn !== null && (
-                <div className="text-[10px] opacity-80 mt-1.5 flex justify-between">
-                  <span>LAST: {lastTurn.toFixed(1)}s</span>
-                  <span>TOT: {fmtTotal(totalThink)}</span>
-                </div>
-              )}
+              <div className="text-[10px] [@media(max-height:540px)]:text-[9px] opacity-80 flex justify-between tabular-nums leading-none">
+                <span>LAST: {lastTurn !== null ? `${lastTurn.toFixed(1)}s` : '—'}</span>
+                <span>TOT: {fmtTotal(totalThink)}</span>
+              </div>
             </div>
           )}
         </div>
@@ -199,14 +221,14 @@ export const Hud: React.FC<HudProps> = ({
         {/* Queued move arrows list in the reserved bottom slot — the flexible
             region: fixed header rows above stay put, this absorbs the rest.
             Chips wrap; never pushes the layout taller. */}
-        <div className="flex-1 min-h-0 overflow-y-auto bg-[#8BAC0F]/20 border border-dashed border-[#0F380F]/40 p-1.5 flex flex-col justify-start">
-          <div className="text-[9px] font-bold opacity-75 mb-1 flex justify-between items-center shrink-0">
+        <div className="flex-1 min-h-0 overflow-y-auto bg-[#8BAC0F]/20 border border-dashed border-[#0F380F]/40 p-1.5 [@media(max-height:540px)]:p-1 flex flex-col justify-start">
+          <div className="text-[9px] font-bold opacity-75 mb-1 flex justify-between items-center shrink-0 h-3.5 tabular-nums">
             <span>QUEUE ({buffer.length}/{snake.body.length})</span>
             {locked && <span className="text-[8px] px-1 bg-[#0F380F] text-[#9BBC0F]">LOCKED</span>}
           </div>
           <div className="flex flex-wrap gap-1 content-start">
             {buffer.length === 0 ? (
-              <span className="text-[10px] opacity-40 italic">Empty (plan moves)</span>
+              <span className="text-[10px] [@media(max-height:540px)]:text-[9px] opacity-50 italic">Swipe/tap board</span>
             ) : !canSeeMoves ? (
               <span className="text-[10px] opacity-60 italic">Hidden</span>
             ) : (
@@ -226,60 +248,68 @@ export const Hud: React.FC<HudProps> = ({
   };
 
   const renderMobileCards = (
-    <div className="mobile-cards-area grid grid-cols-2 gap-2 w-full max-w-[340px] sm:max-w-[400px] font-mono text-[#0F380F]">
+    <div className="mobile-cards-area grid grid-cols-2 gap-2 w-full font-mono text-[#0F380F] shrink-0">
       {(['p1', 'p2'] as const).map((who) => {
         const snake = who === 'p1' ? p1 : p2;
         const locked = isLocked(who);
         const buffer = moveBuffers ? (who === 'p1' ? moveBuffers.p1 : moveBuffers.p2) : [];
         const local = isLocalSeat(who);
         const countdown = thinkTimeRemaining?.[who] ?? null;
+        const lastTurn = gameState.lastTurnTimes ? (who === 'p1' ? gameState.lastTurnTimes.p1 : gameState.lastTurnTimes.p2) : null;
+        const totalThink = gameState.totalThinkTime ? (who === 'p1' ? gameState.totalThinkTime.p1 : gameState.totalThinkTime.p2) : 0;
         return (
-          <div key={who} className="bg-[#9BBC0F] p-2 border-2 border-[#0F380F] flex flex-col justify-between shadow-[2px_2px_0px_#0F380F]">
-            <div>
-              <div className="flex items-center justify-between text-[11px] font-bold">
+          <div key={who} className="bg-[#9BBC0F] p-2 border-2 border-[#0F380F] flex flex-col justify-between shadow-[2px_2px_0px_#0F380F] min-w-0 overflow-hidden">
+            <div className="shrink-0">
+              <div className="flex items-center justify-between text-[11px] font-bold h-4">
                 <span className="flex items-center gap-1 min-w-0">
                   <span className={`w-2.5 h-2.5 shrink-0 ${who === 'p1' ? 'bg-[#0F380F]' : 'bg-[#306230]'} inline-block border border-[#0F380F]`} />
                   <span className="truncate">{snake.name} {seatTag(who)}</span>
                 </span>
-                <span className="text-[10px] opacity-80">LEN: {snake.body.length}</span>
+                <span className="text-[10px] opacity-80 shrink-0 tabular-nums">LEN: {snake.body.length}</span>
               </div>
-              <div className="flex items-baseline justify-between mt-1">
-                <span className="text-xl font-black">{snake.score}</span>
-                <span className="text-[10px] font-semibold uppercase tracking-tight">PTS</span>
+              <div className="flex items-center justify-between mt-1 h-6 tabular-nums gap-1">
+                <div className="flex items-baseline gap-1 shrink-0">
+                  <span className="text-2xl leading-none font-black">{snake.score}</span>
+                  <span className="text-[10px] font-semibold uppercase tracking-tight">PTS</span>
+                </div>
+                {renderOutcomeBadge(who)}
+                {gameState.turnBased && (
+                  <span className="text-[9px] font-bold opacity-80 whitespace-nowrap shrink-0">
+                    {lastTurn !== null ? `${lastTurn.toFixed(1)}s / ${fmtTotal(totalThink)}` : `TOT ${fmtTotal(totalThink)}`}
+                  </span>
+                )}
               </div>
             </div>
-            {gameState.turnBased && gameState.phase !== 'OVER' && (
+            {gameState.turnBased && (
               local ? (
-                <div className="mt-1 bg-[#8BAC0F]/40 border border-[#0F380F] p-1">
-                  <div className="flex items-center justify-between gap-1 text-[9px] font-bold">
-                    <span className="shrink-0">{locked ? '🔒' : ''} {buffer.length}/{snake.body.length}:</span>
-                    <div className="flex gap-0.5 items-center flex-wrap min-w-0">
-                      {buffer.length === 0 ? (
-                        <span className="opacity-40 italic">Empty</span>
-                      ) : (
-                        buffer.map((dir, idx) => {
-                          const arrow = dir === 'UP' ? '↑' : dir === 'DOWN' ? '↓' : dir === 'LEFT' ? '←' : '→';
-                          return (
-                            <span key={idx} className="px-1 py-0.5 bg-[#0F380F] text-[#9BBC0F] text-[9px] font-bold border border-[#0F380F] leading-none">
-                              {arrow}
-                            </span>
-                          );
-                        })
-                      )}
-                    </div>
-                    {!locked && countdown !== null && (
-                      <span className="shrink-0 text-2xl leading-none font-black tabular-nums">{countdown}</span>
+                <div className="mt-1.5 bg-[#8BAC0F]/40 border border-[#0F380F] px-1.5 h-7 flex items-center justify-between gap-1 text-[9px] font-bold overflow-hidden">
+                  <span className="shrink-0 tabular-nums">{locked ? '🔒' : 'QUEUE'} {buffer.length}/{snake.body.length}:</span>
+                  <div className="flex gap-0.5 items-center flex-nowrap min-w-0 overflow-hidden flex-1">
+                    {buffer.length === 0 ? (
+                      <span className="opacity-50 italic truncate">Empty</span>
+                    ) : (
+                      buffer.map((dir, idx) => {
+                        const arrow = dir === 'UP' ? '↑' : dir === 'DOWN' ? '↓' : dir === 'LEFT' ? '←' : '→';
+                        return (
+                          <span key={idx} className="px-1 py-0.5 bg-[#0F380F] text-[#9BBC0F] text-[9px] font-bold border border-[#0F380F] leading-none shrink-0">
+                            {arrow}
+                          </span>
+                        );
+                      })
                     )}
                   </div>
+                  <span className="shrink-0 w-7 text-right text-base leading-none font-black tabular-nums">
+                    {!locked && countdown !== null && gameState.phase !== 'OVER' ? `${countdown}s` : ''}
+                  </span>
                 </div>
               ) : (
-                <div className={`mt-1 flex items-center justify-between gap-1 ${locked ? 'opacity-100 font-bold' : 'opacity-60'}`}>
-                  <span className="text-[10px] truncate">
+                <div className={`mt-1.5 bg-[#8BAC0F]/30 border border-[#0F380F]/60 px-1.5 h-7 flex items-center justify-between gap-1 overflow-hidden ${locked ? 'opacity-100 font-bold' : 'opacity-75'}`}>
+                  <span className="text-[10px] truncate tabular-nums">
                     {thinkLabel(who)} {locked ? '🔒' : countdown === null ? `(${buffer.length})` : ''}
                   </span>
-                  {!locked && countdown !== null && (
-                    <span className="shrink-0 text-2xl leading-none font-black tabular-nums">{countdown}</span>
-                  )}
+                  <span className="shrink-0 w-7 text-right text-base leading-none font-black tabular-nums">
+                    {!locked && countdown !== null && gameState.phase !== 'OVER' ? `${countdown}s` : ''}
+                  </span>
                 </div>
               )
             )}

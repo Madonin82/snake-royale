@@ -130,7 +130,7 @@ export const OnlineRoomLobby: React.FC<OnlineRoomLobbyProps> = ({
   }, [currentBtn, canStart, bothPlayersReady, onStartMatch, onOpenSettings, onOpenLatencyHarness, onLeaveRoom, buttons.length, onRegisterHandler]);
 
   return (
-    <div className="w-full max-w-[440px] bg-[#9BBC0F] border-4 border-[#0F380F] shadow-[8px_8px_0px_#0F380F] text-[#0F380F] p-4 font-mono select-none flex flex-col gap-3">
+    <div className="w-full max-w-[440px] max-h-full bg-[#9BBC0F] border-4 border-[#0F380F] shadow-[8px_8px_0px_#0F380F] text-[#0F380F] p-3 sm:p-4 font-mono select-none flex flex-col justify-between gap-2 overflow-hidden">
       {/* Top bar */}
       <div className="flex items-center justify-between border-b-2 border-[#0F380F] pb-2">
         <button

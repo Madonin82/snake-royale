@@ -243,10 +243,10 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
   if (!isOpen) return null;
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/75 backdrop-blur-xs font-mono select-none">
-      <div className="w-full max-w-sm bg-[#9BBC0F] border-4 border-[#0F380F] shadow-[6px_6px_0px_#0F380F] text-[#0F380F] p-4 flex flex-col gap-3">
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-2 sm:p-4 bg-black/75 backdrop-blur-xs font-mono select-none">
+      <div className="w-full max-w-sm max-h-[96dvh] bg-[#9BBC0F] border-4 border-[#0F380F] shadow-[6px_6px_0px_#0F380F] text-[#0F380F] p-3 flex flex-col justify-between gap-2 overflow-hidden">
         {/* Header */}
-        <div className="flex items-center justify-between border-b-2 border-[#0F380F] pb-2">
+        <div className="flex items-center justify-between border-b-2 border-[#0F380F] pb-1.5 shrink-0">
           <div className="flex items-center gap-2 font-black text-sm uppercase">
             <Settings className="w-4 h-4" />
             <span>GAME SETTINGS</span>
@@ -264,19 +264,19 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
 
         {/* Guest Adopted Rules Info Banner */}
         {isOnlineGuest && (
-          <div className="bg-[#0F380F] text-[#9BBC0F] p-2 border border-[#0F380F] text-[10px] font-bold text-center flex flex-col gap-0.5">
+          <div className="bg-[#0F380F] text-[#9BBC0F] p-1.5 border border-[#0F380F] text-[10px] font-bold text-center flex flex-col gap-0.5 shrink-0">
             <div className="font-black">👑 ADOPTED HOST MATCH RULES:</div>
             <div>
               {settings.gridSize}×{settings.gridSize} Arena • {settings.turnBased ? `Turn-Based (${settings.raceTurns} Turns, Think Time: ${settings.thinkTimeSeconds === null ? 'Infinite' : `${settings.thinkTimeSeconds}s`})` : `Real-Time (${settings.tickRate} TPS)`}
             </div>
-            <div className="text-[9px] opacity-80 mt-0.5 italic">
+            <div className="text-[9px] opacity-80 italic">
               (Host controls match gameplay rules; you can toggle personal audio/CRT below)
             </div>
           </div>
         )}
 
         {/* Options */}
-        <div className="flex flex-col gap-2.5 text-xs font-bold">
+        <div className="flex flex-col gap-1.5 text-xs font-bold flex-1 justify-between min-h-0">
           {/* Play Style */}
           {!isOnlineGuest && (
             <div

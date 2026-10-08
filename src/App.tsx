@@ -98,6 +98,9 @@ export const App: React.FC = () => {
   const [displayName, setDisplayName] = useState<string>(() => {
     try { return localStorage.getItem('snake-royale-name') || ''; } catch { return ''; }
   });
+  const [displayNameP2, setDisplayNameP2] = useState<string>(() => {
+    try { return localStorage.getItem('snake-royale-name-p2') || ''; } catch { return ''; }
+  });
   const [playerNames, setPlayerNames] = useState<{ p1: string; p2: string }>({ p1: 'PLAYER 1', p2: 'PLAYER 2' });
   const playerNamesRef = useRef(playerNames);
   playerNamesRef.current = playerNames;
@@ -116,6 +119,11 @@ export const App: React.FC = () => {
   const handleDisplayNameChange = useCallback((value: string) => {
     setDisplayName(value);
     try { localStorage.setItem('snake-royale-name', value); } catch { /* private mode */ }
+  }, []);
+
+  const handleDisplayNameP2Change = useCallback((value: string) => {
+    setDisplayNameP2(value);
+    try { localStorage.setItem('snake-royale-name-p2', value); } catch { /* private mode */ }
   }, []);
 
   // Replay playback driver
@@ -1438,11 +1446,12 @@ export const App: React.FC = () => {
     activeHandlerRef.current = null;
     soloAiP2OverriddenRef.current = playMode === 'SOLO_AI' && bridgeSeatRef.current === 'p2';
     const me = displayName.trim();
+    const p2Local = displayNameP2.trim();
     let matchNames = { p1: 'PLAYER 1', p2: 'PLAYER 2' };
     if (playMode === 'SOLO_AI') {
       matchNames = { p1: me || 'PLAYER 1', p2: 'BOT' };
     } else if (playMode === 'LOCAL_2P') {
-      matchNames = { p1: me || 'PLAYER 1', p2: 'PLAYER 2' };
+      matchNames = { p1: me || 'PLAYER 1', p2: p2Local || 'PLAYER 2' };
     } else if (playMode === 'ONLINE_HOST') {
       matchNames = { p1: me || 'PLAYER 1', p2: playerNamesRef.current.p2 || 'PLAYER 2' };
     } else if (playMode === 'ONLINE_SERVER') {
@@ -1673,14 +1682,13 @@ export const App: React.FC = () => {
   };
 
   // Single-screen match layout: when a match (or replay) is on screen, the
-  // root <main> becomes a locked viewport (100dvh, no scroll). Lobby/menu
-  // views keep their normal min-h-screen flow.
+  // root <main> becomes a locked viewport (100dvh, no scroll).
   const isMatchView = !inLobby && !inOnlineLobby;
 
   return (
-    <main className={`${isMatchView ? 'h-[100dvh] overflow-hidden' : 'min-h-screen justify-between'} flex flex-col items-center p-2 sm:p-4 ${settings.crtFilterEnabled ? 'crt-overlay' : ''}`}>
+    <main className={`h-[100dvh] overflow-hidden flex flex-col items-center justify-between p-1.5 sm:p-3 [@media(max-height:500px)]:p-1 ${settings.crtFilterEnabled ? 'crt-overlay' : ''}`}>
       {/* Top Header Navbar */}
-      <header className="w-full max-w-[500px] shrink-0 flex items-center justify-between py-1 px-2 border-b-2 border-[#0F380F] text-xs font-mono font-bold">
+      <header className="w-full max-w-[560px] shrink-0 flex items-center justify-between py-0.5 sm:py-1 px-2 border-b-2 border-[#0F380F] text-xs font-mono font-bold [@media(max-height:500px)]:py-0.5">
         <div className="flex items-center gap-2">
           {!inLobby && (
             <button
@@ -1710,8 +1718,8 @@ export const App: React.FC = () => {
       </header>
 
       {/* Main Container */}
-      <div className={`flex-1 ${isMatchView ? 'min-h-0 min-w-0 my-1' : 'my-2'} flex flex-col items-center justify-center w-full`}>
-        <div className={`w-full flex flex-col items-center ${isMatchView ? 'flex-1 min-h-0' : ''}`}>
+      <div className="flex-1 min-h-0 min-w-0 my-1 [@media(max-height:500px)]:my-0.5 flex flex-col items-center justify-center w-full">
+        <div className="w-full flex flex-col items-center justify-center flex-1 min-h-0">
           {inLobby ? (
             <LobbyView
               onStartSolo={handleStartSolo}
@@ -1724,8 +1732,11 @@ export const App: React.FC = () => {
               onOpenLatencyHarness={() => setLatencyModalOpen(true)}
               gamepadCount={gamepadCount}
               settings={settings}
+              onUpdateSettings={handleUpdateSettings}
               displayName={displayName}
               onDisplayNameChange={handleDisplayNameChange}
+              displayNameP2={displayNameP2}
+              onDisplayNameP2Change={handleDisplayNameP2Change}
               onRegisterHandler={(h) => { activeHandlerRef.current = h; }}
               isNintendoController={isNintendoController}
               onImportReplay={handleImportReplay}
@@ -1764,7 +1775,7 @@ export const App: React.FC = () => {
                 moveBuffers={moveBuffers}
                 viewerSeat={viewerSeat}
               />
-              <div className="gameboard-area my-1">
+              <div className="gameboard-area">
                 <GameBoard
                   gameState={displayState}
                   settings={settings}
@@ -1848,9 +1859,9 @@ export const App: React.FC = () => {
         </div>
       </div>
 
-      {/* Footer info — hidden in match view to give the board the full vertical budget */}
+      {/* Footer info — hidden in match view and short landscape screens to give full vertical budget */}
       {!isMatchView && (
-        <footer className="text-center text-[10px] font-mono opacity-80 py-1 shrink-0">
+        <footer className="text-center text-[10px] font-mono opacity-80 py-0.5 shrink-0 [@media(max-height:500px)]:hidden">
           4-shade palette • {settings.gridSize}×{settings.gridSize} grid • {settings.turnBased ? 'Turn-based simultaneous moves' : `Host-authoritative ${settings.tickRate} TPS`} • Gamepad API ready
         </footer>
       )}

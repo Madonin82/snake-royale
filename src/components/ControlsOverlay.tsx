@@ -85,32 +85,32 @@ export const ControlsOverlay: React.FC<ControlsOverlayProps> = ({
         Plan: D-pad queue • B undo • Y clear • A lock
       </div>
     </div>
-    <div className="portrait-controls-row hidden items-center gap-1.5 w-full font-mono select-none">
+    <div className="portrait-controls-row hidden items-center gap-1.5 w-full h-9 [@media(max-height:540px)]:h-7 font-mono select-none shrink-0">
       <button
         type="button"
         onClick={onUndo}
         disabled={!turnBased || locked || queue.length === 0}
-        className="shrink-0 border-2 border-[#0F380F] bg-[#306230] px-2 py-2 text-[11px] font-black text-[#9BBC0F] disabled:opacity-40"
+        className="shrink-0 h-full border-2 border-[#0F380F] bg-[#306230] px-2.5 text-[11px] font-black text-[#9BBC0F] disabled:opacity-40 cursor-pointer flex items-center justify-center"
       >
         UNDO
       </button>
-      <div className="flex min-w-0 flex-1 items-center gap-1 overflow-x-auto border-2 border-dashed border-[#0F380F] bg-[#8BAC0F] px-1.5 py-1.5 text-[10px] font-bold text-[#0F380F]">
+      <div className="flex min-w-0 flex-1 h-full items-center gap-1 overflow-hidden border-2 border-dashed border-[#0F380F] bg-[#8BAC0F] px-2 text-[10px] font-bold text-[#0F380F] tabular-nums">
         <span className="shrink-0">QUEUE {queue.length}/{queueLimit}</span>
-        <span className="flex min-w-0 gap-0.5">
+        <span className="flex min-w-0 flex-1 items-center gap-0.5 overflow-hidden">
           {queue.map((direction, index) => (
-            <span key={`${direction}-${index}`} className="shrink-0 bg-[#0F380F] px-1 text-[#9BBC0F]">
+            <span key={`${direction}-${index}`} className="shrink-0 bg-[#0F380F] px-1 py-0.5 leading-none text-[#9BBC0F]">
               {direction === 'UP' ? '↑' : direction === 'DOWN' ? '↓' : direction === 'LEFT' ? '←' : '→'}
             </span>
           ))}
-          {queue.length === 0 && <span className="opacity-60">—</span>}
+          {queue.length === 0 && <span className="opacity-75 truncate">SWIPE / TAP BOARD</span>}
         </span>
-        {locked && <span className="shrink-0">LOCKED</span>}
+        {locked && <span className="shrink-0 bg-[#0F380F] text-[#9BBC0F] px-1 py-0.5 text-[9px] leading-none">LOCKED</span>}
       </div>
       <button
         type="button"
         onClick={onLock}
         disabled={!turnBased || locked || queue.length === 0}
-        className="shrink-0 border-2 border-[#0F380F] bg-[#0F380F] px-3 py-2 text-[11px] font-black text-[#9BBC0F] disabled:opacity-40"
+        className="shrink-0 h-full border-2 border-[#0F380F] bg-[#0F380F] px-3 text-[11px] font-black text-[#9BBC0F] disabled:opacity-40 cursor-pointer flex items-center justify-center"
       >
         LOCK
       </button>

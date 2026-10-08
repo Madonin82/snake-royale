@@ -126,8 +126,8 @@ export const LatencyHarnessModal: React.FC<LatencyHarnessModalProps> = ({
   if (!isOpen) return null;
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/75 backdrop-blur-xs font-mono select-none">
-      <div className="w-full max-w-lg bg-[#9BBC0F] border-4 border-[#0F380F] shadow-[6px_6px_0px_#0F380F] text-[#0F380F] p-4 flex flex-col gap-3">
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-2 sm:p-4 bg-black/75 backdrop-blur-xs font-mono select-none">
+      <div className="w-full max-w-lg max-h-[96dvh] bg-[#9BBC0F] border-4 border-[#0F380F] shadow-[6px_6px_0px_#0F380F] text-[#0F380F] p-3 flex flex-col justify-between gap-2 overflow-hidden">
         {/* Header */}
         <div className="flex items-center justify-between border-b-2 border-[#0F380F] pb-2">
           <div className="flex items-center gap-2 font-black text-sm uppercase tracking-wider">

@@ -44,16 +44,15 @@
 /* Match Viewport Responsive Layouts — single-screen, no page scroll.
    The match view locks to 100dvh (see <main> classes in App.tsx); the grid
    below distributes that fixed vertical budget.
-   Desktop 3-column triggers on width + landscape aspect. Height is NOT gated:
-   the grid rows (auto / 1fr / auto) and the square board adapt to short
-   viewports (e.g. 844x390 landscape phones) without forcing the stacked
-   mobile layout that would shrink the board to unusable sizes. */
-@media (min-width: 768px) and (min-aspect-ratio: 4/3) {
+   Landscape 3-column triggers on ANY landscape viewport (phones, tablets, desktops)
+   so the square gameboard is always the main focus in the center column and
+   never gets crushed under stacked cards. */
+@media (orientation: landscape), (min-width: 768px) and (min-aspect-ratio: 4/3) {
   .match-grid-container {
     display: grid;
-    grid-template-columns: minmax(180px, 240px) minmax(0, 1fr) minmax(180px, 240px);
+    grid-template-columns: 200px minmax(0, 1fr) 200px;
     grid-template-rows: auto minmax(0, 1fr) auto;
-    gap: 0.75rem;
+    gap: 0.5rem;
     align-items: stretch;
     justify-content: center;
     width: 100%;
@@ -79,7 +78,7 @@
     overflow: hidden;
   }
   .top-strip-area {
-    grid-column: 2 / 3;
+    grid-column: 1 / 4;
     grid-row: 1 / 2;
     width: 100%;
     min-width: 0;
@@ -96,18 +95,35 @@
     container-type: size;
   }
   .controls-area {
-    grid-column: 2 / 3;
+    grid-column: 1 / 4;
     grid-row: 3 / 4;
     width: 100%;
     display: flex;
     justify-content: center;
   }
-  .mobile-cards-area {
+  .mobile-cards-area,
+  .turn-instruction {
     display: none !important;
   }
 }
 
-@media not all and (min-width: 768px) and (min-aspect-ratio: 4/3) {
+/* Short landscape phones (e.g. iPhone landscape): show the compact UNDO / QUEUE / LOCK bar
+   and hide the tall D-pad cluster so the GameBoard gets the full vertical height */
+@media (orientation: landscape) and (max-height: 540px) {
+  .match-grid-container {
+    grid-template-columns: 150px minmax(0, 1fr) 150px;
+    gap: 0.25rem;
+  }
+  .legacy-mobile-controls {
+    display: none !important;
+  }
+  .portrait-controls-row {
+    display: flex !important;
+    max-width: 520px;
+  }
+}
+
+@media (orientation: portrait) and (min-width: 768px) and (not (min-aspect-ratio: 4/3)) {
   .match-grid-container {
     display: flex;
     flex-direction: column;
@@ -117,15 +133,13 @@
     min-height: 0;
     gap: 0.5rem;
   }
-  .desktop-panel-left {
-    display: none !important;
-  }
+  .desktop-panel-left,
   .desktop-panel-right {
     display: none !important;
   }
   .top-strip-area {
     width: 100%;
-    max-width: 340px;
+    max-width: 540px;
     flex-shrink: 0;
   }
   .gameboard-area {
@@ -147,45 +161,69 @@
   .mobile-cards-area {
     display: grid !important;
     width: 100%;
-    max-width: 340px;
+    max-width: 540px;
     flex-shrink: 0;
   }
 }
 
-@media (max-width: 767px) and (orientation: portrait) {
+@media (orientation: portrait) and (max-width: 767px) {
   .match-grid-container {
-    gap: 0.25rem;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: space-between;
+    width: 100%;
+    height: 100%;
+    min-height: 0;
+    gap: 0.35rem;
   }
-  .top-strip-area {
-    max-width: none;
-    gap: 0;
-  }
-  .top-strip-content,
-  .turn-instruction,
-  .mobile-cards-area,
+  .desktop-panel-left,
+  .desktop-panel-right,
+  .portrait-hud,
+  .portrait-opponents,
   .legacy-mobile-controls {
     display: none !important;
   }
-  .portrait-hud,
-  .portrait-opponents,
+  .top-strip-area {
+    width: 100%;
+    max-width: none;
+    flex-shrink: 0;
+  }
+  .mobile-cards-area {
+    display: grid !important;
+    width: 100%;
+    max-width: none;
+    flex-shrink: 0;
+  }
   .portrait-controls-row {
     display: flex !important;
   }
-  .portrait-opponents {
-    flex-shrink: 0;
-  }
   .gameboard-area {
+    width: 100%;
     flex: 1 1 0;
+    min-height: 0;
+    min-width: 0;
     margin-top: 0;
     margin-bottom: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    container-type: size;
   }
   .controls-area {
+    width: 100%;
     flex-shrink: 0;
     max-width: none;
+    display: flex;
+    justify-content: center;
   }
   .match-board canvas {
     touch-action: none;
   }
+}
+
+.match-board canvas {
+  touch-action: none;
 }
 
 /* Board sized by the SMALLER of available width/height — stays square and
