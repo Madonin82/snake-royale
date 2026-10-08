@@ -1,11 +1,12 @@
 import React, { useState, useEffect } from 'react';
-import { Copy, Check, Play, Users, ArrowLeft, Activity, Settings } from 'lucide-react';
+import { Copy, Check, Play, Users, ArrowLeft, Activity, Settings, Trash2 } from 'lucide-react';
 import { onAuthStateChanged, User } from 'firebase/auth';
+import { onValue, ref, remove } from 'firebase/database';
 import { QRCodeSVG } from 'qrcode.react';
 import { GameSettings } from '../types/game';
 import { GamepadMenuAction } from '../game/gamepad';
 import { soundEngine } from '../audio/soundEngine';
-import { ADMIN_UIDS, auth } from '../firebase';
+import { ADMIN_UIDS, auth, rtdb } from '../firebase';
 
 interface OnlineRoomLobbyProps {
   roomId: string;
@@ -46,6 +47,53 @@ export const OnlineRoomLobby: React.FC<OnlineRoomLobbyProps> = ({
     const user = auth.currentUser;
     return user && !user.isAnonymous ? user : null;
   });
+  const [adminRooms, setAdminRooms] = useState<Array<{
+    id: string;
+    status: string;
+    playerCount: number;
+    createdAt: number;
+    lastActive: number;
+  }>>([]);
+  const [confirmDeleteRoomId, setConfirmDeleteRoomId] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!signedInUser || !ADMIN_UIDS.includes(signedInUser.uid)) return;
+    const roomsRef = ref(rtdb, 'rooms');
+    const unsubscribe = onValue(roomsRef, (snapshot) => {
+      if (!snapshot.exists()) {
+        setAdminRooms([]);
+        return;
+      }
+      const val = snapshot.val() || {};
+      const list = Object.entries(val).map(([id, rData]: [string, any]) => {
+        const hasP1 = !!rData?.hasP1;
+        const hasP2 = !!rData?.hasP2;
+        const specs = rData?.spectators ? Object.keys(rData.spectators).length : 0;
+        const playerCount = (hasP1 ? 1 : 0) + (hasP2 ? 1 : 0) + specs;
+        const status = rData?.status || 'lobby';
+        const createdAt = Number(rData?.createdAt) || 0;
+        const lastActive = Number(rData?.lastActive) || createdAt || Date.now();
+        return { id, status, playerCount, createdAt, lastActive };
+      });
+      // Sort by oldest first (createdAt ascending)
+      list.sort((a, b) => (a.createdAt || a.lastActive) - (b.createdAt || b.lastActive));
+      setAdminRooms(list);
+    }, (err) => {
+      console.error('Failed to load admin rooms:', err);
+    });
+    return () => unsubscribe();
+  }, [signedInUser]);
+
+  const handleDeleteRoom = async (roomId: string) => {
+    try {
+      soundEngine.playMenuSelect();
+      await remove(ref(rtdb, `rooms/${roomId}`));
+      await remove(ref(rtdb, `bridgeSecrets/${roomId}`)).catch(() => {});
+      setConfirmDeleteRoomId(null);
+    } catch (err) {
+      console.error('Failed to delete room:', err);
+    }
+  };
 
   const isHost = role === 'p1';
   const isServer = role === 'server';
@@ -240,6 +288,64 @@ export const OnlineRoomLobby: React.FC<OnlineRoomLobbyProps> = ({
             </button>
           </div>
           {secretCopied && <span className="text-[10px] font-bold">COPIED TO CLIPBOARD!</span>}
+        </div>
+      )}
+
+      {signedInUser && ADMIN_UIDS.includes(signedInUser.uid) && (
+        <div className="p-2.5 border-2 border-[#0F380F] bg-[#8BAC0F] flex flex-col gap-2">
+          <div className="text-[11px] font-bold uppercase tracking-wider flex items-center justify-between">
+            <span>ADMIN ROOM MANAGEMENT ({adminRooms.length})</span>
+            <span className="text-[9px] opacity-75">OLDEST FIRST</span>
+          </div>
+          {adminRooms.length === 0 ? (
+            <div className="text-[10px] text-center opacity-75 py-1">No active rooms in RTDB.</div>
+          ) : (
+            <div className="max-h-48 overflow-y-auto flex flex-col gap-1.5 pr-1">
+              {adminRooms.map((room) => {
+                const timeStr = new Date(room.createdAt || room.lastActive).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+                const isConfirming = confirmDeleteRoomId === room.id;
+                return (
+                  <div key={room.id} className="bg-[#9BBC0F] border border-[#0F380F] p-1.5 flex items-center justify-between gap-2 text-[10px]">
+                    <div className="flex flex-col min-w-0">
+                      <div className="font-black flex items-center gap-1.5">
+                        <span className="bg-[#0F380F] text-[#9BBC0F] px-1">{room.id}</span>
+                        <span className="uppercase text-[9px]">[{room.status}]</span>
+                      </div>
+                      <div className="text-[9px] opacity-80">
+                        {room.playerCount} player(s) · Created {timeStr}
+                      </div>
+                    </div>
+                    <div className="shrink-0 flex items-center gap-1">
+                      {isConfirming ? (
+                        <>
+                          <button
+                            onClick={() => handleDeleteRoom(room.id)}
+                            className="bg-red-700 hover:bg-red-800 text-white px-2 py-0.5 border border-[#0F380F] font-black text-[9px] cursor-pointer"
+                          >
+                            CONFIRM
+                          </button>
+                          <button
+                            onClick={() => setConfirmDeleteRoomId(null)}
+                            className="bg-[#0F380F] text-[#9BBC0F] px-1.5 py-0.5 border border-[#0F380F] font-bold text-[9px] cursor-pointer"
+                          >
+                            X
+                          </button>
+                        </>
+                      ) : (
+                        <button
+                          onClick={() => setConfirmDeleteRoomId(room.id)}
+                          className="bg-[#0F380F] hover:bg-red-800 text-[#9BBC0F] px-2 py-0.5 border border-[#0F380F] font-black text-[9px] cursor-pointer flex items-center gap-1"
+                        >
+                          <Trash2 className="w-3 h-3" />
+                          <span>DELETE</span>
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          )}
         </div>
       )}
 
