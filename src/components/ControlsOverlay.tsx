@@ -85,18 +85,18 @@ export const ControlsOverlay: React.FC<ControlsOverlayProps> = ({
         Plan: D-pad queue • B undo • Y clear • A lock
       </div>
     </div>
-    <div className="portrait-controls-row hidden items-center gap-1.5 w-full h-9 [@media(max-height:540px)]:h-7 font-mono select-none shrink-0">
+    <div className="portrait-controls-row hidden w-full min-h-9 [@media(max-height:540px)]:min-h-7 items-center gap-1.5 font-mono select-none shrink-0">
       <button
         type="button"
         onClick={onUndo}
         disabled={!turnBased || locked || queue.length === 0}
-        className="shrink-0 h-full border-2 border-[#0F380F] bg-[#306230] px-2.5 text-[11px] font-black text-[#9BBC0F] disabled:opacity-40 cursor-pointer flex items-center justify-center"
+        className="shrink-0 h-9 [@media(max-height:540px)]:h-7 border-2 border-[#0F380F] bg-[#306230] px-2.5 text-[11px] font-black text-[#9BBC0F] disabled:opacity-40 cursor-pointer flex items-center justify-center"
       >
         UNDO
       </button>
-      <div className="flex min-w-0 flex-1 h-full items-center gap-1 overflow-hidden border-2 border-dashed border-[#0F380F] bg-[#8BAC0F] px-2 text-[10px] font-bold text-[#0F380F] tabular-nums">
+      <div className="flex min-w-0 min-h-9 [@media(max-height:540px)]:min-h-7 flex-1 flex-wrap items-center gap-1 border-2 border-dashed border-[#0F380F] bg-[#8BAC0F] px-2 py-1 text-[10px] font-bold text-[#0F380F] tabular-nums">
         <span className="shrink-0">QUEUE {queue.length}/{queueLimit}</span>
-        <span className="flex min-w-0 flex-1 items-center gap-0.5 overflow-hidden">
+        <span className="flex min-w-0 flex-wrap items-center gap-0.5">
           {queue.map((direction, index) => (
             <span key={`${direction}-${index}`} className="shrink-0 bg-[#0F380F] px-1 py-0.5 leading-none text-[#9BBC0F]">
               {direction === 'UP' ? '↑' : direction === 'DOWN' ? '↓' : direction === 'LEFT' ? '←' : '→'}
@@ -110,7 +110,7 @@ export const ControlsOverlay: React.FC<ControlsOverlayProps> = ({
         type="button"
         onClick={onLock}
         disabled={!turnBased || locked || queue.length === 0}
-        className="shrink-0 h-full border-2 border-[#0F380F] bg-[#0F380F] px-3 text-[11px] font-black text-[#9BBC0F] disabled:opacity-40 cursor-pointer flex items-center justify-center"
+        className="shrink-0 h-9 [@media(max-height:540px)]:h-7 border-2 border-[#0F380F] bg-[#0F380F] px-3 text-[11px] font-black text-[#9BBC0F] disabled:opacity-40 cursor-pointer flex items-center justify-center"
       >
         LOCK
       </button>
