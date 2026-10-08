@@ -47,6 +47,7 @@ export interface GameState {
   phaseEndTime: number; // timestamp
   round: number; // Escalates token count: round 1 = 1 token, round 2 = 2 tokens...
   tokens: Position[];
+  walls?: Position[];
   snakes: {
     p1: Snake;
     p2: Snake;

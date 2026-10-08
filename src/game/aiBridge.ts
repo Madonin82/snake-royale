@@ -6,6 +6,7 @@ export function cloneGameState(state: GameState): GameState {
     lastTurnTimes: state.lastTurnTimes ? { ...state.lastTurnTimes } : null,
     totalThinkTime: { ...state.totalThinkTime },
     tokens: state.tokens.map(token => ({ ...token })),
+    walls: state.walls?.map(wall => ({ ...wall })),
     snakes: {
       p1: { ...state.snakes.p1, body: state.snakes.p1.body.map(position => ({ ...position })) },
       p2: { ...state.snakes.p2, body: state.snakes.p2.body.map(position => ({ ...position })) },
