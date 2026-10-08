@@ -362,10 +362,12 @@ export function processGameTick(
 
   if (p1Died) {
     p1.isAlive = false;
+    p1.deathPosition = nextHeadP1;
     p1.deathReason = isHeadOn ? 'HEAD_ON' : (p1HitWall ? 'WALL' : (p1HitSelf ? 'SELF' : 'OPPONENT'));
   }
   if (p2Died) {
     p2.isAlive = false;
+    p2.deathPosition = nextHeadP2;
     p2.deathReason = isHeadOn ? 'HEAD_ON' : (p2HitWall ? 'WALL' : (p2HitSelf ? 'SELF' : 'OPPONENT'));
   }
 
