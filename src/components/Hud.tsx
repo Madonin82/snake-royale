@@ -90,13 +90,6 @@ export const Hud: React.FC<HudProps> = ({
   const formattedTime = `${minutes}:${seconds < 10 ? '0' : ''}${seconds}`;
   const portraitTimerSeat = viewerSeat ?? 'p1';
   const portraitCountdown = thinkTimeRemaining?.[portraitTimerSeat] ?? null;
-  const meanScore = Math.round((p1.score + p2.score) / 2);
-  const phaseInfo = isRacing
-    ? `RACE • ${gameState.phaseTurnsRemaining} LEFT`
-    : isShrinking
-    ? `SHRINK • RING IN ${gameState.phaseTurnsRemaining}`
-    : `GAME OVER`;
-
   const topStripContent = (
     <div className="top-strip-content h-9 [@media(max-height:540px)]:h-7 flex items-center justify-between gap-2 bg-[#8BAC0F] px-2.5 border-2 border-[#0F380F] text-xs font-bold tracking-wider w-full shadow-[2px_2px_0px_#0F380F] overflow-hidden shrink-0">
       <div className="flex items-center gap-1.5 flex-nowrap min-w-0 overflow-hidden">
@@ -290,22 +283,8 @@ export const Hud: React.FC<HudProps> = ({
             </div>
             {gameState.turnBased && (
               local ? (
-                <div className="mt-1.5 bg-[#8BAC0F]/40 border border-[#0F380F] px-1.5 h-7 flex items-center justify-between gap-1 text-[9px] font-bold overflow-hidden">
-                  <span className="shrink-0 tabular-nums">{locked ? '🔒' : 'QUEUE'} {buffer.length}/{snake.body.length}:</span>
-                  <div className="flex gap-0.5 items-center flex-nowrap min-w-0 overflow-hidden flex-1">
-                    {buffer.length === 0 ? (
-                      <span className="opacity-50 italic truncate">Empty</span>
-                    ) : (
-                      buffer.map((dir, idx) => {
-                        const arrow = dir === 'UP' ? '↑' : dir === 'DOWN' ? '↓' : dir === 'LEFT' ? '←' : '→';
-                        return (
-                          <span key={idx} className="px-1 py-0.5 bg-[#0F380F] text-[#9BBC0F] text-[9px] font-bold border border-[#0F380F] leading-none shrink-0">
-                            {arrow}
-                          </span>
-                        );
-                      })
-                    )}
-                  </div>
+                <div className="mt-1.5 bg-[#8BAC0F]/40 border border-[#0F380F] px-1.5 h-7 flex items-center justify-between gap-1 text-[9px] font-bold">
+                  <span className="shrink-0 tabular-nums">{locked ? '🔒 ' : ''}QUEUE {buffer.length}/{snake.body.length}</span>
                   <span className="shrink-0 w-7 text-right text-base leading-none font-black tabular-nums">
                     {!locked && countdown !== null && gameState.phase !== 'OVER' ? `${countdown}s` : ''}
                   </span>
@@ -330,21 +309,36 @@ export const Hud: React.FC<HudProps> = ({
   return (
     <>
       <div className="top-strip-area w-full flex flex-col items-center">
-        <div className="portrait-hud hidden w-full items-center justify-between gap-2 bg-[#8BAC0F] px-2 py-1 border-2 border-[#0F380F] font-mono text-[#0F380F]">
-          <span className="min-w-0 truncate text-[10px] font-black tracking-tight">
-            {phaseInfo} · AVG {meanScore} PTS
-          </span>
-          <span className="shrink-0 text-[10px] font-bold">TURN {gameState.tick}</span>
-          <span className="shrink-0 min-w-[2.5rem] text-right text-2xl leading-none font-black tabular-nums">
-            {gameState.turnBased ? portraitCountdown ?? '∞' : formattedTime}
-          </span>
+        <div className="portrait-match-header hidden w-full flex-col gap-1 font-mono text-[#0F380F]">
+          <div className="flex h-8 items-center justify-between gap-1 border-2 border-[#0F380F] bg-[#8BAC0F] px-2 text-[10px] font-black tracking-tight">
+            <span className={`min-w-0 truncate ${isRacing ? '' : isShrinking ? 'animate-pulse' : ''}`}>
+              {isRacing ? 'PHASE 1: RACE' : isShrinking ? 'PHASE 2: SHRINK' : 'MATCH OVER'}
+            </span>
+            <span className="shrink-0 tabular-nums">RND {gameState.round}</span>
+            <span className="shrink-0 tabular-nums">TURN {gameState.tick} · {isRacing ? `${gameState.phaseTurnsRemaining} LEFT` : isShrinking ? `RING IN ${gameState.phaseTurnsRemaining}` : 'OVER'}</span>
+          </div>
+          <div className="flex h-7 items-center justify-between gap-2 border-2 border-[#0F380F] bg-[#9BBC0F] px-2 text-[10px] font-bold tabular-nums">
+            <span className="shrink-0">
+              {gameState.turnBased ? `THINK ${portraitCountdown ?? '∞'}${portraitCountdown === null ? '' : 's'}` : `TIME ${formattedTime}`}
+            </span>
+            <span className="shrink-0 text-right">
+              {gameState.turnBased
+                ? isRacing ? `SHRINK IN ${gameState.phaseTurnsRemaining}` : isShrinking ? `RING IN ${gameState.phaseTurnsRemaining}` : 'SHRINK —'
+                : isShrinking ? `RING IN ${formattedTime}` : `SHRINK IN ${formattedTime}`}
+            </span>
+            <button
+              type="button"
+              onClick={onOpenLatencyHarness}
+              aria-label="Open network diagnostics"
+              title="Open Latency Diagnostic Suite & Diagnostics"
+              className="flex shrink-0 items-center gap-0.5 border border-[#0F380F] bg-[#8BAC0F] px-1 py-0.5"
+            >
+              <Activity className="h-3 w-3" />
+              <Wifi className="h-2.5 w-2.5" />
+            </button>
+          </div>
         </div>
         {topStripContent}
-        {gameState.turnBased && (
-          <div className="turn-instruction md:hidden text-center text-[10px] font-bold bg-[#8BAC0F] px-2 py-0.5 border-x-2 border-b-2 border-[#0F380F] w-full">
-            {gameState.phase === 'OVER' ? 'GAME!' : 'BOTH LOCK → BOARD STEPS'}
-          </div>
-        )}
       </div>
 
       <div className="portrait-opponents hidden w-full items-center gap-1 border-2 border-[#0F380F] bg-[#9BBC0F] px-1 py-0.5 font-mono text-[10px] font-bold text-[#0F380F]">

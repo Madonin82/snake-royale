@@ -179,10 +179,17 @@
   }
   .desktop-panel-left,
   .desktop-panel-right,
-  .portrait-hud,
   .portrait-opponents,
   .legacy-mobile-controls {
     display: none !important;
+  }
+  .match-header,
+  .top-strip-content,
+  .turn-instruction {
+    display: none !important;
+  }
+  .portrait-match-header {
+    display: flex !important;
   }
   .top-strip-area {
     width: 100%;

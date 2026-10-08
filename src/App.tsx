@@ -74,6 +74,9 @@ export const App: React.FC = () => {
   const [playMode, setPlayMode] = useState<PlayMode>('SOLO_AI');
   const [inLobby, setInLobby] = useState<boolean>(true);
   const [inOnlineLobby, setInOnlineLobby] = useState<boolean>(false);
+  const [showTurnHint, setShowTurnHint] = useState<boolean>(() => {
+    try { return localStorage.getItem('snake-royale-turn-hint-dismissed') !== 'true'; } catch { return true; }
+  });
   const [onlineRoomId, setOnlineRoomId] = useState<string>('');
   const [bridgeSecret, setBridgeSecret] = useState<string | null>(null);
   const [onlineRole, setOnlineRole] = useState<'p1' | 'p2' | 'spectator' | 'server' | null>(null);
@@ -1717,7 +1720,7 @@ export const App: React.FC = () => {
   return (
     <main className={`h-[100dvh] overflow-hidden flex flex-col items-center justify-between p-1.5 sm:p-3 [@media(max-height:500px)]:p-1 ${settings.crtFilterEnabled ? 'crt-overlay' : ''}`}>
       {/* Top Header Navbar */}
-      <header className="w-full max-w-[560px] shrink-0 flex items-center justify-between py-0.5 sm:py-1 px-2 border-b-2 border-[#0F380F] text-xs font-mono font-bold [@media(max-height:500px)]:py-0.5">
+      <header className={`${isMatchView ? 'match-header' : ''} w-full max-w-[560px] shrink-0 flex items-center justify-between py-0.5 sm:py-1 px-2 border-b-2 border-[#0F380F] text-xs font-mono font-bold [@media(max-height:500px)]:py-0.5`}>
         <div className="flex items-center gap-2">
           {!inLobby && (
             <button
@@ -1806,7 +1809,7 @@ export const App: React.FC = () => {
                 viewerSeat={viewerSeat}
                 replayActive={replayActive}
               />
-              <div className="gameboard-area">
+              <div className="gameboard-area relative">
                 <GameBoard
                   gameState={displayState}
                   settings={settings}
@@ -1816,6 +1819,22 @@ export const App: React.FC = () => {
                   interactionEnabled={!replayActive}
                   animationsDisabled={aiMode}
                 />
+                {showTurnHint && displayState.turnBased && displayState.phase !== 'OVER' && !replayActive && (
+                  <div role="status" className="absolute top-1 left-1/2 z-30 flex w-[min(20rem,calc(100%-1rem))] -translate-x-1/2 items-center justify-between gap-2 border-2 border-[#0F380F] bg-[#9BBC0F] px-2 py-1 font-mono text-[10px] font-bold text-[#0F380F] shadow-[2px_2px_0px_#0F380F]">
+                    <span>BOTH LOCK → BOARD STEPS</span>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setShowTurnHint(false);
+                        try { localStorage.setItem('snake-royale-turn-hint-dismissed', 'true'); } catch { /* private mode */ }
+                      }}
+                      aria-label="Dismiss move planning hint"
+                      className="shrink-0 border border-[#0F380F] px-1 leading-none"
+                    >
+                      ×
+                    </button>
+                  </div>
+                )}
                 {!replayActive && (playMode === 'ONLINE_HOST' || playMode === 'ONLINE_JOIN' || playMode === 'ONLINE_SERVER') && !(displayState.readyConfirmed?.p1 && displayState.readyConfirmed?.p2) && (
                   <div className="absolute inset-0 bg-[#0F380F]/90 backdrop-blur-xs flex flex-col items-center justify-center p-3 z-20 font-mono text-[#9BBC0F]">
                     <div className="bg-[#9BBC0F] border-4 border-[#0F380F] shadow-[6px_6px_0px_#0F380F] p-3 sm:p-4 max-w-[340px] w-full text-center flex flex-col gap-2.5">
