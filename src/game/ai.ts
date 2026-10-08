@@ -6,11 +6,13 @@ const ALL_DIRECTIONS: Direction[] = ['UP', 'RIGHT', 'DOWN', 'LEFT'];
 export function calculateAIMove(
   gameState: GameState,
   gridSize: number,
-  botRole: 'p1' | 'p2' = 'p2',
+  botRole: string = 'p2',
   difficulty: 'EASY' | 'MEDIUM' | 'HARD' = 'MEDIUM'
 ): Direction | null {
-  const me = botRole === 'p2' ? gameState.snakes.p2 : gameState.snakes.p1;
-  const opponent = botRole === 'p2' ? gameState.snakes.p1 : gameState.snakes.p2;
+  const me = gameState.snakes.find(snake => snake.id === botRole);
+  if (!me) return null;
+  const opponents = gameState.snakes.filter(snake => snake.id !== botRole);
+  const livingOpponents = opponents.filter(snake => snake.isAlive);
 
   if (!me.isAlive) return null;
 
@@ -42,21 +44,27 @@ export function calculateAIMove(
     }
 
     // 3. HARD RULE: Avoid Opponent Body
-    const hitsOpponentBody = opponent.body.slice(0, -1).some(s => s.x === nextPos.x && s.y === nextPos.y);
+    const hitsOpponentBody = opponents.some(opponent =>
+      (opponent.isAlive ? opponent.body.slice(0, -1) : opponent.body)
+        .some(s => s.x === nextPos.x && s.y === nextPos.y),
+    );
     if (hitsOpponentBody) {
       continue;
     }
 
     // 4. Opponent Head Proximity / Head-on hazard
-    const distToOpponentHead = Math.abs(nextPos.x - opponent.body[0].x) + Math.abs(nextPos.y - opponent.body[0].y);
-    if (distToOpponentHead <= 1) {
+    const nearestOpponent = livingOpponents.reduce((nearest, opponent) => {
+      const distance = Math.abs(nextPos.x - opponent.body[0].x) + Math.abs(nextPos.y - opponent.body[0].y);
+      return distance < nearest.distance ? { snake: opponent, distance } : nearest;
+    }, { snake: null as (typeof opponents)[number] | null, distance: Infinity });
+    if (nearestOpponent.distance <= 1 && nearestOpponent.snake) {
       // Possible head collision next tick
       if (difficulty === 'EASY') {
         score -= 5;
       } else if (difficulty === 'MEDIUM') {
         score -= 15;
       } else {
-        score -= (me.score > opponent.score ? 50 : 10);
+        score -= (me.score > nearestOpponent.snake.score ? 50 : 10);
       }
     }
 
@@ -114,8 +122,7 @@ function countOpenNeighbors(pos: Position, state: GameState, gridSize: number): 
     const p = getNextHeadPosition(pos, d);
     if (!isCellInArena(p, gridSize, state.ringInset)) continue;
     if (state.walls?.some(wall => wall.x === p.x && wall.y === p.y)) continue;
-    if (state.snakes.p1.body.some(s => s.x === p.x && s.y === p.y)) continue;
-    if (state.snakes.p2.body.some(s => s.x === p.x && s.y === p.y)) continue;
+    if (state.snakes.some(snake => snake.body.some(segment => segment.x === p.x && segment.y === p.y))) continue;
     count++;
   }
   return count;

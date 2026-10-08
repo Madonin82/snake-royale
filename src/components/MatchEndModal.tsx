@@ -135,10 +135,13 @@ export const MatchEndModal: React.FC<MatchEndModalProps> = ({
   matchHistory = [],
   turnDecisions = [],
 }) => {
-  const { p1, p2 } = gameState.snakes;
+  const p1 = gameState.snakes.find(snake => snake.id === 'p1') ?? gameState.snakes[0]!;
+  const p2 = gameState.snakes.find(snake => snake.id === 'p2') ?? gameState.snakes[1]!;
   const handleReturn = onReturnToEditor ?? onReturnToLobby;
   const isDraw = gameState.winner === 'DRAW';
-  const winnerSnake = gameState.winner === 'p1' ? p1 : gameState.winner === 'p2' ? p2 : null;
+  const winnerSnake = gameState.winner && gameState.winner !== 'DRAW'
+    ? gameState.snakes.find(snake => snake.id === gameState.winner) ?? null
+    : null;
   
   const [expandedP1, setExpandedP1] = useState(true);
   const [expandedP2, setExpandedP2] = useState(true);
@@ -152,7 +155,7 @@ export const MatchEndModal: React.FC<MatchEndModalProps> = ({
     titleText = 'DRAW GAME';
   } else if (winnerSnake) {
     if (playMode === 'SOLO_AI') {
-      titleText = gameState.winner === 'p1' ? 'VICTORY!' : 'DEFEATED';
+      titleText = winnerSnake.id === 'p1' ? 'VICTORY!' : 'DEFEATED';
     } else {
       titleText = `${winnerSnake.name} WINS!`;
     }
@@ -314,7 +317,7 @@ export const MatchEndModal: React.FC<MatchEndModalProps> = ({
 
         {/* Series scoreboard + think-time totals */}
         {((series && (series.p1 + series.p2 + series.draws) > 0) ||
-          (gameState.turnBased && (gameState.totalThinkTime.p1 > 0 || gameState.totalThinkTime.p2 > 0))) && (
+          (gameState.turnBased && Object.values(gameState.totalThinkTime).some(seconds => seconds > 0))) && (
           <div className="flex flex-wrap items-center justify-center gap-x-3 gap-y-0.5 text-[11px] [@media(max-height:520px)]:text-[10px] font-black bg-[#8BAC0F] border-2 border-[#0F380F] py-1 px-2 shrink-0">
             {series && (series.p1 + series.p2 + series.draws) > 0 && (
               <span>
@@ -322,9 +325,11 @@ export const MatchEndModal: React.FC<MatchEndModalProps> = ({
                 {series.draws > 0 ? ` · DRAWS ${series.draws}` : ''}
               </span>
             )}
-            {gameState.turnBased && (gameState.totalThinkTime.p1 > 0 || gameState.totalThinkTime.p2 > 0) && (
+            {gameState.turnBased && Object.values(gameState.totalThinkTime).some(seconds => seconds > 0) && (
               <span className="text-[10px] font-bold opacity-85">
-                ⏱ THINK — {p1.name} {Math.floor(gameState.totalThinkTime.p1 / 60)}:{String(Math.floor(gameState.totalThinkTime.p1 % 60)).padStart(2, '0')} · {p2.name} {Math.floor(gameState.totalThinkTime.p2 / 60)}:{String(Math.floor(gameState.totalThinkTime.p2 % 60)).padStart(2, '0')}
+                ⏱ THINK — {gameState.snakes.slice(0, 2).map(snake =>
+                  `${snake.name} ${Math.floor((gameState.totalThinkTime[snake.id] ?? 0) / 60)}:${String(Math.floor((gameState.totalThinkTime[snake.id] ?? 0) % 60)).padStart(2, '0')}`,
+                ).join(' · ')}
               </span>
             )}
           </div>

@@ -1,4 +1,5 @@
-import type { GameState, Position } from '../types/game';
+import type { GameState, Position, Snake } from '../types/game';
+import { withLegacySnakeAccessors } from './snakeArray';
 
 /**
  * RTDB does not round-trip arrays faithfully:
@@ -24,6 +25,23 @@ function asPositionArray(value: unknown): Position[] {
   return [];
 }
 
+function asSnakeArray(value: unknown): Snake[] {
+  if (Array.isArray(value)) return value as Snake[];
+  if (!value || typeof value !== 'object') return [];
+
+  const record = value as Record<string, Partial<Snake>>;
+  const keys = Object.keys(record);
+  const indexedKeys = keys.filter(key => /^\d+$/.test(key)).sort((a, b) => Number(a) - Number(b));
+  const orderedKeys = indexedKeys.length > 0 ? indexedKeys : keys;
+  return orderedKeys.map((key, index) => {
+    const snake = record[key];
+    return {
+      ...snake,
+      id: snake.id || (indexedKeys.length > 0 ? `p${index + 1}` : key),
+    } as Snake;
+  });
+}
+
 /**
  * Return a copy of a wire-received game state with its array fields
  * guaranteed iterable. Safe to call on locally-built states too (arrays
@@ -31,14 +49,15 @@ function asPositionArray(value: unknown): Position[] {
  */
 export function normalizeGameState(state: GameState): GameState {
   if (!state || typeof state !== 'object') return state;
-  const snakes = (state as GameState).snakes;
+  const snakes = asSnakeArray((state as GameState).snakes);
   return {
     ...state,
     tokens: asPositionArray((state as GameState).tokens),
-    walls: asPositionArray((state as GameState).walls),
-    snakes: {
-      p1: { ...snakes?.p1, body: asPositionArray(snakes?.p1?.body) },
-      p2: { ...snakes?.p2, body: asPositionArray(snakes?.p2?.body) },
-    },
+    ...(state.walls === undefined ? {} : { walls: asPositionArray(state.walls) }),
+    snakes: withLegacySnakeAccessors(snakes.map((snake, index) => ({
+      ...snake,
+      id: snake.id || `p${index + 1}`,
+      body: asPositionArray(snake.body),
+    }))),
   };
 }

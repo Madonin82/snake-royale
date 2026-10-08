@@ -6,7 +6,7 @@ export interface Position {
 }
 
 export interface Snake {
-  id: 'p1' | 'p2';
+  id: string;
   name: string;
   body: Position[]; // index 0 is head
   direction: Direction;
@@ -40,25 +40,22 @@ export interface GameState {
   tick: number;
   turnBased: boolean; // copied from settings at match start (host is authoritative in online play)
   phaseTurnsRemaining: number; // turn-based only: turns left in race phase / turns until next ring closes
-  lastTurnTimes: { p1: number; p2: number } | null; // Turn-based seconds spent planning before the most recent lock.
-  totalThinkTime: { p1: number; p2: number }; // Turn-based cumulative planning seconds, synchronized in game state.
+  lastTurnTimes: Record<string, number> | null; // Turn-based seconds spent planning before the most recent lock.
+  totalThinkTime: Record<string, number>; // Turn-based cumulative planning seconds, synchronized in game state.
   phase: GamePhase;
   phaseTimeRemaining: number; // in milliseconds
   phaseEndTime: number; // timestamp
   round: number; // Escalates token count: round 1 = 1 token, round 2 = 2 tokens...
   tokens: Position[];
   walls?: Position[];
-  snakes: {
-    p1: Snake;
-    p2: Snake;
-  };
+  snakes: Snake[];
   ringInset: number; // 0 for full 8x8, 1 for 6x6, 2 for 4x4, 3 for 2x2
   isTelegraphingShrink: boolean;
   telegraphRingInset: number;
-  winner: 'p1' | 'p2' | 'DRAW' | null;
+  winner: string | 'DRAW' | null;
   winReason: string;
   totalMatchTime: number;
-  readyConfirmed?: { p1: boolean; p2: boolean };
+  readyConfirmed?: Record<string, boolean>;
 }
 
 export interface CompactSnakeState {
@@ -79,11 +76,8 @@ export interface CompactGameState {
   isTelegraphingShrink: boolean;
   telegraphRingInset: number;
   tokens: Position[];
-  snakes: {
-    p1: CompactSnakeState;
-    p2: CompactSnakeState;
-  };
-  locks: { p1: boolean; p2: boolean };
+  snakes: Record<string, CompactSnakeState>;
+  locks: Record<string, boolean>;
   winner: GameState['winner'];
 }
 
