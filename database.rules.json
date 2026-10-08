@@ -1,126 +1,29 @@
 {
   "rules": {
     "rooms": {
+      ".read": "auth != null && auth.uid === 'UV4T0gFhciXwOLY19CJ1yma3ZMg2'",
       "$roomId": {
         ".read": "auth != null",
-        ".write": "!data.exists() && newData.exists() && (newData.child('p1Uid').val() === auth.uid || newData.child('p2Uid').val() === auth.uid || newData.child('serverUid').val() === auth.uid)",
-        "createdAt": {
-          ".validate": "newData.isNumber()",
-          ".write": "false"
-        },
-        "hasP1": {
-          ".validate": "newData.isBoolean()",
-          ".write": "auth != null && (data.parent().child('p1Uid').val() === auth.uid || newData.parent().child('p1Uid').val() === auth.uid)"
-        },
-        "hasP2": {
-          ".validate": "newData.isBoolean()",
-          ".write": "auth != null && (data.parent().child('p2Uid').val() === auth.uid || newData.parent().child('p2Uid').val() === auth.uid)"
-        },
-        "inputs": {
-          "$other": {
-            ".write": "false"
-          },
-          "p1": {
-            ".validate": "newData.hasChildren(['dir', 'tick']) && (newData.child('dir').val() === 'UP' || newData.child('dir').val() === 'DOWN' || newData.child('dir').val() === 'LEFT' || newData.child('dir').val() === 'RIGHT') && newData.child('tick').isNumber() && newData.child('tick').val() >= 0 && (!newData.hasChild('clientTime') || newData.child('clientTime').isNumber())",
-            ".write": "auth != null && data.parent().parent().child('p1Uid').val() === auth.uid"
-          },
-          "p2": {
-            ".validate": "newData.hasChildren(['dir', 'tick']) && (newData.child('dir').val() === 'UP' || newData.child('dir').val() === 'DOWN' || newData.child('dir').val() === 'LEFT' || newData.child('dir').val() === 'RIGHT') && newData.child('tick').isNumber() && newData.child('tick').val() >= 0 && (!newData.hasChild('clientTime') || newData.child('clientTime').isNumber())",
-            ".write": "auth != null && data.parent().parent().child('p2Uid').val() === auth.uid"
+        ".write": "auth != null"
+      }
+    },
+    "bridgeSecrets": {
+      "$roomId": {
+        ".read": "auth.uid == root.child('rooms/' + $roomId + '/p1Uid').val()",
+        ".write": "auth.uid == root.child('rooms/' + $roomId + '/p1Uid').val() && !data.exists()"
+      }
+    },
+    "bridges": {
+      "$roomId": {
+        "$seat": {
+          ".read": "auth != null && ($seat == 'p1' || $seat == 'p2') && auth.uid == root.child('rooms/' + $roomId + '/' + $seat + 'Uid').val()",
+          ".write": "auth != null && ($seat == 'p1' || $seat == 'p2') && (auth.uid == root.child('rooms/' + $roomId + '/' + $seat + 'Uid').val() || (root.child('bridgeSecrets/' + $roomId).exists() && newData.child('secret').exists() && newData.child('secret').val() == root.child('bridgeSecrets/' + $roomId).val()))",
+          ".validate": "newData.hasChildren(['seq', 'matchId']) && newData.child('seq').isNumber() && newData.child('seq').val() % 1 == 0 && newData.child('matchId').isString() && (!newData.child('lock').exists() || newData.child('lock').isBoolean()) && (!newData.child('secret').exists() || newData.child('secret').isString())",
+          "moves": {
+            "$moveIndex": {
+              ".validate": "newData.isString() && (newData.val() == 'UP' || newData.val() == 'DOWN' || newData.val() == 'LEFT' || newData.val() == 'RIGHT')"
+            }
           }
-        },
-        "lastActive": {
-          ".validate": "newData.isNumber()",
-          ".write": "auth != null"
-        },
-        "matchStartTrigger": {
-          ".validate": "newData.isNumber()",
-          ".write": "auth != null && (data.parent().child('p1Uid').val() === auth.uid || data.parent().child('serverUid').val() === auth.uid)"
-        },
-        "p1Name": {
-          ".validate": "!newData.exists() || (newData.isString() && newData.val().length <= 14)",
-          ".write": "auth != null && (data.parent().child('p1Uid').val() === auth.uid || newData.parent().child('p1Uid').val() === auth.uid)"
-        },
-        "p1Uid": {
-          ".validate": "!newData.exists() || newData.isString()",
-          ".write": "auth != null && (!data.exists() || data.val() === auth.uid) && (!newData.exists() || newData.val() === auth.uid)"
-        },
-        "p2Name": {
-          ".validate": "!newData.exists() || (newData.isString() && newData.val().length <= 14)",
-          ".write": "auth != null && (data.parent().child('p2Uid').val() === auth.uid || newData.parent().child('p2Uid').val() === auth.uid)"
-        },
-        "p2Uid": {
-          ".validate": "!newData.exists() || newData.isString()",
-          ".write": "auth != null && (!data.exists() || data.val() === auth.uid) && (!newData.exists() || newData.val() === auth.uid)"
-        },
-        "pings": {
-          "$pingId": {
-            ".validate": "newData.hasChildren(['pingId', 'fromRole']) && newData.child('ack').isBoolean() && (!newData.hasChild('t0') || newData.child('t0').isNumber()) && (!newData.hasChild('t1') || newData.child('t1').isNumber())",
-            ".write": "auth != null"
-          }
-        },
-        "ready": {
-          "$other": {
-            ".write": "false"
-          },
-          "p1": {
-            ".validate": "newData.child('ready').isBoolean() && newData.child('updatedAt').isNumber()",
-            ".write": "auth != null && (data.parent().parent().child('p1Uid').val() === auth.uid || data.parent().parent().child('serverUid').val() === auth.uid)"
-          },
-          "p2": {
-            ".validate": "newData.child('ready').isBoolean() && newData.child('updatedAt').isNumber()",
-            ".write": "auth != null && (data.parent().parent().child('p2Uid').val() === auth.uid || data.parent().parent().child('serverUid').val() === auth.uid)"
-          }
-        },
-        "restartSender": {
-          ".validate": "newData.isString() && newData.val().length <= 16",
-          ".write": "auth != null && (data.parent().child('p1Uid').val() === auth.uid || data.parent().child('p2Uid').val() === auth.uid || data.parent().child('serverUid').val() === auth.uid)"
-        },
-        "restartTrigger": {
-          ".validate": "newData.isNumber()",
-          ".write": "auth != null && (data.parent().child('p1Uid').val() === auth.uid || data.parent().child('p2Uid').val() === auth.uid || data.parent().child('serverUid').val() === auth.uid)"
-        },
-        "seriesDraws": {
-          ".validate": "newData.isNumber() && newData.val() >= 0",
-          ".write": "auth != null && (data.parent().child('p1Uid').val() === auth.uid || data.parent().child('serverUid').val() === auth.uid)"
-        },
-        "seriesP1": {
-          ".validate": "newData.isNumber() && newData.val() >= 0",
-          ".write": "auth != null && (data.parent().child('p1Uid').val() === auth.uid || data.parent().child('serverUid').val() === auth.uid)"
-        },
-        "seriesP2": {
-          ".validate": "newData.isNumber() && newData.val() >= 0",
-          ".write": "auth != null && (data.parent().child('p1Uid').val() === auth.uid || data.parent().child('serverUid').val() === auth.uid)"
-        },
-        "serverUid": {
-          ".validate": "!newData.exists() || newData.isString()",
-          ".write": "auth != null && (!data.exists() || data.val() === auth.uid) && (!newData.exists() || newData.val() === auth.uid)"
-        },
-        "settings": {
-          ".write": "auth != null && (data.parent().child('p1Uid').val() === auth.uid || data.parent().child('serverUid').val() === auth.uid)"
-        },
-        "signals": {
-          "$sig": {
-            ".write": "auth != null && (data.parent().parent().child('p1Uid').val() === auth.uid || data.parent().parent().child('p2Uid').val() === auth.uid)"
-          }
-        },
-        "spectators": {
-          "$uid": {
-            ".validate": "!newData.exists() || newData.child('joinedAt').isNumber()",
-            ".write": "auth != null && $uid === auth.uid"
-          }
-        },
-        "state": {
-          "$other": {
-            ".write": "false"
-          },
-          "current": {
-            ".write": "auth != null && (data.parent().parent().child('p1Uid').val() === auth.uid || data.parent().parent().child('serverUid').val() === auth.uid)"
-          }
-        },
-        "status": {
-          ".validate": "newData.isString() && newData.val().length <= 16",
-          ".write": "auth != null && (data.parent().child('p1Uid').val() === auth.uid || data.parent().child('p2Uid').val() === auth.uid || data.parent().child('serverUid').val() === auth.uid)"
         }
       }
     }
