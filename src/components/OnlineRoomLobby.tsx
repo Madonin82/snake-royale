@@ -1,8 +1,10 @@
 import React, { useState, useEffect } from 'react';
 import { Copy, Check, Play, Users, ArrowLeft, Activity, Settings } from 'lucide-react';
+import { onAuthStateChanged, User } from 'firebase/auth';
 import { GameSettings } from '../types/game';
 import { GamepadMenuAction } from '../game/gamepad';
 import { soundEngine } from '../audio/soundEngine';
+import { ADMIN_UIDS, auth } from '../firebase';
 
 interface OnlineRoomLobbyProps {
   roomId: string;
@@ -39,11 +41,24 @@ export const OnlineRoomLobby: React.FC<OnlineRoomLobbyProps> = ({
 }) => {
   const [copied, setCopied] = useState(false);
   const [secretCopied, setSecretCopied] = useState(false);
+  const [signedInUser, setSignedInUser] = useState<User | null>(() => {
+    const user = auth.currentUser;
+    return user && !user.isAnonymous ? user : null;
+  });
 
   const isHost = role === 'p1';
   const isServer = role === 'server';
   const canStart = isHost || isServer;
   const bothPlayersReady = hasP1 && hasP2;
+
+  useEffect(() => onAuthStateChanged(
+    auth,
+    (user) => setSignedInUser(user && !user.isAnonymous ? user : null),
+    (error) => {
+      console.error(`Authentication state failed: ${error.message}`);
+      setSignedInUser(null);
+    },
+  ), []);
 
   const buttons: ('START' | 'COPY' | 'SETTINGS' | 'HARNESS' | 'LEAVE')[] = canStart
     ? ['START', 'COPY', 'SETTINGS', 'HARNESS', 'LEAVE']
@@ -203,7 +218,7 @@ export const OnlineRoomLobby: React.FC<OnlineRoomLobbyProps> = ({
         )}
       </div>
 
-      {isHost && bridgeSecret && (
+      {isHost && bridgeSecret && signedInUser && ADMIN_UIDS.includes(signedInUser.uid) && (
         <div className="p-2.5 border-2 border-[#0F380F] bg-[#8BAC0F] text-center flex flex-col items-center gap-1.5">
           <div className="text-[11px] font-bold uppercase tracking-wider">
             BRIDGE SECRET (SHARE WITH AI AGENT):
