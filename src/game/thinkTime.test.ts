@@ -148,7 +148,12 @@ test('20 varied queue-depth planning windows accrue monotonically and match repl
   }
 
   const finalState = applyThinkTimeModel(createInitialState(), model);
-  const replay = createReplayDataObject([finalState], DEFAULT_SETTINGS);
+  const replay = createReplayDataObject(
+    [finalState],
+    DEFAULT_SETTINGS,
+    [],
+    { p1: false, p2: false },
+  );
   assert.deepEqual(replay.states[0].totalThinkTime, finalState.totalThinkTime);
 
   const imported = adoptThinkTimeSnapshot(createThinkTimeModel(), replay.states[0]);

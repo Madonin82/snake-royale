@@ -1,9 +1,19 @@
-import { GameState, GameSettings } from '../types/game';
+import { Direction, GameState, GameSettings } from '../types/game';
 import { normalizeGameState } from './normalize';
+
+export interface TurnDecision {
+  tick: number;
+  seat: 'p1' | 'p2';
+  // Online clients only observe their own queue; opponent queues are fog-of-war by design.
+  // A replay exported by one client may therefore omit opponent decisions; merge both exports.
+  queue: Direction[];
+  lockedAt: number;
+  autoLock: boolean;
+}
 
 export interface ReplayFileObject {
   format: 'snake-royale-replay';
-  version: number;
+  version: 2;
   exportedAt: string;
   settings: {
     gridSize: number;
@@ -18,9 +28,16 @@ export interface ReplayFileObject {
     p2Score: number;
   };
   states: GameState[];
+  decisions: TurnDecision[];
+  agentDriven: { p1: boolean; p2: boolean };
 }
 
-export function createReplayDataObject(matchHistory: GameState[], settings: GameSettings): ReplayFileObject {
+export function createReplayDataObject(
+  matchHistory: GameState[],
+  settings: GameSettings,
+  decisions: TurnDecision[],
+  agentDriven: { p1: boolean; p2: boolean },
+): ReplayFileObject {
   const finalState = matchHistory[matchHistory.length - 1] || matchHistory[0];
   const now = new Date();
   const pad = (n: number) => String(n).padStart(2, '0');
@@ -30,7 +47,7 @@ export function createReplayDataObject(matchHistory: GameState[], settings: Game
 
   return {
     format: 'snake-royale-replay',
-    version: 1,
+    version: 2,
     exportedAt: now.toISOString(),
     settings: {
       gridSize: settings.gridSize,
@@ -45,12 +62,19 @@ export function createReplayDataObject(matchHistory: GameState[], settings: Game
       p2Score,
     },
     states: matchHistory,
+    decisions,
+    agentDriven,
   };
 }
 
-export function exportReplayToFile(matchHistory: GameState[], settings: GameSettings): void {
+export function exportReplayToFile(
+  matchHistory: GameState[],
+  settings: GameSettings,
+  decisions: TurnDecision[],
+  agentDriven: { p1: boolean; p2: boolean },
+): void {
   try {
-    const replayObj = createReplayDataObject(matchHistory, settings);
+    const replayObj = createReplayDataObject(matchHistory, settings, decisions, agentDriven);
     const jsonStr = JSON.stringify(replayObj, null, 2);
     const blob = new Blob([jsonStr], { type: 'application/json' });
     const url = URL.createObjectURL(blob);
@@ -76,7 +100,12 @@ export function exportReplayToFile(matchHistory: GameState[], settings: GameSett
   }
 }
 
-export function parseAndValidateReplayData(rawText: string): { states: GameState[]; settings?: { gridSize: number; turnBased: boolean; raceTurns: number; tickRate: number; thinkTimeSeconds?: number | null } } {
+export function parseAndValidateReplayData(rawText: string): {
+  states: GameState[];
+  settings?: { gridSize: number; turnBased: boolean; raceTurns: number; tickRate: number; thinkTimeSeconds?: number | null };
+  decisions: TurnDecision[];
+  agentDriven: { p1: boolean; p2: boolean };
+} {
   if (!rawText || rawText.length > 5 * 1024 * 1024) {
     throw new Error("That file isn't a Snake Royale replay");
   }
@@ -92,8 +121,37 @@ export function parseAndValidateReplayData(rawText: string): { states: GameState
     throw new Error("That file isn't a Snake Royale replay");
   }
 
-  if (obj.format !== 'snake-royale-replay' || obj.version !== 1 || !Array.isArray(obj.states) || obj.states.length <= 1) {
+  if (
+    obj.format !== 'snake-royale-replay' ||
+    (obj.version !== 1 && obj.version !== 2) ||
+    !Array.isArray(obj.states) ||
+    obj.states.length <= 1
+  ) {
     throw new Error("That file isn't a Snake Royale replay");
+  }
+
+  let decisions: TurnDecision[] = [];
+  let agentDriven = { p1: false, p2: false };
+  if (obj.version === 2) {
+    const validDirections: Direction[] = ['UP', 'DOWN', 'LEFT', 'RIGHT'];
+    const validDecisions = Array.isArray(obj.decisions) && obj.decisions.every((decision: any) =>
+      decision &&
+      Number.isSafeInteger(decision.tick) &&
+      (decision.seat === 'p1' || decision.seat === 'p2') &&
+      Array.isArray(decision.queue) &&
+      decision.queue.every((direction: unknown) => validDirections.includes(direction as Direction)) &&
+      typeof decision.lockedAt === 'number' &&
+      Number.isFinite(decision.lockedAt) &&
+      typeof decision.autoLock === 'boolean',
+    );
+    const validAgentDriven = obj.agentDriven &&
+      typeof obj.agentDriven.p1 === 'boolean' &&
+      typeof obj.agentDriven.p2 === 'boolean';
+    if (!validDecisions || !validAgentDriven) {
+      throw new Error("That file isn't a Snake Royale replay");
+    }
+    decisions = obj.decisions;
+    agentDriven = obj.agentDriven;
   }
 
   const normalizedStates: GameState[] = obj.states.map((s: any) => normalizeGameState(s as GameState));
@@ -101,5 +159,7 @@ export function parseAndValidateReplayData(rawText: string): { states: GameState
   return {
     states: normalizedStates,
     settings: obj.settings,
+    decisions,
+    agentDriven,
   };
 }

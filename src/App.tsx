@@ -17,7 +17,7 @@ import { networkManager } from './game/network';
 import { rtdb } from './firebase';
 import { canAcceptState, canAdoptMatch, isCurrentMatch, isNewerSequence, MatchIdentity } from './game/networkProtocol';
 import { normalizeGameState } from './game/normalize';
-import { exportReplayToFile, parseAndValidateReplayData } from './game/replayFile';
+import { exportReplayToFile, parseAndValidateReplayData, TurnDecision } from './game/replayFile';
 import {
   adoptThinkTimeSnapshot,
   applyThinkTimeModel,
@@ -99,6 +99,8 @@ export const App: React.FC = () => {
 
   // MATCH REPLAY: recorded states
   const [matchHistory, setMatchHistory] = useState<GameState[]>([]);
+  const turnDecisionsRef = useRef<TurnDecision[]>([]);
+  const agentDrivenRef = useRef<{ p1: boolean; p2: boolean }>({ p1: false, p2: false });
   const [replayActive, setReplayActive] = useState<boolean>(false);
   const [replayIdx, setReplayIdx] = useState<number>(0);
   const [replayPlaying, setReplayPlaying] = useState<boolean>(false);
@@ -305,7 +307,7 @@ export const App: React.FC = () => {
     return 'p1';
   }, []);
 
-  const setLock = useCallback((who: 'p1' | 'p2') => {
+  const setLock = useCallback((who: 'p1' | 'p2', isAuto = false) => {
     thinkTimeEndsRef.current = { ...thinkTimeEndsRef.current, [who]: null };
     lastThinkTimeTickRef.current = { ...lastThinkTimeTickRef.current, [who]: null };
     notifiedPlanningWindowRef.current = { ...notifiedPlanningWindowRef.current, [who]: false };
@@ -314,6 +316,13 @@ export const App: React.FC = () => {
     if (playModeRef.current === 'ONLINE_HOST' || playModeRef.current === 'ONLINE_SERVER') {
       networkManager.broadcastState(stateRef.current, locksRef.current);
     }
+    turnDecisionsRef.current.push({
+      tick: stateRef.current.tick,
+      seat: who,
+      queue: [...moveBuffersRef.current[who]],
+      lockedAt: Date.now(),
+      autoLock: isAuto,
+    });
   }, [commitLocks]);
 
   const clearLocks = useCallback(() => {
@@ -393,7 +402,15 @@ export const App: React.FC = () => {
       }
       moveBuffersRef.current = { ...moveBuffersRef.current, p2: p2Buf };
       setMoveBuffers({ ...moveBuffersRef.current });
+      agentDrivenRef.current.p2 = true;
       commitLocks({ ...locksRef.current, p2: true });
+      turnDecisionsRef.current.push({
+        tick: current.tick,
+        seat: 'p2',
+        queue: [...moveBuffersRef.current.p2],
+        lockedAt: Date.now(),
+        autoLock: false,
+      });
       applyThinkTransition({ type: 'CANCEL', player: 'p2' });
     }
 
@@ -453,7 +470,7 @@ export const App: React.FC = () => {
     const current = stateRef.current;
     const buffer = moveBuffersRef.current[who];
 
-    setLock(who);
+    setLock(who, true);
     if (playModeRef.current === 'ONLINE_JOIN') {
       if (buffer.length > 0 && sentTickRef.current !== current.tick) {
         sentTickRef.current = current.tick;
@@ -735,6 +752,7 @@ export const App: React.FC = () => {
           return;
         }
 
+        agentDrivenRef.current[seat] = true;
         if (command.moves) queueBridgeMoves(command.moves);
         if (command.lock) lockBridgeSeat();
         lastBridgeCommandSequencesRef.current[commandPath] = { matchId: command.matchId, seq: command.seq };
@@ -820,6 +838,8 @@ export const App: React.FC = () => {
     setReplayActive(false);
     setSettingsModalOpen(false);
     setLatencyModalOpen(false);
+    turnDecisionsRef.current = [];
+    agentDrivenRef.current = { p1: false, p2: false };
   }, []);
 
   const handleMenuAction = useCallback((action: GamepadMenuAction, _slot: 1 | 2) => {
@@ -1053,6 +1073,8 @@ export const App: React.FC = () => {
           lastInputSequenceRef.current = { p1: 0, p2: 0 };
           clearLocks();
           setMatchHistory([]);
+          turnDecisionsRef.current = [];
+          agentDrivenRef.current = { p1: false, p2: false };
           setReplayActive(false);
           setReplayIdx(0);
           setReplayPlaying(false);
@@ -1072,6 +1094,8 @@ export const App: React.FC = () => {
             lastInputSequenceRef.current = { p1: 0, p2: 0 };
             clearLocks();
             setMatchHistory([]);
+            turnDecisionsRef.current = [];
+            agentDrivenRef.current = { p1: false, p2: false };
             setReplayActive(false);
             setReplayIdx(0);
             setReplayPlaying(false);
@@ -1428,6 +1452,8 @@ export const App: React.FC = () => {
     }
     seriesCountedRef.current = false;
     setMatchHistory([initial]);
+    turnDecisionsRef.current = [];
+    agentDrivenRef.current = { p1: false, p2: false };
     setReplayActive(false);
     setReplayIdx(0);
     setReplayPlaying(false);
@@ -1597,7 +1623,7 @@ export const App: React.FC = () => {
   const [joinError, setJoinError] = useState<string | null>(null);
 
   const handleExportReplay = () => {
-    exportReplayToFile(matchHistory, settings);
+    exportReplayToFile(matchHistory, settings, turnDecisionsRef.current, agentDrivenRef.current);
   };
 
   const handleImportReplay = async (file: File) => {
@@ -1618,6 +1644,8 @@ export const App: React.FC = () => {
         }));
       }
       setMatchHistory(parsed.states);
+      turnDecisionsRef.current = parsed.decisions;
+      agentDrivenRef.current = parsed.agentDriven;
       const snapshot = adoptThinkTimeSnapshot(thinkRef.current, parsed.states[0]);
       thinkRef.current = snapshot.model;
       stateRef.current = snapshot.state;
