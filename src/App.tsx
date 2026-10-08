@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { CompactGameState, Direction, GameSettings, GameState, LatencyReport, PlayMode, Position } from './types/game';
+import { onAuthStateChanged, User } from 'firebase/auth';
 import { onValue, ref } from 'firebase/database';
 import {
   createInitialState,
@@ -14,7 +15,7 @@ import { cloneGameState, toCompactGameState } from './game/aiBridge';
 import { shouldApplyRtdbBridgeCommand } from './game/aiBridgeRtdb';
 import { gamepadController, GamepadMenuAction } from './game/gamepad';
 import { networkManager } from './game/network';
-import { rtdb } from './firebase';
+import { ADMIN_UIDS, auth, rtdb } from './firebase';
 import { canAcceptState, canAdoptMatch, isCurrentMatch, isNewerSequence, MatchIdentity } from './game/networkProtocol';
 import { normalizeGameState } from './game/normalize';
 import { exportReplayToFile, parseAndValidateReplayData, TurnDecision } from './game/replayFile';
@@ -70,6 +71,7 @@ function createLobbyState(settings: GameSettings): GameState {
 
 export const App: React.FC = () => {
   const [currentHash, setCurrentHash] = useState<string>(() => window.location.hash);
+  const [signedInUser, setSignedInUser] = useState<User | null>(auth.currentUser);
 
   useEffect(() => {
     const handleHashChange = () => {
@@ -79,8 +81,34 @@ export const App: React.FC = () => {
     return () => window.removeEventListener('hashchange', handleHashChange);
   }, []);
 
+  useEffect(() => {
+    return onAuthStateChanged(auth, setSignedInUser);
+  }, []);
+
   if (currentHash === '#/level-editor') {
-    return <LevelEditor />;
+    const isAdmin = Boolean(signedInUser && ADMIN_UIDS.includes(signedInUser.uid));
+    if (isAdmin) {
+      return <LevelEditor />;
+    }
+
+    return (
+      <div className="w-screen h-screen flex flex-col items-center justify-center bg-[#7b8860] text-[#0F380F] font-mono select-none p-4 uppercase">
+        <div className="w-full max-w-md bg-[#9BBC0F] border-4 border-[#0F380F] p-6 text-center shadow-[inset_0_0_12px_rgba(15,56,15,0.4)]">
+          <div className="text-2xl font-black mb-3 tracking-wider text-[#0F380F]">
+            ACCESS DENIED
+          </div>
+          <div className="text-xs font-bold text-[#306230] mb-6 tracking-wide leading-relaxed">
+            THIS TOOL IS RESTRICTED TO ADMINISTRATORS.
+          </div>
+          <a
+            href="#/"
+            className="inline-block px-4 py-2 bg-[#0F380F] text-[#9BBC0F] font-black text-xs hover:bg-[#306230] border-2 border-[#0F380F] active:translate-y-0.5"
+          >
+            RETURN TO GAME
+          </a>
+        </div>
+      </div>
+    );
   }
 
   const aiMode = useMemo(() => new URLSearchParams(window.location.search).get('ai') === '1', []);
