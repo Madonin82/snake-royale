@@ -2,9 +2,10 @@ import React, { useState, useEffect, useCallback } from 'react';
 import { GameSettings } from '../types/game';
 import { soundEngine } from '../audio/soundEngine';
 import { GamepadMenuAction } from '../game/gamepad';
-import { ADMIN_UIDS, auth, signOutToAnonymous } from '../firebase';
+import { ADMIN_UIDS, auth, signOutToAnonymous, rtdb } from '../firebase';
 import { GoogleAuthProvider, onAuthStateChanged, signInWithPopup, User } from 'firebase/auth';
-import { Settings, Volume2, VolumeX, X, Grid, Gauge, Tv } from 'lucide-react';
+import { Settings, Volume2, VolumeX, X, Grid, Gauge, Tv, Trash2 } from 'lucide-react';
+import { onValue, ref, remove } from 'firebase/database';
 
 interface SettingsModalProps {
   isOpen: boolean;
@@ -24,24 +25,69 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
   onRegisterHandler,
 }) => {
   const [focusIndex, setFocusIndex] = useState<number>(0);
-  const [authUser, setAuthUser] = useState<User | null>(auth.currentUser);
+  const [signedInUser, setSignedInUser] = useState<User | null>(auth.currentUser);
+  const [adminRooms, setAdminRooms] = useState<Array<{
+    id: string;
+    status: string;
+    playerCount: number;
+    createdAt: number;
+    lastActive: number;
+  }>>([]);
+  const [confirmDeleteRoomId, setConfirmDeleteRoomId] = useState<string | null>(null);
   const [authBusy, setAuthBusy] = useState<boolean>(false);
   const [authError, setAuthError] = useState<string | null>(null);
 
-  type SettingsRow = 'STYLE' | 'TURNS' | 'GRID' | 'TICKS' | 'THINK_TIME' | 'SOUND' | 'CRT' | 'ACCOUNT' | 'CLOSE';
+  useEffect(() => {
+    if (!signedInUser || !ADMIN_UIDS.includes(signedInUser.uid)) return;
+    const roomsRef = ref(rtdb, 'rooms');
+    const unsubscribe = onValue(roomsRef, (snapshot) => {
+      const val = snapshot.val() || {};
+      const list = Object.entries(val).map(([id, rData]: [string, any]) => {
+        const hasP1 = !!rData?.hasP1;
+        const hasP2 = !!rData?.hasP2;
+        const specs = rData?.spectators ? Object.keys(rData.spectators).length : 0;
+        const playerCount = (hasP1 ? 1 : 0) + (hasP2 ? 1 : 0) + specs;
+        const status = rData?.status || 'lobby';
+        const createdAt = Number(rData?.createdAt) || 0;
+        const lastActive = Number(rData?.lastActive) || createdAt || Date.now();
+        return { id, status, playerCount, createdAt, lastActive };
+      });
+      list.sort((a, b) => (a.createdAt || a.lastActive) - (b.createdAt || b.lastActive));
+      setAdminRooms(list);
+    }, (err) => {
+      console.error('Failed to load admin rooms:', err);
+    });
+    return () => unsubscribe();
+  }, [signedInUser]);
 
-  const rows: SettingsRow[] = isOnlineGuest
+  const handleDeleteRoom = async (roomId: string) => {
+    try {
+      soundEngine.playMenuSelect();
+      await remove(ref(rtdb, `rooms/${roomId}`));
+      await remove(ref(rtdb, `bridgeSecrets/${roomId}`)).catch(() => {});
+      setConfirmDeleteRoomId(null);
+    } catch (err) {
+      console.error('Failed to delete room:', err);
+    }
+  };
+
+  type SettingsRow = 'STYLE' | 'TURNS' | 'GRID' | 'TICKS' | 'THINK_TIME' | 'SOUND' | 'CRT' | 'ACCOUNT' | 'ADMIN' | 'CLOSE';
+
+  const baseRows: SettingsRow[] = isOnlineGuest
     ? ['SOUND', 'CRT', 'ACCOUNT', 'CLOSE']
     : settings.turnBased
     ? ['STYLE', 'TURNS', 'GRID', 'THINK_TIME', 'SOUND', 'CRT', 'ACCOUNT', 'CLOSE']
     : ['STYLE', 'GRID', 'TICKS', 'SOUND', 'CRT', 'ACCOUNT', 'CLOSE'];
 
+  const rows: SettingsRow[] = (signedInUser && ADMIN_UIDS.includes(signedInUser.uid))
+    ? [...baseRows.slice(0, -1), 'ADMIN', 'CLOSE']
+    : baseRows;
+
   const currentRow = rows[focusIndex] || rows[0];
-  const signedInUser = authUser && !authUser.isAnonymous ? authUser : null;
 
   useEffect(() => {
     if (!isOpen) return;
-    return onAuthStateChanged(auth, setAuthUser, (error) => {
+    return onAuthStateChanged(auth, setSignedInUser, (error) => {
       setAuthError(`Authentication state failed: ${error.message}`);
     });
   }, [isOpen]);
@@ -567,6 +613,72 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
             </div>
             {authError && <div role="status" className="text-[9px] font-bold">{authError}</div>}
           </div>
+
+          {/* Admin Room Management */}
+          {signedInUser && ADMIN_UIDS.includes(signedInUser.uid) && (
+            <div
+              className={`flex flex-col gap-2 p-2 border transition-all ${
+                currentRow === 'ADMIN'
+                  ? 'bg-[#8BAC0F] border-[#0F380F] ring-2 ring-[#0F380F]'
+                  : 'bg-[#8BAC0F] border-[#0F380F]'
+              }`}
+              onClick={() => setFocusIndex(rows.indexOf('ADMIN'))}
+            >
+              <div className="text-[11px] font-bold uppercase tracking-wider flex items-center justify-between">
+                <span>{currentRow === 'ADMIN' && <span className="animate-pulse mr-1">►</span>} ADMIN ROOM MANAGEMENT ({adminRooms.length})</span>
+                <span className="text-[9px] opacity-75">OLDEST FIRST</span>
+              </div>
+              {adminRooms.length === 0 ? (
+                <div className="text-[10px] text-center opacity-75 py-1">No active rooms in RTDB.</div>
+              ) : (
+                <div className="max-h-48 overflow-y-auto flex flex-col gap-1.5 pr-1">
+                  {adminRooms.map((room) => {
+                    const timeStr = new Date(room.createdAt || room.lastActive).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+                    const isConfirming = confirmDeleteRoomId === room.id;
+                    return (
+                      <div key={room.id} className="bg-[#9BBC0F] border border-[#0F380F] p-1.5 flex items-center justify-between gap-2 text-[10px]">
+                        <div className="flex flex-col min-w-0">
+                          <div className="font-black flex items-center gap-1.5">
+                            <span className="bg-[#0F380F] text-[#9BBC0F] px-1">{room.id}</span>
+                            <span className="uppercase text-[9px]">[{room.status}]</span>
+                          </div>
+                          <div className="text-[9px] opacity-80">
+                            {room.playerCount} player(s) · Created {timeStr}
+                          </div>
+                        </div>
+                        <div className="shrink-0 flex items-center gap-1">
+                          {isConfirming ? (
+                            <>
+                              <button
+                                onClick={() => handleDeleteRoom(room.id)}
+                                className="bg-red-700 hover:bg-red-800 text-white px-2 py-0.5 border border-[#0F380F] font-black text-[9px] cursor-pointer"
+                              >
+                                CONFIRM
+                              </button>
+                              <button
+                                onClick={() => setConfirmDeleteRoomId(null)}
+                                className="bg-[#0F380F] text-[#9BBC0F] px-1.5 py-0.5 border border-[#0F380F] font-bold text-[9px] cursor-pointer"
+                              >
+                                X
+                              </button>
+                            </>
+                          ) : (
+                            <button
+                              onClick={() => setConfirmDeleteRoomId(room.id)}
+                              className="bg-[#0F380F] hover:bg-red-800 text-[#9BBC0F] px-2 py-0.5 border border-[#0F380F] font-black text-[9px] cursor-pointer flex items-center gap-1"
+                            >
+                              <Trash2 className="w-3 h-3" />
+                              <span>DELETE</span>
+                            </button>
+                          )}
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+          )}
         </div>
 
         {/* Footer Save & Close */}

@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Copy, Check, Play, Users, ArrowLeft, Activity, Settings, Trash2 } from 'lucide-react';
+import { Copy, Check, Play, Users, ArrowLeft, Activity, Settings } from 'lucide-react';
 import { onAuthStateChanged, User } from 'firebase/auth';
 import { onValue, ref, remove } from 'firebase/database';
 import { QRCodeSVG } from 'qrcode.react';
@@ -47,6 +47,7 @@ export const OnlineRoomLobby: React.FC<OnlineRoomLobbyProps> = ({
     const user = auth.currentUser;
     return user && !user.isAnonymous ? user : null;
   });
+  const [isQrModalOpen, setIsQrModalOpen] = useState(false);
   const [adminRooms, setAdminRooms] = useState<Array<{
     id: string;
     status: string;
@@ -55,7 +56,8 @@ export const OnlineRoomLobby: React.FC<OnlineRoomLobbyProps> = ({
     lastActive: number;
   }>>([]);
   const [confirmDeleteRoomId, setConfirmDeleteRoomId] = useState<string | null>(null);
-
+  
+  // Keep the listener for the SettingsModal, which will now use adminRooms
   useEffect(() => {
     if (!signedInUser || !ADMIN_UIDS.includes(signedInUser.uid)) return;
     const roomsRef = ref(rtdb, 'rooms');
@@ -71,7 +73,6 @@ export const OnlineRoomLobby: React.FC<OnlineRoomLobbyProps> = ({
         const lastActive = Number(rData?.lastActive) || createdAt || Date.now();
         return { id, status, playerCount, createdAt, lastActive };
       });
-      // Sort by oldest first (createdAt ascending)
       list.sort((a, b) => (a.createdAt || a.lastActive) - (b.createdAt || b.lastActive));
       setAdminRooms(list);
     }, (err) => {
@@ -249,9 +250,12 @@ export const OnlineRoomLobby: React.FC<OnlineRoomLobbyProps> = ({
           <span className="text-3xl font-black tracking-widest bg-[#9BBC0F] px-4 py-0.5 border-2 border-[#0F380F]">
             {roomId}
           </span>
-          <div className="bg-white p-1 border-2 border-[#0F380F] shrink-0" title="Scan to join room">
-            <QRCodeSVG value={`https://madonin82.github.io/snake-royale/?room=${roomId}`} size={52} level="L" />
-          </div>
+          <button
+            onClick={() => setIsQrModalOpen(true)}
+            className="bg-[#0F380F] hover:bg-[#306230] text-[#9BBC0F] p-2 border-2 border-[#0F380F] cursor-pointer shadow-[2px_2px_0px_#0F380F] text-xs font-bold"
+          >
+            QR CODE
+          </button>
           <button
             onClick={handleCopy}
             className="bg-[#0F380F] hover:bg-[#306230] text-[#9BBC0F] p-2 border-2 border-[#0F380F] cursor-pointer shadow-[2px_2px_0px_#0F380F]"
@@ -260,6 +264,17 @@ export const OnlineRoomLobby: React.FC<OnlineRoomLobbyProps> = ({
             {copied ? <Check className="w-5 h-5" /> : <Copy className="w-5 h-5" />}
           </button>
         </div>
+        {isQrModalOpen && (
+          <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4" onClick={() => setIsQrModalOpen(false)}>
+            <div className="bg-[#8BAC0F] p-4 border-4 border-[#0F380F] flex flex-col items-center gap-2" onClick={e => e.stopPropagation()}>
+              <div className="text-xs font-black uppercase">SCAN TO JOIN</div>
+              <div className="bg-white p-1 border-2 border-[#0F380F]">
+                <QRCodeSVG value={`https://madonin82.github.io/snake-royale/?room=${roomId}`} size={200} level="L" />
+              </div>
+              <button onClick={() => setIsQrModalOpen(false)} className="bg-[#0F380F] text-[#9BBC0F] px-4 py-1 font-bold text-xs cursor-pointer">CLOSE</button>
+            </div>
+          </div>
+        )}
         {copied && <span className="text-[10px] font-bold">COPIED TO CLIPBOARD!</span>}
         {currentBtn === 'COPY' && (
           <span className="text-[9px] bg-[#0F380F] text-[#9BBC0F] px-1 font-bold">[A] COPY</span>
@@ -284,64 +299,6 @@ export const OnlineRoomLobby: React.FC<OnlineRoomLobbyProps> = ({
             </button>
           </div>
           {secretCopied && <span className="text-[10px] font-bold">COPIED TO CLIPBOARD!</span>}
-        </div>
-      )}
-
-      {signedInUser && ADMIN_UIDS.includes(signedInUser.uid) && (
-        <div className="p-2.5 border-2 border-[#0F380F] bg-[#8BAC0F] flex flex-col gap-2">
-          <div className="text-[11px] font-bold uppercase tracking-wider flex items-center justify-between">
-            <span>ADMIN ROOM MANAGEMENT ({adminRooms.length})</span>
-            <span className="text-[9px] opacity-75">OLDEST FIRST</span>
-          </div>
-          {adminRooms.length === 0 ? (
-            <div className="text-[10px] text-center opacity-75 py-1">No active rooms in RTDB.</div>
-          ) : (
-            <div className="max-h-48 overflow-y-auto flex flex-col gap-1.5 pr-1">
-              {adminRooms.map((room) => {
-                const timeStr = new Date(room.createdAt || room.lastActive).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
-                const isConfirming = confirmDeleteRoomId === room.id;
-                return (
-                  <div key={room.id} className="bg-[#9BBC0F] border border-[#0F380F] p-1.5 flex items-center justify-between gap-2 text-[10px]">
-                    <div className="flex flex-col min-w-0">
-                      <div className="font-black flex items-center gap-1.5">
-                        <span className="bg-[#0F380F] text-[#9BBC0F] px-1">{room.id}</span>
-                        <span className="uppercase text-[9px]">[{room.status}]</span>
-                      </div>
-                      <div className="text-[9px] opacity-80">
-                        {room.playerCount} player(s) · Created {timeStr}
-                      </div>
-                    </div>
-                    <div className="shrink-0 flex items-center gap-1">
-                      {isConfirming ? (
-                        <>
-                          <button
-                            onClick={() => handleDeleteRoom(room.id)}
-                            className="bg-red-700 hover:bg-red-800 text-white px-2 py-0.5 border border-[#0F380F] font-black text-[9px] cursor-pointer"
-                          >
-                            CONFIRM
-                          </button>
-                          <button
-                            onClick={() => setConfirmDeleteRoomId(null)}
-                            className="bg-[#0F380F] text-[#9BBC0F] px-1.5 py-0.5 border border-[#0F380F] font-bold text-[9px] cursor-pointer"
-                          >
-                            X
-                          </button>
-                        </>
-                      ) : (
-                        <button
-                          onClick={() => setConfirmDeleteRoomId(room.id)}
-                          className="bg-[#0F380F] hover:bg-red-800 text-[#9BBC0F] px-2 py-0.5 border border-[#0F380F] font-black text-[9px] cursor-pointer flex items-center gap-1"
-                        >
-                          <Trash2 className="w-3 h-3" />
-                          <span>DELETE</span>
-                        </button>
-                      )}
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
-          )}
         </div>
       )}
 
