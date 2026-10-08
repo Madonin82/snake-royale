@@ -31,6 +31,9 @@ export function calculateAIMove(
     if (!isCellInArena(nextPos, gridSize, gameState.ringInset)) {
       continue; // Instant death
     }
+    if (gameState.walls?.some(wall => wall.x === nextPos.x && wall.y === nextPos.y)) {
+      continue;
+    }
 
     // 2. HARD RULE: Avoid Own Body (except the tail if we don't eat)
     const hitsSelf = me.body.slice(0, -1).some(s => s.x === nextPos.x && s.y === nextPos.y);
@@ -110,6 +113,7 @@ function countOpenNeighbors(pos: Position, state: GameState, gridSize: number): 
   for (const d of ALL_DIRECTIONS) {
     const p = getNextHeadPosition(pos, d);
     if (!isCellInArena(p, gridSize, state.ringInset)) continue;
+    if (state.walls?.some(wall => wall.x === p.x && wall.y === p.y)) continue;
     if (state.snakes.p1.body.some(s => s.x === p.x && s.y === p.y)) continue;
     if (state.snakes.p2.body.some(s => s.x === p.x && s.y === p.y)) continue;
     count++;

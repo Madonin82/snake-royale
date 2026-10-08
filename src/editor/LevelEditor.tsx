@@ -1,6 +1,11 @@
 import React, { useState, useRef, useEffect, useCallback } from 'react';
 import { Position, Direction } from '../types/game';
 import { CampaignLevel } from './levelSchema';
+import {
+  createCampaignPlaytestState,
+  getCampaignPlaytestLevel,
+  setCampaignPlaytestLevel,
+} from './playtestSession';
 
 type Tool = 'WALL' | 'TOKEN' | 'P1_SPAWN' | 'P2_SPAWN' | 'ERASER';
 
@@ -51,10 +56,10 @@ const DEFAULT_LEVEL: CampaignLevel = {
 };
 
 export const LevelEditor: React.FC = () => {
-  const [level, setLevel] = useState<CampaignLevel>(() => ({ ...DEFAULT_LEVEL }));
+  const [level, setLevel] = useState<CampaignLevel>(() => getCampaignPlaytestLevel() ?? { ...DEFAULT_LEVEL });
   const [activeTool, setActiveTool] = useState<Tool>('WALL');
   const [isMouseDown, setIsMouseDown] = useState(false);
-  const [bonusText, setBonusText] = useState<string>(() => DEFAULT_LEVEL.objectives.bonus.join('\n'));
+  const [bonusText, setBonusText] = useState<string>(() => level.objectives.bonus.join('\n'));
   const [statusMessage, setStatusMessage] = useState<string>('READY');
   const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -285,6 +290,17 @@ export const LevelEditor: React.FC = () => {
     setLevel({ ...DEFAULT_LEVEL });
     setBonusText(DEFAULT_LEVEL.objectives.bonus.join('\n'));
     showStatus('RESET TO DEFAULTS');
+  };
+
+  const handlePlaytest = () => {
+    try {
+      createCampaignPlaytestState(level);
+    } catch (error) {
+      showStatus(error instanceof Error ? error.message : 'INVALID LEVEL FOR PLAYTEST');
+      return;
+    }
+    setCampaignPlaytestLevel(level);
+    window.location.hash = '#/level-editor/playtest';
   };
 
   return (
@@ -723,6 +739,14 @@ export const LevelEditor: React.FC = () => {
       {/* Bottom Bar: Action Buttons */}
       <footer className="flex items-center justify-between px-4 py-2.5 bg-[#9BBC0F] border-t-4 border-[#0F380F] shrink-0">
         <div className="flex items-center gap-3">
+          <button
+            type="button"
+            onClick={handlePlaytest}
+            className="px-4 py-1.5 bg-[#0F380F] text-[#9BBC0F] font-black text-xs hover:bg-[#306230] border-2 border-[#0F380F] active:translate-y-0.5"
+          >
+            ▶ PLAYTEST
+          </button>
+
           <button
             type="button"
             onClick={handleExportJson}

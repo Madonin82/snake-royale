@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { GameState, PlayMode } from '../types/game';
 import { GamepadMenuAction } from '../game/gamepad';
 import { soundEngine } from '../audio/soundEngine';
-import { RotateCcw, Home, Trophy, AlertTriangle, Play } from 'lucide-react';
+import { RotateCcw, Home, Trophy, AlertTriangle, Play, ArrowLeft } from 'lucide-react';
 import { computeMatchStats, computeTurnLedger, MatchSummaryStats, TurnLedgerEntry } from '../game/stats';
 import { TurnDecision } from '../game/replayFile';
 
@@ -17,6 +17,7 @@ interface MatchEndModalProps {
   onWatchReplay?: () => void;
   onRematch: () => void;
   onReturnToLobby: () => void;
+  onReturnToEditor?: () => void;
   onExportReplay?: () => void;
   onRegisterHandler?: (handler: ((action: GamepadMenuAction) => void) | null) => void;
   matchHistory?: GameState[];
@@ -128,12 +129,14 @@ export const MatchEndModal: React.FC<MatchEndModalProps> = ({
   onWatchReplay,
   onRematch,
   onReturnToLobby,
+  onReturnToEditor,
   onExportReplay,
   onRegisterHandler,
   matchHistory = [],
   turnDecisions = [],
 }) => {
   const { p1, p2 } = gameState.snakes;
+  const handleReturn = onReturnToEditor ?? onReturnToLobby;
   const isDraw = gameState.winner === 'DRAW';
   const winnerSnake = gameState.winner === 'p1' ? p1 : gameState.winner === 'p2' ? p2 : null;
   
@@ -179,14 +182,14 @@ export const MatchEndModal: React.FC<MatchEndModalProps> = ({
           onConfirm();
         } else if (action === 'CANCEL') {
           soundEngine.playMenuBack();
-          onReturnToLobby();
+          handleReturn();
         }
         return;
       }
 
       if (action === 'CANCEL') {
         soundEngine.playMenuBack();
-        onReturnToLobby();
+        handleReturn();
         return;
       }
 
@@ -211,7 +214,7 @@ export const MatchEndModal: React.FC<MatchEndModalProps> = ({
         } else if (currentBtn === 'REMATCH') {
           onRematch();
         } else if (currentBtn === 'LOBBY') {
-          onReturnToLobby();
+          handleReturn();
         }
       }
     };
@@ -220,7 +223,7 @@ export const MatchEndModal: React.FC<MatchEndModalProps> = ({
     return () => {
       onRegisterHandler?.(null);
     };
-  }, [gameState.phase, confirmed, onConfirm, currentBtn, onWatchReplay, onExportReplay, onRematch, onReturnToLobby, buttons.length, onRegisterHandler]);
+  }, [gameState.phase, confirmed, onConfirm, currentBtn, onWatchReplay, onExportReplay, onRematch, handleReturn, buttons.length, onRegisterHandler]);
 
   if (gameState.phase !== 'OVER') return null;
 
@@ -397,7 +400,7 @@ export const MatchEndModal: React.FC<MatchEndModalProps> = ({
           <button
             onClick={() => {
               soundEngine.playMenuBack();
-              onReturnToLobby();
+              handleReturn();
             }}
             onMouseEnter={() => setFocusIndex(buttons.indexOf('LOBBY'))}
             className={`w-full py-2.5 [@media(max-height:520px)]:py-2 px-2 border-2 border-[#0F380F] font-bold text-xs sm:text-sm flex items-center justify-center gap-1.5 cursor-pointer transition-colors shadow-[2px_2px_0px_#0F380F] ${
@@ -407,8 +410,10 @@ export const MatchEndModal: React.FC<MatchEndModalProps> = ({
             }`}
           >
             {currentBtn === 'LOBBY' && <span className="animate-pulse">►</span>}
-            <Home className="w-4 h-4 shrink-0" />
-            <span>RETURN TO LOBBY</span>
+            {onReturnToEditor
+              ? <ArrowLeft className="w-4 h-4 shrink-0" />
+              : <Home className="w-4 h-4 shrink-0" />}
+            <span>{onReturnToEditor ? 'RETURN TO EDITOR' : 'RETURN TO LOBBY'}</span>
             {currentBtn === 'LOBBY' && (
               <span className="text-[9px] bg-[#9BBC0F] text-[#0F380F] px-1 font-bold">[B]</span>
             )}

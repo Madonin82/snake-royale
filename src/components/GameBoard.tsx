@@ -85,6 +85,14 @@ export const GameBoard: React.FC<GameBoardProps> = ({
       }
     }
 
+    // Campaign playtest walls are permanent cells within the arena.
+    for (const wall of gameState.walls ?? []) {
+      ctx.fillStyle = GAMEBOY_COLORS.DARKEST;
+      ctx.fillRect(wall.x * cellSize, wall.y * cellSize, cellSize, cellSize);
+      ctx.fillStyle = GAMEBOY_COLORS.DARK;
+      ctx.fillRect(wall.x * cellSize + 4, wall.y * cellSize + 4, cellSize - 8, cellSize - 8);
+    }
+
     // 5. Render Tokens (Escalating Round Tokens)
     const tokenBlink = !animationsDisabled && Math.floor(Date.now() / 250) % 2 === 0;
     for (const token of gameState.tokens) {

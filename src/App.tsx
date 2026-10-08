@@ -39,6 +39,12 @@ import { MatchEndModal } from './components/MatchEndModal';
 import { ControlsOverlay } from './components/ControlsOverlay';
 import { ReplayControls } from './components/ReplayControls';
 import { LevelEditor } from './editor/LevelEditor';
+import { CampaignLevel } from './editor/levelSchema';
+import {
+  createCampaignPlaytestState,
+  getCampaignPlaytestLevel,
+  getCampaignPlaytestSettings,
+} from './editor/playtestSession';
 import { ArrowLeft, Volume2, VolumeX } from 'lucide-react';
 
 function computePreviewSnake(snake: any, buffer: Direction[]): Position[] {
@@ -85,7 +91,13 @@ export const App: React.FC = () => {
     return onAuthStateChanged(auth, setSignedInUser);
   }, []);
 
-  if (currentHash === '#/level-editor') {
+  const campaignPlaytestLevel = currentHash === '#/level-editor/playtest'
+    ? getCampaignPlaytestLevel()
+    : null;
+  const isEditorRoute = currentHash === '#/level-editor' ||
+    (currentHash === '#/level-editor/playtest' && !campaignPlaytestLevel);
+
+  if (isEditorRoute) {
     const isAdmin = Boolean(signedInUser && ADMIN_UIDS.includes(signedInUser.uid));
     if (isAdmin) {
       return <LevelEditor />;
@@ -111,11 +123,25 @@ export const App: React.FC = () => {
     );
   }
 
+  return <GameApp campaignPlaytestLevel={campaignPlaytestLevel} />;
+};
+
+const GameApp: React.FC<{ campaignPlaytestLevel: CampaignLevel | null }> = ({ campaignPlaytestLevel }) => {
   const aiMode = useMemo(() => new URLSearchParams(window.location.search).get('ai') === '1', []);
   const initialRoomParam = useMemo(() => new URLSearchParams(window.location.search).get('room') || '', []);
-  const [settings, setSettings] = useState<GameSettings>(DEFAULT_SETTINGS);
+  const initialCampaignSettings = useMemo(
+    () => campaignPlaytestLevel ? getCampaignPlaytestSettings(campaignPlaytestLevel) : null,
+    [campaignPlaytestLevel],
+  );
+  const initialCampaignState = useMemo(
+    () => campaignPlaytestLevel && initialCampaignSettings
+      ? createCampaignPlaytestState(campaignPlaytestLevel, initialCampaignSettings)
+      : null,
+    [campaignPlaytestLevel, initialCampaignSettings],
+  );
+  const [settings, setSettings] = useState<GameSettings>(initialCampaignSettings ?? DEFAULT_SETTINGS);
   const [playMode, setPlayMode] = useState<PlayMode>('SOLO_AI');
-  const [inLobby, setInLobby] = useState<boolean>(true);
+  const [inLobby, setInLobby] = useState<boolean>(!campaignPlaytestLevel);
   const [inOnlineLobby, setInOnlineLobby] = useState<boolean>(false);
   const [showTurnHint, setShowTurnHint] = useState<boolean>(() => {
     try { return localStorage.getItem('snake-royale-turn-hint-dismissed') !== 'true'; } catch { return true; }
@@ -127,7 +153,9 @@ export const App: React.FC = () => {
   const [hasP2, setHasP2] = useState<boolean>(false);
   const [spectatorsCount, setSpectatorsCount] = useState<number>(0);
 
-  const [gameState, setGameState] = useState<GameState>(() => createLobbyState(DEFAULT_SETTINGS));
+  const [gameState, setGameState] = useState<GameState>(() =>
+    initialCampaignState ?? createLobbyState(initialCampaignSettings ?? DEFAULT_SETTINGS)
+  );
   const [gameOverConfirmed, setGameOverConfirmed] = useState(false);
   const [latencyModalOpen, setLatencyModalOpen] = useState<boolean>(false);
   const [settingsModalOpen, setSettingsModalOpen] = useState<boolean>(false);
@@ -155,7 +183,9 @@ export const App: React.FC = () => {
   const seriesCountedRef = useRef<boolean>(false);
 
   // MATCH REPLAY: recorded states
-  const [matchHistory, setMatchHistory] = useState<GameState[]>([]);
+  const [matchHistory, setMatchHistory] = useState<GameState[]>(() =>
+    initialCampaignState ? [initialCampaignState] : []
+  );
   const turnDecisionsRef = useRef<TurnDecision[]>([]);
   const agentDrivenRef = useRef<{ p1: boolean; p2: boolean }>({ p1: false, p2: false });
   const [replayActive, setReplayActive] = useState<boolean>(false);
@@ -902,6 +932,10 @@ export const App: React.FC = () => {
   }, []);
 
   const handleReturnToLobby = useCallback(() => {
+    if (campaignPlaytestLevel) {
+      window.location.hash = '#/level-editor';
+      return;
+    }
     setGameOverConfirmed(false);
     if (playModeRef.current === 'ONLINE_HOST' || playModeRef.current === 'ONLINE_JOIN' || playModeRef.current === 'ONLINE_SERVER' || playModeRef.current === 'ONLINE_SPECTATOR') {
       networkManager.disconnect();
@@ -920,7 +954,7 @@ export const App: React.FC = () => {
     setLatencyModalOpen(false);
     turnDecisionsRef.current = [];
     agentDrivenRef.current = { p1: false, p2: false };
-  }, []);
+  }, [campaignPlaytestLevel]);
 
   const handleMenuAction = useCallback((action: GamepadMenuAction, _slot: 1 | 2) => {
     const isUiActive =
@@ -1526,7 +1560,9 @@ export const App: React.FC = () => {
         : { p1: playerNamesRef.current.p1 || 'PLAYER 1', p2: me || 'PLAYER 2' };
     }
     const isOnline = playMode === 'ONLINE_HOST' || playMode === 'ONLINE_JOIN' || playMode === 'ONLINE_SERVER';
-    const initial = createInitialState(settingsRef.current, matchNames);
+    const initial = campaignPlaytestLevel
+      ? createCampaignPlaytestState(campaignPlaytestLevel, settingsRef.current, matchNames)
+      : createInitialState(settingsRef.current, matchNames);
     if (isOnline) {
       initial.readyConfirmed = { p1: false, p2: false };
     } else {
@@ -1771,7 +1807,7 @@ export const App: React.FC = () => {
               className="flex items-center gap-1 bg-[#9BBC0F] hover:bg-[#0F380F] hover:text-[#9BBC0F] px-1.5 py-0.5 border border-[#0F380F] cursor-pointer"
             >
               <ArrowLeft className="w-3.5 h-3.5" />
-              <span>LOBBY</span>
+              <span>{campaignPlaytestLevel ? 'EDITOR' : 'LOBBY'}</span>
             </button>
           )}
           <span className="tracking-wider">SNAKE ROYALE v1.0</span>
@@ -1997,6 +2033,7 @@ export const App: React.FC = () => {
           }}
           onRematch={handleRematch}
           onReturnToLobby={handleReturnToLobby}
+          onReturnToEditor={campaignPlaytestLevel ? handleReturnToLobby : undefined}
           onExportReplay={handleExportReplay}
           onRegisterHandler={(h) => { activeHandlerRef.current = h; }}
           matchHistory={matchHistory}

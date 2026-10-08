@@ -35,6 +35,7 @@ export function normalizeGameState(state: GameState): GameState {
   return {
     ...state,
     tokens: asPositionArray((state as GameState).tokens),
+    walls: asPositionArray((state as GameState).walls),
     snakes: {
       p1: { ...snakes?.p1, body: asPositionArray(snakes?.p1?.body) },
       p2: { ...snakes?.p2, body: asPositionArray(snakes?.p2?.body) },

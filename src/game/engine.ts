@@ -115,7 +115,8 @@ export function spawnTokens(
   gridSize: number,
   ringInset: number,
   snakes: Snake[],
-  existingTokens: Position[]
+  existingTokens: Position[],
+  walls: Position[] = [],
 ): Position[] {
   const occupied = new Set<string>();
 
@@ -129,6 +130,10 @@ export function spawnTokens(
   // Add existing tokens to occupied
   for (const token of existingTokens) {
     occupied.add(`${token.x},${token.y}`);
+  }
+
+  for (const wall of walls) {
+    occupied.add(`${wall.x},${wall.y}`);
   }
 
   // Find all valid available cells within the current ringInset boundary
@@ -336,8 +341,10 @@ export function processGameTick(
   const p2WillGrow = state.tokens.some(t => t.x === nextHeadP2.x && t.y === nextHeadP2.y);
 
   // Check Wall / Shrink Arena bounds
-  const p1HitWall = !isCellInArena(nextHeadP1, settings.gridSize, state.ringInset);
-  const p2HitWall = !isCellInArena(nextHeadP2, settings.gridSize, state.ringInset);
+  const isPermanentWall = (position: Position) =>
+    state.walls?.some(wall => wall.x === position.x && wall.y === position.y) ?? false;
+  const p1HitWall = !isCellInArena(nextHeadP1, settings.gridSize, state.ringInset) || isPermanentWall(nextHeadP1);
+  const p2HitWall = !isCellInArena(nextHeadP2, settings.gridSize, state.ringInset) || isPermanentWall(nextHeadP2);
 
   // Check Self Collision (tail excluded unless growing this tick)
   const p1SelfBody = p1WillGrow ? p1.body : p1.body.slice(0, -1);
@@ -435,7 +442,7 @@ export function processGameTick(
   // 8. ESCALATE TOKEN SPAWNS (Only during Phase 1 Racing)
   if (state.phase === 'RACING' && state.tokens.length === 0) {
     state.round += 1;
-    const newTokens = spawnTokens(state.round, settings.gridSize, state.ringInset, [p1, p2], []);
+    const newTokens = spawnTokens(state.round, settings.gridSize, state.ringInset, [p1, p2], [], state.walls);
     state.tokens.push(...newTokens);
   }
 
