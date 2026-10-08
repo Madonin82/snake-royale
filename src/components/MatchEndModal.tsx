@@ -7,6 +7,8 @@ import { RotateCcw, Home, Trophy, AlertTriangle, Play } from 'lucide-react';
 interface MatchEndModalProps {
   gameState: GameState;
   playMode: PlayMode;
+  confirmed: boolean;
+  onConfirm: () => void;
   series?: { p1: number; p2: number; draws: number };
   canReplay?: boolean;
   isSpectator?: boolean;
@@ -20,6 +22,8 @@ interface MatchEndModalProps {
 export const MatchEndModal: React.FC<MatchEndModalProps> = ({
   gameState,
   playMode,
+  confirmed,
+  onConfirm,
   series,
   canReplay,
   isSpectator,
@@ -62,6 +66,17 @@ export const MatchEndModal: React.FC<MatchEndModalProps> = ({
     }
 
     const handleAction = (action: GamepadMenuAction) => {
+      if (!confirmed) {
+        if (action === 'CONFIRM' || action === 'START') {
+          soundEngine.playMenuSelect();
+          onConfirm();
+        } else if (action === 'CANCEL') {
+          soundEngine.playMenuBack();
+          onReturnToLobby();
+        }
+        return;
+      }
+
       if (action === 'CANCEL') {
         soundEngine.playMenuBack();
         onReturnToLobby();
@@ -98,9 +113,25 @@ export const MatchEndModal: React.FC<MatchEndModalProps> = ({
     return () => {
       onRegisterHandler?.(null);
     };
-  }, [gameState.phase, currentBtn, onWatchReplay, onExportReplay, onRematch, onReturnToLobby, buttons.length, onRegisterHandler]);
+  }, [gameState.phase, confirmed, onConfirm, currentBtn, onWatchReplay, onExportReplay, onRematch, onReturnToLobby, buttons.length, onRegisterHandler]);
 
   if (gameState.phase !== 'OVER') return null;
+
+  if (!confirmed) {
+    return (
+      <div className="fixed inset-0 z-50 flex items-center justify-center p-4 pointer-events-none font-mono select-none">
+        <button
+          onClick={() => {
+            soundEngine.playMenuSelect();
+            onConfirm();
+          }}
+          className="pointer-events-auto px-5 py-3 bg-[#9BBC0F] border-4 border-[#0F380F] shadow-[4px_4px_0px_#0F380F] text-[#0F380F] font-black text-sm tracking-wider cursor-pointer hover:bg-[#8BAC0F] focus-visible:outline-4 focus-visible:outline-[#0F380F]"
+        >
+          SHOW RESULTS
+        </button>
+      </div>
+    );
+  }
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-xs font-mono select-none">

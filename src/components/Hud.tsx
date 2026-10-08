@@ -115,8 +115,10 @@ export const Hud: React.FC<HudProps> = ({
       </div>
 
       <div className="flex items-center gap-2 min-w-0">
-        {gameState.turnBased && gameState.phase !== 'OVER' && (
-          <span className="hidden lg:inline text-[9px] opacity-80 whitespace-nowrap">BOTH LOCK → BOARD STEPS</span>
+        {gameState.turnBased && (
+          <span className="hidden lg:inline text-[9px] opacity-80 whitespace-nowrap">
+            {gameState.phase === 'OVER' ? 'GAME!' : 'BOTH LOCK → BOARD STEPS'}
+          </span>
         )}
 
         <div className="whitespace-nowrap text-xs md:text-sm font-black tracking-widest bg-[#9BBC0F] px-2 py-0.5 border border-[#0F380F]">
@@ -300,9 +302,9 @@ export const Hud: React.FC<HudProps> = ({
           </span>
         </div>
         {topStripContent}
-        {gameState.turnBased && gameState.phase !== 'OVER' && (
+        {gameState.turnBased && (
           <div className="turn-instruction md:hidden text-center text-[10px] font-bold bg-[#8BAC0F] px-2 py-0.5 border-x-2 border-b-2 border-[#0F380F] w-full">
-            BOTH LOCK → BOARD STEPS
+            {gameState.phase === 'OVER' ? 'GAME!' : 'BOTH LOCK → BOARD STEPS'}
           </div>
         )}
       </div>

@@ -81,11 +81,18 @@ export const App: React.FC = () => {
   const [spectatorsCount, setSpectatorsCount] = useState<number>(0);
 
   const [gameState, setGameState] = useState<GameState>(() => createLobbyState(DEFAULT_SETTINGS));
+  const [gameOverConfirmed, setGameOverConfirmed] = useState(false);
   const [latencyModalOpen, setLatencyModalOpen] = useState<boolean>(false);
   const [settingsModalOpen, setSettingsModalOpen] = useState<boolean>(false);
   const [latencyReport, setLatencyReport] = useState<LatencyReport>(() => networkManager.getLatencyReport());
   const [gamepadCount, setGamepadCount] = useState<number>(0);
   const [isNintendoController, setIsNintendoController] = useState<boolean>(false);
+
+  useEffect(() => {
+    if (gameState.phase !== 'OVER' || inLobby || inOnlineLobby) {
+      setGameOverConfirmed(false);
+    }
+  }, [gameState.phase, inLobby, inOnlineLobby]);
 
   // Optional display name + room seat names + series score
   const [displayName, setDisplayName] = useState<string>(() => {
@@ -823,6 +830,7 @@ export const App: React.FC = () => {
   }, []);
 
   const handleReturnToLobby = useCallback(() => {
+    setGameOverConfirmed(false);
     if (playModeRef.current === 'ONLINE_HOST' || playModeRef.current === 'ONLINE_JOIN' || playModeRef.current === 'ONLINE_SERVER' || playModeRef.current === 'ONLINE_SPECTATOR') {
       networkManager.disconnect();
       setBridgeSecret(null);
@@ -1426,6 +1434,7 @@ export const App: React.FC = () => {
   }, []);
 
   const startNewMatch = () => {
+    setGameOverConfirmed(false);
     activeHandlerRef.current = null;
     soloAiP2OverriddenRef.current = playMode === 'SOLO_AI' && bridgeSeatRef.current === 'p2';
     const me = displayName.trim();
@@ -1602,6 +1611,7 @@ export const App: React.FC = () => {
   };
 
   const handleLeaveRoom = () => {
+    setGameOverConfirmed(false);
     networkManager.disconnect();
     setBridgeSecret(null);
     setInOnlineLobby(false);
@@ -1869,6 +1879,8 @@ export const App: React.FC = () => {
         <MatchEndModal
           gameState={gameState}
           playMode={playMode}
+          confirmed={gameOverConfirmed}
+          onConfirm={() => setGameOverConfirmed(true)}
           series={series}
           canReplay={matchHistory.length > 1}
           isSpectator={playMode === 'ONLINE_SPECTATOR'}

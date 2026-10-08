@@ -111,7 +111,17 @@ export const GameBoard: React.FC<GameBoardProps> = ({
     renderSnake(ctx, gameState.snakes.p1, cellSize, '#0F380F', '#8BAC0F', 'P1');
     renderSnake(ctx, gameState.snakes.p2, cellSize, '#306230', '#9BBC0F', 'P2');
 
-    // 8. Outer Frame Border
+    // 8. Mark dead snake heads after the sprites so the death marker stays visible.
+    if (gameState.phase === 'OVER') {
+      for (const snake of [gameState.snakes.p1, gameState.snakes.p2]) {
+        const head = snake.body[0];
+        if (!snake.isAlive && head) {
+          renderDeathMarker(ctx, head.x * cellSize, head.y * cellSize, cellSize);
+        }
+      }
+    }
+
+    // 9. Outer Frame Border
     ctx.strokeStyle = GAMEBOY_COLORS.DARKEST;
     ctx.lineWidth = 4;
     ctx.strokeRect(2, 2, boardPixelSize - 4, boardPixelSize - 4);
@@ -268,6 +278,23 @@ function renderSnake(
     ctx.fillRect(hx + cellSize - edge - eyeSize, hy + c - spread / 2 - eyeSize / 2, eyeSize, eyeSize);
     ctx.fillRect(hx + cellSize - edge - eyeSize, hy + c + spread / 2 - eyeSize / 2, eyeSize, eyeSize);
   }
+}
+
+function renderDeathMarker(ctx: CanvasRenderingContext2D, x: number, y: number, cellSize: number) {
+  ctx.save();
+  ctx.strokeStyle = '#FF0000';
+  ctx.lineWidth = 2;
+  ctx.strokeRect(x + 1, y + 1, cellSize - 2, cellSize - 2);
+
+  ctx.lineWidth = 3;
+  ctx.lineCap = 'square';
+  ctx.beginPath();
+  ctx.moveTo(x + 3, y + 3);
+  ctx.lineTo(x + cellSize - 3, y + cellSize - 3);
+  ctx.moveTo(x + cellSize - 3, y + 3);
+  ctx.lineTo(x + 3, y + cellSize - 3);
+  ctx.stroke();
+  ctx.restore();
 }
 
 function renderToken(ctx: CanvasRenderingContext2D, x: number, y: number, cellSize: number, blink: boolean) {
