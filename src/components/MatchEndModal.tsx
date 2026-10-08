@@ -119,7 +119,7 @@ export const MatchEndModal: React.FC<MatchEndModalProps> = ({
 
   if (!confirmed) {
     return (
-      <div className="fixed inset-0 z-50 flex items-center justify-center p-4 pointer-events-none font-mono select-none">
+      <div className="fixed inset-x-0 bottom-4 z-50 flex justify-center px-4 pointer-events-none font-mono select-none">
         <button
           onClick={() => {
             soundEngine.playMenuSelect();

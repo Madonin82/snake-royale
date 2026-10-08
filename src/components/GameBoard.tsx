@@ -114,9 +114,9 @@ export const GameBoard: React.FC<GameBoardProps> = ({
     // 8. Mark dead snake heads after the sprites so the death marker stays visible.
     if (gameState.phase === 'OVER') {
       for (const snake of [gameState.snakes.p1, gameState.snakes.p2]) {
-        const head = snake.body[0];
-        if (!snake.isAlive && head) {
-          renderDeathMarker(ctx, head.x * cellSize, head.y * cellSize, cellSize);
+        const pos = snake.deathPosition || snake.body[0];
+        if (!snake.isAlive && pos) {
+          renderDeathMarker(ctx, pos.x * cellSize, pos.y * cellSize, cellSize);
         }
       }
     }

@@ -15,6 +15,7 @@ export interface Snake {
   isAlive: boolean;
   color: string; // Game Boy shade
   deathReason?: 'WALL' | 'SELF' | 'OPPONENT' | 'SHRINK' | 'HEAD_ON';
+  deathPosition?: Position;
 }
 
 export type GamePhase = 'LOBBY' | 'RACING' | 'SHRINKING' | 'OVER';
