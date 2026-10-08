@@ -60,10 +60,6 @@ export const OnlineRoomLobby: React.FC<OnlineRoomLobbyProps> = ({
     if (!signedInUser || !ADMIN_UIDS.includes(signedInUser.uid)) return;
     const roomsRef = ref(rtdb, 'rooms');
     const unsubscribe = onValue(roomsRef, (snapshot) => {
-      if (!snapshot.exists()) {
-        setAdminRooms([]);
-        return;
-      }
       const val = snapshot.val() || {};
       const list = Object.entries(val).map(([id, rData]: [string, any]) => {
         const hasP1 = !!rData?.hasP1;
