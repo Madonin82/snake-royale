@@ -1109,7 +1109,14 @@ const GameApp: React.FC<{ campaignPlaytestLevel: CampaignLevel | null }> = ({ ca
         return;
       }
       if (e.key === 'Enter' || e.key === ' ') {
-        const isOnline = playModeRef.current === 'ONLINE_HOST' || playModeRef.current === 'ONLINE_JOIN' || playModeRef.current === 'ONLINE_SERVER';
+        const playMode = playModeRef.current;
+        if (playMode === 'LOCAL_2P') {
+          handleBufferLock(e.key === ' ' ? 2 : 1);
+          e.preventDefault();
+          return;
+        }
+
+        const isOnline = playMode === 'ONLINE_HOST' || playMode === 'ONLINE_JOIN' || playMode === 'ONLINE_SERVER';
         const ready = stateRef.current.readyConfirmed;
         const mySeat = onlineRoleRef.current === 'p2' ? 'p2' : 'p1';
         if (isOnline && (!ready || !ready[mySeat])) {
