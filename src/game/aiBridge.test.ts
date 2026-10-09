@@ -81,3 +81,16 @@ test('RTDB bridge command validation rejects malformed commands', () => {
     false,
   );
 });
+
+test('equippedSkill and pendingSkill survive compact state', () => {
+  const state = createInitialState();
+  const p1 = state.snakes.find(snake => snake.id === 'p1')!;
+  p1.equippedSkill = 'dart';
+  p1.pendingSkill = { skillId: 'dart', direction: 'RIGHT' };
+
+  const compact = toCompactGameState(state, { p1: true, p2: false });
+
+  const cp1 = (compact.snakes as Record<string, { equippedSkill: unknown; pendingSkill: unknown }>)['p1'];
+  assert.equal(cp1.equippedSkill, 'dart');
+  assert.deepEqual(cp1.pendingSkill, { skillId: 'dart', direction: 'RIGHT' });
+});

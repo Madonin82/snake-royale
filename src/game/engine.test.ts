@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { createInitialState, DEFAULT_SETTINGS, getHitstopForTransition, processGameTick } from './engine';
+import { createInitialState, DEFAULT_SETTINGS, getHitstopForTransition, processGameTick, queueSnakeSkill } from './engine';
 import { GameState, GameSettings, Position } from '../types/game';
 
 function runDeathTick(
@@ -144,3 +144,61 @@ test('getHitstopForTransition returns 100ms for token pickup, 300ms for regular 
   });
 });
 
+
+test('dart moves 3 total cells (1 normal + 2 dart)', () => {
+  const state = createInitialState();
+  const settings = { ...DEFAULT_SETTINGS, skillsAvailable: 'immediate' as const };
+  state.tokens = [];
+  state.skillsAvailable = 'immediate';
+  const p1 = state.snakes.find(snake => snake.id === 'p1')!;
+  p1.body = [{ x: 2, y: 5 }, { x: 1, y: 5 }, { x: 0, y: 5 }];
+  p1.direction = 'RIGHT';
+  p1.equippedSkill = 'dart';
+  p1.score = 5;
+  // Move p2 out of the way
+  const p2 = state.snakes.find(snake => snake.id === 'p2')!;
+  p2.body = [{ x: 7, y: 0 }, { x: 7, y: 1 }, { x: 7, y: 2 }];
+  p2.direction = 'UP';
+  queueSnakeSkill(p1, { skillId: 'dart', direction: 'RIGHT' });
+  const result = processGameTick(state, settings, 0);
+  const after = result.nextState.snakes.find(snake => snake.id === 'p1')!;
+  assert.deepEqual(after.body[0], { x: 5, y: 5 });
+  assert.equal(after.score, 3);
+});
+
+test('dart applies token pickup before deducting cost', () => {
+  const state = createInitialState();
+  const settings = { ...DEFAULT_SETTINGS, skillsAvailable: 'immediate' as const };
+  state.skillsAvailable = 'immediate';
+  state.tokens = [{ x: 4, y: 5 }];
+  const p1 = state.snakes.find(snake => snake.id === 'p1')!;
+  p1.body = [{ x: 2, y: 5 }, { x: 1, y: 5 }, { x: 0, y: 5 }];
+  p1.direction = 'RIGHT';
+  p1.equippedSkill = 'dart';
+  p1.score = 2;
+  const p2 = state.snakes.find(snake => snake.id === 'p2')!;
+  p2.body = [{ x: 7, y: 0 }, { x: 7, y: 1 }, { x: 7, y: 2 }];
+  p2.direction = 'UP';
+  queueSnakeSkill(p1, { skillId: 'dart', direction: 'RIGHT' });
+  const result = processGameTick(state, settings, 0);
+  const after = result.nextState.snakes.find(snake => snake.id === 'p1')!;
+  // +1 pickup (now 3), -2 dart cost = 1
+  assert.equal(after.score, 1);
+  assert.equal(after.isAlive, true);
+});
+
+test('dart into wall kills the snake', () => {
+  const state = createInitialState();
+  const settings = { ...DEFAULT_SETTINGS, skillsAvailable: 'immediate' as const };
+  state.tokens = [];
+  state.skillsAvailable = 'immediate';
+  const p1 = state.snakes.find(snake => snake.id === 'p1')!;
+  p1.body = [{ x: 6, y: 5 }, { x: 5, y: 5 }, { x: 4, y: 5 }];
+  p1.direction = 'RIGHT';
+  p1.equippedSkill = 'dart';
+  p1.score = 5;
+  queueSnakeSkill(p1, { skillId: 'dart', direction: 'RIGHT' });
+  const result = processGameTick(state, settings, 0);
+  const after = result.nextState.snakes.find(snake => snake.id === 'p1')!;
+  assert.equal(after.isAlive, false);
+});
