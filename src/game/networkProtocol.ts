@@ -59,3 +59,13 @@ export function canAcceptState(
 export function isNewerSequence(incoming: number, current: number): boolean {
   return Number.isSafeInteger(incoming) && incoming > current;
 }
+
+export function sanitizeSettings<T extends Record<string, any>>(
+  settings: T | null | undefined,
+): Partial<T> | null {
+  if (!settings || typeof settings !== 'object') return null;
+  return Object.fromEntries(
+    Object.entries(settings).filter(([, value]) => value !== undefined),
+  ) as Partial<T>;
+}
+

@@ -1,6 +1,6 @@
 import { Direction, GameState, LatencyReport, LatencySample } from '../types/game';
 import { rtdb, initAuth } from '../firebase';
-import { canAcceptState, canAdoptMatch, isCurrentMatch, isNewerSequence, MatchIdentity } from './networkProtocol';
+import { canAcceptState, canAdoptMatch, isCurrentMatch, isNewerSequence, MatchIdentity, sanitizeSettings } from './networkProtocol';
 import {
   ref,
   set,
@@ -129,9 +129,7 @@ export class NetworkManager {
         p2Name = this.role === 'p2' && cleanName ? cleanName : null;
 
         createdRoom = true;
-        const settings = hostSettings
-          ? Object.fromEntries(Object.entries(hostSettings).filter(([, value]) => value !== undefined))
-          : null;
+        const settings = sanitizeSettings(hostSettings);
         await set(roomRef, {
           createdAt: Date.now(),
           p1Uid: this.role === 'p1' ? uid : null,
@@ -917,9 +915,10 @@ export class NetworkManager {
 
   public updateRoomSettings(settings: any) {
     if (!this.isConnected || !this.roomId || (this.role !== 'p1' && this.role !== 'server')) return;
+    const sanitizedSettings = sanitizeSettings(settings);
     const roomRef = ref(rtdb, `rooms/${this.roomId}`);
     update(roomRef, {
-      settings,
+      settings: sanitizedSettings,
       lastActive: Date.now(),
     }).catch(() => {});
 
@@ -927,7 +926,7 @@ export class NetworkManager {
       try {
         this.dataChannel.send(JSON.stringify({
           type: 'SETTINGS_SYNC',
-          settings,
+          settings: sanitizedSettings,
         }));
       } catch {}
     }
@@ -948,6 +947,7 @@ export class NetworkManager {
     this.lastReceivedInputSequence = { p1: 0, p2: 0 };
     const stateRevision = this.nextStateRevision;
     const timestamp = Date.now();
+    const sanitizedSettings = sanitizeSettings(settings);
 
     this.withOrderedSimulation(() => {
       if (connectionGeneration !== this.connectionGeneration) return;
@@ -957,7 +957,7 @@ export class NetworkManager {
         matchNumber,
         stateRevision,
         state: initialState,
-        settings,
+        settings: sanitizedSettings,
         status: 'racing',
         timestamp,
       };
@@ -968,7 +968,7 @@ export class NetworkManager {
         matchId,
         matchNumber,
         matchStartTrigger: timestamp,
-        settings: settings || null,
+        settings: sanitizedSettings,
         matchStartAcks: { p2: null },
         lastActive: timestamp,
         // Clear the prior match's acknowledgment and ready flags before this start.

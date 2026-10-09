@@ -10,7 +10,44 @@ import {
   mergeOnlineReadyFlags,
   isNewerSequence,
   MatchIdentity,
+  sanitizeSettings,
 } from './networkProtocol';
+
+test('sanitizeSettings strips undefined keys while preserving null and defined values', () => {
+  const rawSettings = {
+    gridSize: 8,
+    turnBased: true,
+    thinkTimeSeconds: null,
+    levelId: undefined,
+    levelName: undefined,
+    aiStyle: undefined,
+    campaignAiDifficulties: undefined,
+  };
+  const sanitized = sanitizeSettings(rawSettings);
+  assert.deepEqual(sanitized, {
+    gridSize: 8,
+    turnBased: true,
+    thinkTimeSeconds: null,
+  });
+  assert.equal('levelId' in (sanitized ?? {}), false);
+  assert.equal('levelName' in (sanitized ?? {}), false);
+
+  const customLevelSettings = {
+    ...rawSettings,
+    levelId: 'lvl-1',
+    levelName: 'Arena One',
+  };
+  assert.deepEqual(sanitizeSettings(customLevelSettings), {
+    gridSize: 8,
+    turnBased: true,
+    thinkTimeSeconds: null,
+    levelId: 'lvl-1',
+    levelName: 'Arena One',
+  });
+
+  assert.equal(sanitizeSettings(undefined), null);
+  assert.equal(sanitizeSettings(null), null);
+});
 
 test('RTDB seat readiness merges into p1 and p2 without replacing other snake state', () => {
   assert.deepEqual(
