@@ -41,6 +41,37 @@
   image-rendering: crisp-edges;
 }
 
+.mobile-rotate-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 100;
+  align-items: center;
+  justify-content: center;
+  padding: 1rem;
+  background: #7b8860;
+  color: #0F380F;
+  font-family: 'VT323', monospace;
+  text-transform: uppercase;
+}
+
+@media (max-width: 767px), (pointer: coarse) and (max-width: 1024px) {
+  .mobile-scroll-panel {
+    max-height: 90dvh !important;
+    overflow-x: hidden !important;
+    overflow-y: auto !important;
+    overscroll-behavior-y: contain;
+  }
+  .mobile-scroll-panel > .flex-1 {
+    flex: none !important;
+  }
+}
+
+@media (orientation: landscape) and (pointer: coarse) and (max-width: 1024px) and (max-height: 700px) {
+  .mobile-rotate-overlay {
+    display: flex !important;
+  }
+}
+
 /* Match Viewport Responsive Layouts — single-screen, no page scroll.
    The match view locks to 100dvh (see <main> classes in App.tsx); the grid
    below distributes that fixed vertical budget.
@@ -118,6 +149,10 @@
     display: none !important;
   }
   .portrait-controls-row {
+    display: flex !important;
+    max-width: 520px;
+  }
+  .portrait-p2-controls-row {
     display: flex !important;
     max-width: 520px;
   }
@@ -203,6 +238,9 @@
     flex-shrink: 0;
   }
   .portrait-controls-row {
+    display: flex !important;
+  }
+  .portrait-p2-controls-row {
     display: flex !important;
   }
   .gameboard-area {

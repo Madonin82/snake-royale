@@ -15,6 +15,8 @@ interface HudProps {
   viewerSeat?: 'p1' | 'p2' | null;
   moveBuffers?: Record<string, Direction[]>;
   replayActive?: boolean;
+  onP2Undo?: () => void;
+  onP2Lock?: () => void;
 }
 
 export const Hud: React.FC<HudProps> = ({
@@ -29,6 +31,8 @@ export const Hud: React.FC<HudProps> = ({
   viewerSeat,
   moveBuffers,
   replayActive = false,
+  onP2Undo,
+  onP2Lock,
 }) => {
   // Who is "you" on this screen, per seat — drives the (YOU) tags.
   const seatTag = (seat: 'p1' | 'p2'): string => {
@@ -367,6 +371,39 @@ export const Hud: React.FC<HudProps> = ({
       </div>
 
       {renderMobileCards}
+
+      {playMode === 'LOCAL_2P' && (
+        <div className="portrait-p2-controls-row hidden w-full min-h-9 [@media(max-height:540px)]:min-h-7 items-center gap-1.5 font-mono select-none shrink-0">
+          <button
+            type="button"
+            onClick={onP2Undo}
+            disabled={!gameState.turnBased || isLocked('p2') || (moveBuffers?.p2?.length ?? 0) === 0}
+            className="shrink-0 h-9 [@media(max-height:540px)]:h-7 border-2 border-[#0F380F] bg-[#306230] px-2.5 text-[11px] font-black text-[#9BBC0F] disabled:opacity-40 cursor-pointer flex items-center justify-center"
+          >
+            P2 UNDO
+          </button>
+          <div className="flex min-w-0 min-h-9 [@media(max-height:540px)]:min-h-7 flex-1 flex-wrap items-center gap-1 border-2 border-dashed border-[#0F380F] bg-[#8BAC0F] px-2 py-1 text-[10px] font-bold text-[#0F380F] tabular-nums">
+            <span className="shrink-0">P2 QUEUE {moveBuffers?.p2?.length ?? 0}/{gameState.snakes.find(snake => snake.id === 'p2')?.body.length ?? 0}</span>
+            <span className="flex min-w-0 flex-wrap items-center gap-0.5">
+              {(moveBuffers?.p2 ?? []).map((direction, index) => (
+                <span key={`${direction}-${index}`} className="shrink-0 bg-[#0F380F] px-1 py-0.5 leading-none text-[#9BBC0F]">
+                  {direction === 'UP' ? '↑' : direction === 'DOWN' ? '↓' : direction === 'LEFT' ? '←' : '→'}
+                </span>
+              ))}
+              {(moveBuffers?.p2?.length ?? 0) === 0 && <span className="opacity-75 truncate">SWIPE / TAP TOP</span>}
+            </span>
+            {isLocked('p2') && <span className="shrink-0 bg-[#0F380F] text-[#9BBC0F] px-1 py-0.5 text-[9px] leading-none">LOCKED</span>}
+          </div>
+          <button
+            type="button"
+            onClick={onP2Lock}
+            disabled={!gameState.turnBased || isLocked('p2') || (moveBuffers?.p2?.length ?? 0) === 0}
+            className="shrink-0 h-9 [@media(max-height:540px)]:h-7 border-2 border-[#0F380F] bg-[#0F380F] px-2 text-[10px] font-black text-[#9BBC0F] disabled:opacity-40 cursor-pointer flex items-center justify-center"
+          >
+            P2 LOCK
+          </button>
+        </div>
+      )}
     </>
   );
 };

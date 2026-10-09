@@ -129,6 +129,18 @@ export const App: React.FC = () => {
 const GameApp: React.FC<{ campaignPlaytestLevel: CampaignLevel | null }> = ({ campaignPlaytestLevel }) => {
   const aiMode = useMemo(() => new URLSearchParams(window.location.search).get('ai') === '1', []);
   const initialRoomParam = useMemo(() => new URLSearchParams(window.location.search).get('room') || '', []);
+  useEffect(() => {
+    if (!window.matchMedia('(pointer: coarse) and (max-width: 1024px)').matches) return;
+
+    const orientation = screen.orientation as ScreenOrientation & {
+      lock?: (orientation: 'portrait') => Promise<void>;
+    };
+    if (!orientation || typeof orientation.lock !== 'function') return;
+
+    orientation.lock('portrait').catch(() => {
+      // The landscape overlay is the fallback when the browser blocks orientation locking.
+    });
+  }, []);
   const initialCampaignSettings = useMemo(
     () => campaignPlaytestLevel ? getCampaignPlaytestSettings(campaignPlaytestLevel) : null,
     [campaignPlaytestLevel],
@@ -1812,6 +1824,13 @@ const GameApp: React.FC<{ campaignPlaytestLevel: CampaignLevel | null }> = ({ ca
 
   return (
     <main className={`h-[100dvh] overflow-hidden flex flex-col items-center justify-between p-1.5 sm:p-3 [@media(max-height:500px)]:p-1 ${settings.crtFilterEnabled ? 'crt-overlay' : ''}`}>
+      <div className="mobile-rotate-overlay hidden" role="status" aria-live="polite">
+        <div className="flex flex-col items-center gap-3 border-4 border-[#0F380F] bg-[#9BBC0F] p-6 text-center shadow-[6px_6px_0px_#0F380F]">
+          <span className="text-4xl" aria-hidden="true">↻</span>
+          <span className="text-xl font-black tracking-wider">PLEASE ROTATE YOUR PHONE</span>
+          <span className="text-sm font-bold">SNAKE ROYALE IS DESIGNED FOR PORTRAIT PLAY</span>
+        </div>
+      </div>
       {/* Top Header Navbar */}
       <header className={`${isMatchView ? 'match-header' : ''} w-full max-w-[560px] shrink-0 flex items-center justify-between py-0.5 sm:py-1 px-2 border-b-2 border-[#0F380F] text-xs font-mono font-bold [@media(max-height:500px)]:py-0.5`}>
         <div className="flex items-center gap-2">
@@ -1901,6 +1920,8 @@ const GameApp: React.FC<{ campaignPlaytestLevel: CampaignLevel | null }> = ({ ca
                 moveBuffers={replayActive && replayDecisionQueues ? replayDecisionQueues : moveBuffers}
                 viewerSeat={viewerSeat}
                 replayActive={replayActive}
+                onP2Undo={() => handleBufferUndo(2)}
+                onP2Lock={() => handleBufferLock(2)}
               />
               <div className="gameboard-area relative">
                 <GameBoard
@@ -1908,8 +1929,9 @@ const GameApp: React.FC<{ campaignPlaytestLevel: CampaignLevel | null }> = ({ ca
                   settings={settings}
                   lockedPaths={lockedPaths}
                   controlSeat={playMode === 'ONLINE_JOIN' && onlineRole === 'p2' ? 'p2' : 'p1'}
-                  onDirection={(dir) => handleDirectionInput(1, dir)}
+                  onDirection={(dir, touchSeat) => handleDirectionInput(touchSeat === 'p2' ? 2 : 1, dir)}
                   interactionEnabled={!replayActive}
+                  splitTouchSeats={playMode === 'LOCAL_2P'}
                   animationsDisabled={aiMode}
                 />
                 {showTurnHint && displayState.turnBased && displayState.phase !== 'OVER' && !replayActive && (
@@ -1980,6 +2002,7 @@ const GameApp: React.FC<{ campaignPlaytestLevel: CampaignLevel | null }> = ({ ca
                     queueLimit={controlsSnake.body.length}
                     locked={locks[getTargetKey(1)]}
                     turnBased={settings.turnBased}
+                    localTwoPlayer={playMode === 'LOCAL_2P'}
                   />
                 )}
                 {replayActive && (

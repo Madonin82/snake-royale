@@ -11,10 +11,12 @@ interface ControlsOverlayProps {
   queueLimit: number;
   locked: boolean;
   turnBased: boolean;
+  localTwoPlayer?: boolean;
 }
 
 export const ControlsOverlay: React.FC<ControlsOverlayProps> = ({
   onDirection, onLock, onUndo, onClear, queue, queueLimit, locked, turnBased,
+  localTwoPlayer = false,
 }) => {
   return (
     <>
@@ -65,13 +67,25 @@ export const ControlsOverlay: React.FC<ControlsOverlayProps> = ({
           >
             Y
           </button>
-          <button
-            onClick={onLock}
-            className="absolute right-1 top-1/2 -translate-y-1/2 w-14 h-14 rounded-full bg-[#0F380F] active:bg-[#306230] text-[#9BBC0F] flex items-center justify-center border-2 border-[#0F380F] cursor-pointer font-black text-lg shadow-[2px_2px_0px_#306230]"
-            title="Lock in queued moves"
-          >
-            A
-          </button>
+          {localTwoPlayer ? (
+            <button
+              type="button"
+              onClick={onLock}
+              disabled={!turnBased || locked || queue.length === 0}
+              className="absolute right-0 top-1/2 -translate-y-1/2 w-16 h-10 rounded border-2 border-[#0F380F] bg-[#0F380F] text-[#9BBC0F] text-[10px] font-black disabled:opacity-40 cursor-pointer"
+              title="Lock P1's queued moves"
+            >
+              P1 LOCK
+            </button>
+          ) : (
+            <button
+              onClick={onLock}
+              className="absolute right-1 top-1/2 -translate-y-1/2 w-14 h-14 rounded-full bg-[#0F380F] active:bg-[#306230] text-[#9BBC0F] flex items-center justify-center border-2 border-[#0F380F] cursor-pointer font-black text-lg shadow-[2px_2px_0px_#306230]"
+              title="Lock in queued moves"
+            >
+              A
+            </button>
+          )}
           <button
             onClick={onUndo}
             className="absolute bottom-1 left-1/2 -translate-x-1/2 w-11 h-11 rounded-full bg-[#306230] active:bg-[#0F380F] text-[#9BBC0F] flex items-center justify-center border-2 border-[#0F380F] cursor-pointer font-black text-sm shadow-[2px_2px_0px_#0F380F]"
@@ -82,7 +96,7 @@ export const ControlsOverlay: React.FC<ControlsOverlayProps> = ({
         </div>
       </div>
       <div className="text-[9px] font-mono font-bold text-center mt-1.5 opacity-90 tracking-tight">
-        Plan: D-pad queue • B undo • Y clear • A lock
+        {localTwoPlayer ? 'Plan: D-pad P1 • B undo • Y clear • P1 LOCK' : 'Plan: D-pad queue • B undo • Y clear • A lock'}
       </div>
     </div>
     <div className="portrait-controls-row hidden w-full min-h-9 [@media(max-height:540px)]:min-h-7 items-center gap-1.5 font-mono select-none shrink-0">
@@ -95,7 +109,7 @@ export const ControlsOverlay: React.FC<ControlsOverlayProps> = ({
         UNDO
       </button>
       <div className="flex min-w-0 min-h-9 [@media(max-height:540px)]:min-h-7 flex-1 flex-wrap items-center gap-1 border-2 border-dashed border-[#0F380F] bg-[#8BAC0F] px-2 py-1 text-[10px] font-bold text-[#0F380F] tabular-nums">
-        <span className="shrink-0">QUEUE {queue.length}/{queueLimit}</span>
+        <span className="shrink-0">{localTwoPlayer ? 'P1 ' : ''}QUEUE {queue.length}/{queueLimit}</span>
         <span className="flex min-w-0 flex-wrap items-center gap-0.5">
           {queue.map((direction, index) => (
             <span key={`${direction}-${index}`} className="shrink-0 bg-[#0F380F] px-1 py-0.5 leading-none text-[#9BBC0F]">
@@ -106,14 +120,25 @@ export const ControlsOverlay: React.FC<ControlsOverlayProps> = ({
         </span>
         {locked && <span className="shrink-0 bg-[#0F380F] text-[#9BBC0F] px-1 py-0.5 text-[9px] leading-none">LOCKED</span>}
       </div>
-      <button
-        type="button"
-        onClick={onLock}
-        disabled={!turnBased || locked || queue.length === 0}
-        className="shrink-0 h-9 [@media(max-height:540px)]:h-7 border-2 border-[#0F380F] bg-[#0F380F] px-3 text-[11px] font-black text-[#9BBC0F] disabled:opacity-40 cursor-pointer flex items-center justify-center"
-      >
-        LOCK
-      </button>
+      {localTwoPlayer ? (
+        <button
+          type="button"
+          onClick={onLock}
+          disabled={!turnBased || locked || queue.length === 0}
+          className="shrink-0 h-9 [@media(max-height:540px)]:h-7 border-2 border-[#0F380F] bg-[#0F380F] px-1.5 text-[10px] font-black text-[#9BBC0F] disabled:opacity-40 cursor-pointer flex items-center justify-center"
+        >
+          P1 LOCK
+        </button>
+      ) : (
+        <button
+          type="button"
+          onClick={onLock}
+          disabled={!turnBased || locked || queue.length === 0}
+          className="shrink-0 h-9 [@media(max-height:540px)]:h-7 border-2 border-[#0F380F] bg-[#0F380F] px-3 text-[11px] font-black text-[#9BBC0F] disabled:opacity-40 cursor-pointer flex items-center justify-center"
+        >
+          LOCK
+        </button>
+      )}
     </div>
     </>
   );

@@ -176,7 +176,7 @@ export const OnlineRoomLobby: React.FC<OnlineRoomLobbyProps> = ({
   }, [currentBtn, canStart, bothPlayersReady, onStartMatch, onOpenSettings, onOpenLatencyHarness, onLeaveRoom, buttons.length, onRegisterHandler]);
 
   return (
-    <div className="w-full max-w-[440px] max-h-full bg-[#9BBC0F] border-4 border-[#0F380F] shadow-[8px_8px_0px_#0F380F] text-[#0F380F] p-3 sm:p-4 font-mono select-none flex flex-col justify-between gap-2 overflow-hidden">
+    <div className="mobile-scroll-panel w-full max-w-[440px] max-h-full bg-[#9BBC0F] border-4 border-[#0F380F] shadow-[8px_8px_0px_#0F380F] text-[#0F380F] p-3 sm:p-4 font-mono select-none flex flex-col justify-between gap-2 overflow-hidden">
       {/* Top bar */}
       <div className="flex items-center justify-between border-b-2 border-[#0F380F] pb-2">
         <button
@@ -266,7 +266,7 @@ export const OnlineRoomLobby: React.FC<OnlineRoomLobbyProps> = ({
         </div>
         {isQrModalOpen && (
           <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4" onClick={() => setIsQrModalOpen(false)}>
-            <div className="bg-[#8BAC0F] p-4 border-4 border-[#0F380F] flex flex-col items-center gap-2" onClick={e => e.stopPropagation()}>
+            <div className="mobile-scroll-panel bg-[#8BAC0F] p-4 border-4 border-[#0F380F] flex flex-col items-center gap-2" onClick={e => e.stopPropagation()}>
               <div className="text-xs font-black uppercase">SCAN TO JOIN</div>
               <div className="bg-white p-1 border-2 border-[#0F380F]">
                 <QRCodeSVG value={`https://madonin82.github.io/snake-royale/?room=${roomId}`} size={200} level="L" />
