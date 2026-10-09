@@ -258,6 +258,11 @@ export const Hud: React.FC<HudProps> = ({
                 );
               })
             )}
+            {canSeeMoves && snake.pendingSkill && (
+              <span className="px-1 py-0.5 bg-[#0F380F] text-[#9BBC0F] text-[10px] leading-tight font-bold border border-[#0F380F] shrink-0">
+                ⚡
+              </span>
+            )}
           </div>
         </div>
       </div>
@@ -302,7 +307,7 @@ export const Hud: React.FC<HudProps> = ({
                 <div className="mt-1.5 bg-[#8BAC0F]/40 border border-[#0F380F] px-1.5 h-7 flex items-center justify-between gap-1 text-[9px] font-bold">
                   <span className="shrink-0 tabular-nums">{locked ? '🔒 ' : ''}QUEUE {buffer.length}/{snake.body.length}</span>
                   <span className="min-w-0 flex-1 truncate text-right opacity-80">
-                    {buffer.map(dir => dir === 'UP' ? '↑' : dir === 'DOWN' ? '↓' : dir === 'LEFT' ? '←' : '→').join('')}
+                    {buffer.map(dir => dir === 'UP' ? '↑' : dir === 'DOWN' ? '↓' : dir === 'LEFT' ? '←' : '→').join('')}{snake.pendingSkill ? '⚡' : ''}
                   </span>
                   <span className="shrink-0 w-7 text-right text-base leading-none font-black tabular-nums">
                     {!locked && countdown !== null && gameState.phase !== 'OVER' ? `${countdown}s` : ''}
