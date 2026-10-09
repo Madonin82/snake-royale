@@ -34,6 +34,18 @@ export interface GameSettings {
   gameBoyFrameEnabled: boolean;
   crtFilterEnabled: boolean;
   botDifficulty: 'EASY' | 'MEDIUM' | 'HARD';
+  levelId?: string;
+  levelName?: string;
+  aiStyle?: 'GREEDY' | 'TURTLE' | 'CUTOFF' | 'HEADHUNTER' | 'PATROL';
+  campaignAiDifficulties?: Record<string, 'EASY' | 'MEDIUM' | 'HARD'>;
+}
+
+export type CampaignObjectiveKind = 'collect' | 'first_to' | 'survive' | 'win_under' | 'shutout' | 'outscore';
+
+export interface CampaignObjective {
+  text: string;
+  kind: CampaignObjectiveKind;
+  target: number;
 }
 
 export interface GameState {
@@ -47,6 +59,19 @@ export interface GameState {
   phaseEndTime: number; // timestamp
   round: number; // Escalates token count: round 1 = 1 token, round 2 = 2 tokens...
   tokens: Position[];
+  campaignTokenRules?: {
+    count: number;
+    respawn: boolean;
+    mode: 'ESCALATING' | 'FIXED' | 'FIXED_SET';
+    tokensEatenInRound: number;
+  };
+  campaignObjectives?: {
+    primary: CampaignObjective | null;
+    bonus: (CampaignObjective | null)[];
+    p1TokensCollected: number;
+    firstToResults: Array<'p1' | 'opponent' | 'tie' | null>;
+    surviveResults: boolean[];
+  };
   walls?: Position[];
   snakes: Snake[];
   ringInset: number; // 0 for full 8x8, 1 for 6x6, 2 for 4x4, 3 for 2x2

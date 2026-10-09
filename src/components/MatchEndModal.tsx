@@ -5,6 +5,7 @@ import { soundEngine } from '../audio/soundEngine';
 import { RotateCcw, Home, Trophy, AlertTriangle, Play, ArrowLeft } from 'lucide-react';
 import { computeMatchStats, computeTurnLedger, MatchSummaryStats, TurnLedgerEntry } from '../game/stats';
 import { TurnDecision } from '../game/replayFile';
+import { getCampaignObjectiveProgress, isCampaignObjectiveComplete } from '../game/objectives';
 
 interface MatchEndModalProps {
   gameState: GameState;
@@ -149,6 +150,12 @@ export const MatchEndModal: React.FC<MatchEndModalProps> = ({
   const history = matchHistory.length > 0 ? matchHistory : [gameState];
   const matchStats = computeMatchStats(history, turnDecisions);
   const turnLedgerEntries = computeTurnLedger(history, turnDecisions);
+  const campaignObjectives = gameState.campaignObjectives;
+  const objectiveRows = campaignObjectives
+    ? [campaignObjectives.primary, ...campaignObjectives.bonus]
+        .map((objective, index) => ({ objective, index }))
+        .filter((item): item is { objective: NonNullable<typeof item.objective>; index: number } => item.objective !== null)
+    : [];
 
   let titleText = 'MATCH FINISHED';
   if (isDraw) {
@@ -265,6 +272,21 @@ export const MatchEndModal: React.FC<MatchEndModalProps> = ({
             {gameState.winReason}
           </div>
         </div>
+
+        {objectiveRows.length > 0 && (
+          <div className="shrink-0 border-2 border-[#0F380F] bg-[#8BAC0F] p-2 text-left text-[10px] font-bold">
+            <div className="mb-1 border-b border-[#0F380F] pb-1 font-black">OBJECTIVES</div>
+            {objectiveRows.map(({ objective, index }) => {
+              const complete = isCampaignObjectiveComplete(objective, gameState, index);
+              return (
+                <div key={`${index}-${objective.text}`} className="flex justify-between gap-2">
+                  <span className="truncate">{index === 0 ? '' : `${complete ? '☑' : '☐'} `}{getCampaignObjectiveProgress(objective, gameState, index)}</span>
+                  <span className="shrink-0 font-black">{complete ? 'COMPLETE' : 'FAILED'}</span>
+                </div>
+              );
+            })}
+          </div>
+        )}
 
         {/* Final Stats Breakdown — Independent Expandable Player Cards */}
         <div className="flex flex-col sm:grid sm:grid-cols-2 gap-2 bg-[#8BAC0F] p-2.5 [@media(max-height:520px)]:p-1.5 border-2 border-[#0F380F] shrink-0">

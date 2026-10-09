@@ -1,5 +1,4 @@
 import type { GameState, Position, Snake } from '../types/game';
-import { withLegacySnakeAccessors } from './snakeArray';
 
 /**
  * RTDB does not round-trip arrays faithfully:
@@ -54,10 +53,10 @@ export function normalizeGameState(state: GameState): GameState {
     ...state,
     tokens: asPositionArray((state as GameState).tokens),
     ...(state.walls === undefined ? {} : { walls: asPositionArray(state.walls) }),
-    snakes: withLegacySnakeAccessors(snakes.map((snake, index) => ({
+    snakes: snakes.map((snake, index) => ({
       ...snake,
       id: snake.id || `p${index + 1}`,
       body: asPositionArray(snake.body),
-    }))),
+    })),
   };
 }

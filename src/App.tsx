@@ -199,7 +199,7 @@ const GameApp: React.FC<{ campaignPlaytestLevel: CampaignLevel | null }> = ({ ca
     initialCampaignState ? [initialCampaignState] : []
   );
   const turnDecisionsRef = useRef<TurnDecision[]>([]);
-  const agentDrivenRef = useRef<{ p1: boolean; p2: boolean }>({ p1: false, p2: false });
+  const agentDrivenRef = useRef<{ p1: boolean; p2: boolean; [key: string]: boolean }>({ p1: false, p2: false });
   const [replayActive, setReplayActive] = useState<boolean>(false);
   const [replayIdx, setReplayIdx] = useState<number>(0);
   const [replayPlaying, setReplayPlaying] = useState<boolean>(false);
@@ -232,8 +232,9 @@ const GameApp: React.FC<{ campaignPlaytestLevel: CampaignLevel | null }> = ({ ca
 
   const stateRef = useRef<GameState>(gameState);
   stateRef.current = gameState;
-  const [moveBuffers, setMoveBuffers] = useState<Record<string, Direction[]>>({ p1: [], p2: [] });
-  const moveBuffersRef = useRef<Record<string, Direction[]>>({ p1: [], p2: [] });
+  const initialBuffers = Object.fromEntries(gameState.snakes.map(snake => [snake.id, [] as Direction[]]));
+  const [moveBuffers, setMoveBuffers] = useState<Record<string, Direction[]>>(initialBuffers);
+  const moveBuffersRef = useRef<Record<string, Direction[]>>(initialBuffers);
   moveBuffersRef.current = moveBuffers;
 
   const clearMoveBuffers = useCallback(() => {
@@ -243,14 +244,23 @@ const GameApp: React.FC<{ campaignPlaytestLevel: CampaignLevel | null }> = ({ ca
   }, []);
 
   // TURN-BASED MOVE LOCKS
-  const locksRef = useRef<Record<string, boolean>>({ p1: false, p2: false });
-  const [locks, setLocks] = useState<Record<string, boolean>>({ p1: false, p2: false });
-  const [thinkTimeRemaining, setThinkTimeRemaining] = useState<Record<string, number | null>>({ p1: null, p2: null });
+  const initialSeatRecords = Object.fromEntries(gameState.snakes.map(snake => [snake.id, false]));
+  const locksRef = useRef<Record<string, boolean>>(initialSeatRecords);
+  const [locks, setLocks] = useState<Record<string, boolean>>(initialSeatRecords);
+  const [thinkTimeRemaining, setThinkTimeRemaining] = useState<Record<string, number | null>>(
+    Object.fromEntries(gameState.snakes.map(snake => [snake.id, null])),
+  );
   const thinkTimeRemainingRef = useRef(thinkTimeRemaining);
   thinkTimeRemainingRef.current = thinkTimeRemaining;
-  const thinkTimeEndsRef = useRef<Record<string, number | null>>({ p1: null, p2: null });
-  const lastThinkTimeTickRef = useRef<Record<string, number | null>>({ p1: null, p2: null });
-  const notifiedPlanningWindowRef = useRef<Record<string, boolean>>({ p1: false, p2: false });
+  const thinkTimeEndsRef = useRef<Record<string, number | null>>(
+    Object.fromEntries(gameState.snakes.map(snake => [snake.id, null])),
+  );
+  const lastThinkTimeTickRef = useRef<Record<string, number | null>>(
+    Object.fromEntries(gameState.snakes.map(snake => [snake.id, null])),
+  );
+  const notifiedPlanningWindowRef = useRef<Record<string, boolean>>(
+    Object.fromEntries(gameState.snakes.map(snake => [snake.id, false])),
+  );
   const sentTickRef = useRef<number>(-1);
   const activeMatchRef = useRef<MatchIdentity | null>(null);
   const lastStateRevisionRef = useRef<number>(-1);
@@ -354,7 +364,7 @@ const GameApp: React.FC<{ campaignPlaytestLevel: CampaignLevel | null }> = ({ ca
   const activeHandlerRef = useRef<((action: GamepadMenuAction) => void) | null>(null);
 
   // The think-time model is the sole source of last-turn and cumulative times.
-  const thinkRef = useRef(createThinkTimeModel());
+  const thinkRef = useRef(createThinkTimeModel(gameState.snakes.map(snake => snake.id)));
   const applyThinkTransition = useCallback((event: ThinkTimeEvent) => {
     const nextModel = transitionThinkTime(thinkRef.current, event);
     if (nextModel === thinkRef.current) return;
@@ -501,48 +511,55 @@ const GameApp: React.FC<{ campaignPlaytestLevel: CampaignLevel | null }> = ({ ca
       .every(snake => current.readyConfirmed?.[snake.id]);
     if (!bothReady) return;
 
-    if (isBuiltInAiActive() && !locksRef.current.p2 && current.snakes.some(snake => snake.id === 'p2' && snake.isAlive)) {
-      const p2Buf = [...moveBuffersRef.current.p2];
-      const p2Snake = current.snakes.find(snake => snake.id === 'p2');
-      if (!p2Snake) return;
-      if (p2Buf.length === 0) {
-        let curDir = p2Snake.direction;
-        let simBody = [...p2Snake.body];
-        const planLen = Math.min(3, p2Snake.body.length);
-        for (let i = 0; i < planLen; i++) {
-          const aiDir = calculateAIMove({
-            ...current,
-            snakes: current.snakes.map(snake => snake.id === 'p2'
-              ? { ...snake, body: simBody, direction: curDir }
-              : snake),
-          }, s.gridSize, 'p2', s.botDifficulty);
-          if (aiDir && !isOppositeDirection(curDir, aiDir)) {
-            p2Buf.push(aiDir);
-            curDir = aiDir;
-            const nextHead = getNextHeadPosition(simBody[0], aiDir);
-            simBody.unshift(nextHead);
-            simBody.pop();
-          } else {
-            break;
+    const aiSnakes = current.snakes.filter(snake =>
+      snake.isAlive &&
+      (campaignPlaytestLevel
+        ? snake.id !== 'p1'
+        : snake.id === 'p2') &&
+      !locksRef.current[snake.id],
+    );
+    if (isBuiltInAiActive()) {
+      for (const aiSnake of aiSnakes) {
+        const aiBuffer = [...(moveBuffersRef.current[aiSnake.id] ?? [])];
+        if (aiBuffer.length === 0) {
+          let curDir = aiSnake.direction;
+          let simBody = [...aiSnake.body];
+          const planLen = Math.min(3, aiSnake.body.length);
+          for (let i = 0; i < planLen; i++) {
+            const aiDir = calculateAIMove({
+              ...current,
+              snakes: current.snakes.map(snake => snake.id === aiSnake.id
+                ? { ...snake, body: simBody, direction: curDir }
+                : snake),
+            }, s.gridSize, aiSnake.id, s.campaignAiDifficulties?.[aiSnake.id] ?? s.botDifficulty);
+            if (aiDir && !isOppositeDirection(curDir, aiDir)) {
+              aiBuffer.push(aiDir);
+              curDir = aiDir;
+              const nextHead = getNextHeadPosition(simBody[0], aiDir);
+              simBody.unshift(nextHead);
+              simBody.pop();
+            } else {
+              break;
+            }
+          }
+          if (aiBuffer.length === 0) {
+            const fallback = ['UP', 'DOWN', 'LEFT', 'RIGHT'].find(d => !isOppositeDirection(curDir, d as Direction)) as Direction || 'LEFT';
+            aiBuffer.push(fallback);
           }
         }
-        if (p2Buf.length === 0) {
-          const fallback = ['UP', 'DOWN', 'LEFT', 'RIGHT'].find(d => !isOppositeDirection(curDir, d as Direction)) as Direction || 'LEFT';
-          p2Buf.push(fallback);
-        }
+        moveBuffersRef.current = { ...moveBuffersRef.current, [aiSnake.id]: aiBuffer };
+        agentDrivenRef.current[aiSnake.id] = true;
+        commitLocks({ ...locksRef.current, [aiSnake.id]: true });
+        turnDecisionsRef.current.push({
+          tick: current.tick,
+          seat: aiSnake.id,
+          queue: [...aiBuffer],
+          lockedAt: Date.now(),
+          autoLock: false,
+        });
+        applyThinkTransition({ type: 'CANCEL', player: aiSnake.id });
       }
-      moveBuffersRef.current = { ...moveBuffersRef.current, p2: p2Buf };
       setMoveBuffers({ ...moveBuffersRef.current });
-      agentDrivenRef.current.p2 = true;
-      commitLocks({ ...locksRef.current, p2: true });
-      turnDecisionsRef.current.push({
-        tick: current.tick,
-        seat: 'p2',
-        queue: [...moveBuffersRef.current.p2],
-        lockedAt: Date.now(),
-        autoLock: false,
-      });
-      applyThinkTransition({ type: 'CANCEL', player: 'p2' });
     }
 
     for (const snake of current.snakes) {
@@ -584,7 +601,7 @@ const GameApp: React.FC<{ campaignPlaytestLevel: CampaignLevel | null }> = ({ ca
     const canProgress =
       nextState.phase !== 'OVER' &&
       (nextState.snakes.filter(snake => snake.isAlive).every(snake => moveBuffersRef.current[snake.id]?.length > 0) ||
-       (playModeRef.current === 'SOLO_AI' && !locksRef.current.p2));
+       (playModeRef.current === 'SOLO_AI' && current.snakes.some(snake => snake.id !== 'p1' && snake.isAlive && !locksRef.current[snake.id])));
 
     if (canProgress && aiMode) {
       queueMicrotask(() => {
@@ -597,7 +614,7 @@ const GameApp: React.FC<{ campaignPlaytestLevel: CampaignLevel | null }> = ({ ca
         maybeAdvanceTurn();
       }, 550);
     }
-  }, [aiMode, applyThinkTransition, commitLocks, dispatchAiState, isBuiltInAiActive, playTickEvents]);
+  }, [aiMode, applyThinkTransition, campaignPlaytestLevel, commitLocks, dispatchAiState, isBuiltInAiActive, playTickEvents]);
 
   const autoLockPlayer = useCallback((who: string) => {
     if (locksRef.current[who]) return;
@@ -1497,15 +1514,16 @@ const GameApp: React.FC<{ campaignPlaytestLevel: CampaignLevel | null }> = ({ ca
       if (isOnlineAuthority && current.snakes.some(snake => !current.readyConfirmed?.[snake.id])) return;
 
       if (isBuiltInAiActive()) {
-        const aiDir = calculateAIMove(
-          current,
-          settingsRef.current.gridSize,
-          'p2',
-          settingsRef.current.botDifficulty
-        );
-        if (aiDir) {
-          const bot = current.snakes.find(snake => snake.id === 'p2');
-          if (bot) queueSnakeDirection(bot, aiDir);
+        for (const bot of current.snakes.filter(snake =>
+          snake.isAlive && (campaignPlaytestLevel ? snake.id !== 'p1' : snake.id === 'p2'),
+        )) {
+          const aiDir = calculateAIMove(
+            current,
+            settingsRef.current.gridSize,
+            bot.id,
+            settingsRef.current.campaignAiDifficulties?.[bot.id] ?? settingsRef.current.botDifficulty,
+          );
+          if (aiDir) queueSnakeDirection(bot, aiDir);
         }
       }
 
@@ -1528,7 +1546,7 @@ const GameApp: React.FC<{ campaignPlaytestLevel: CampaignLevel | null }> = ({ ca
     }, tickIntervalMs);
 
     return () => clearInterval(intervalId);
-  }, [dispatchAiState, inLobby, inOnlineLobby, isBuiltInAiActive, playMode, settings.tickRate, settings.turnBased]);
+  }, [campaignPlaytestLevel, dispatchAiState, inLobby, inOnlineLobby, isBuiltInAiActive, playMode, settings.tickRate, settings.turnBased]);
 
   // Series scorebook
   useEffect(() => {

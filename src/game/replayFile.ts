@@ -21,6 +21,9 @@ export interface ReplayFileObject {
     raceTurns: number;
     tickRate: number;
     thinkTimeSeconds?: number | null;
+    levelId?: string;
+    levelName?: string;
+    aiStyle?: GameSettings['aiStyle'];
   };
   result: {
     winner: string | 'DRAW' | null;
@@ -57,6 +60,9 @@ export function createReplayDataObject(
       raceTurns: settings.raceTurns,
       tickRate: settings.tickRate,
       thinkTimeSeconds: settings.thinkTimeSeconds,
+      ...(settings.levelId ? { levelId: settings.levelId } : {}),
+      ...(settings.levelName ? { levelName: settings.levelName } : {}),
+      ...(settings.aiStyle ? { aiStyle: settings.aiStyle } : {}),
     },
     result: {
       winner,
@@ -105,7 +111,16 @@ export function exportReplayToFile(
 
 export function parseAndValidateReplayData(rawText: string): {
   states: GameState[];
-  settings?: { gridSize: number; turnBased: boolean; raceTurns: number; tickRate: number; thinkTimeSeconds?: number | null };
+  settings?: {
+    gridSize: number;
+    turnBased: boolean;
+    raceTurns: number;
+    tickRate: number;
+    thinkTimeSeconds?: number | null;
+    levelId?: string;
+    levelName?: string;
+    aiStyle?: GameSettings['aiStyle'];
+  };
   decisions: TurnDecision[];
   agentDriven: { p1: boolean; p2: boolean };
 } {

@@ -102,11 +102,17 @@
   }
   .desktop-panel-right {
     display: flex !important;
+    flex-direction: column;
+    gap: 0.5rem;
     grid-column: 3 / 4;
     grid-row: 2 / 3;
     min-height: 0;
     min-width: 0;
     overflow: hidden;
+  }
+  .desktop-panel-right > * {
+    flex: 1 1 0;
+    min-height: 0;
   }
   .top-strip-area {
     grid-column: 1 / 4;

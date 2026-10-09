@@ -1,7 +1,7 @@
 import { DEFAULT_SETTINGS, createInitialState, getNextHeadPosition, spawnTokens } from '../game/engine';
 import { Direction, GameSettings, GameState, Position } from '../types/game';
-import { withLegacySnakeAccessors } from '../game/snakeArray';
-import { CampaignLevel } from './levelSchema';
+import { createCampaignObjectives } from '../game/objectives';
+import { CampaignLevel, SpawnConfig } from './levelSchema';
 
 let campaignPlaytestLevel: CampaignLevel | null = null;
 
@@ -31,17 +31,25 @@ export function getCampaignPlaytestSettings(level: CampaignLevel): GameSettings 
     PATROL: 'MEDIUM',
   } as const;
 
+  const difficultyForStyle = (style: SpawnConfig['aiStyle']) => difficulty[style];
+  const aiSpawns = level.spawns.slice(1);
   return {
     ...DEFAULT_SETTINGS,
     gridSize: level.gridSize,
     raceTurns: level.phases.raceTurns,
     shrinkEveryTurns: level.phases.shrinkEveryTurns,
-    botDifficulty: difficulty[level.opponentSpawn.aiStyle],
+    botDifficulty: difficultyForStyle(aiSpawns[0]?.aiStyle ?? 'GREEDY'),
+    levelId: level.id,
+    levelName: level.name,
+    aiStyle: aiSpawns[0]?.aiStyle ?? 'GREEDY',
+    campaignAiDifficulties: Object.fromEntries(
+      aiSpawns.map((spawn, index) => [`p${index + 2}`, difficultyForStyle(spawn.aiStyle)]),
+    ),
   };
 }
 
-function createSpawnBody(
-  spawn: CampaignLevel['playerSpawn'] | CampaignLevel['opponentSpawn'],
+export function createSpawnBody(
+  spawn: SpawnConfig,
   gridSize: number,
   walls: Set<string>,
   occupied: Set<string>,
@@ -103,20 +111,34 @@ export function createCampaignPlaytestState(
 ): GameState {
   const walls = level.walls.map(wall => ({ ...wall }));
   const wallCells = new Set(walls.map(wall => `${wall.x},${wall.y}`));
-  const p1Body = createSpawnBody(level.playerSpawn, level.gridSize, wallCells, new Set());
-  const p2Body = createSpawnBody(
-    level.opponentSpawn,
-    level.gridSize,
-    wallCells,
-    new Set(p1Body.map(position => `${position.x},${position.y}`)),
-  );
   const initial = createInitialState(settings, playerNames);
-  const p1 = { ...initial.snakes.find(snake => snake.id === 'p1')!, body: p1Body, direction: level.playerSpawn.direction };
-  const p2 = { ...initial.snakes.find(snake => snake.id === 'p2')!, body: p2Body, direction: level.opponentSpawn.direction };
-  const occupied = new Set([...p1Body, ...p2Body].map(position => `${position.x},${position.y}`));
+  const colors = ['#0F380F', '#306230', '#8B1E0F', '#5B2C83'];
+  const snakes = level.spawns.map((spawn, index) => {
+    const occupied = new Set<string>();
+    for (const previous of level.spawns.slice(0, index)) {
+      const previousBody = previous.body
+        ? previous.body.map(position => ({ ...position }))
+        : createSpawnBody(previous, level.gridSize, wallCells, occupied);
+      previousBody.forEach(position => occupied.add(`${position.x},${position.y}`));
+    }
+    const body = spawn.body
+      ? spawn.body.map(position => ({ ...position }))
+      : createSpawnBody(spawn, level.gridSize, wallCells, occupied);
+    const template = initial.snakes[index] ?? initial.snakes[1];
+    return {
+      ...template,
+      id: `p${index + 1}`,
+      name: index === 0 ? template.name : `BOT ${index + 1}`,
+      color: colors[index] ?? template.color,
+      body,
+      direction: spawn.direction,
+      score: spawn.startingScore,
+    };
+  });
+  const occupied = new Set(snakes.flatMap(snake => snake.body.map(position => `${position.x},${position.y}`)));
   const tokens = level.tokens.positions.length > 0
-    ? level.tokens.positions.map(position => ({ ...position }))
-    : spawnTokens(1, level.gridSize, 0, [p1, p2], [], walls);
+    ? level.tokens.positions.slice(0, level.tokens.count).map(position => ({ ...position }))
+    : spawnTokens(level.tokens.count, level.gridSize, 0, snakes, [], walls);
 
   for (const token of tokens) {
     const key = `${token.x},${token.y}`;
@@ -136,8 +158,20 @@ export function createCampaignPlaytestState(
   return {
     ...initial,
     phase: 'RACING',
-    snakes: withLegacySnakeAccessors([p1, p2]),
+    snakes,
     tokens,
+    campaignTokenRules: {
+      count: level.tokens.positions.length > 0 ? tokens.length : level.tokens.count,
+      respawn: level.tokens.mode !== 'FIXED_SET' && level.tokens.respawn,
+      mode: level.tokens.mode,
+      tokensEatenInRound: 0,
+    },
+    campaignObjectives: createCampaignObjectives(
+      level.objectives.primary,
+      level.objectives.bonus,
+      snakes[0]?.score ?? 0,
+      snakes[1]?.score ?? 0,
+    ),
     walls,
   };
 }

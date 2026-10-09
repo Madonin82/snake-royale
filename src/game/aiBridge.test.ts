@@ -7,7 +7,7 @@ import { shouldApplyRtdbBridgeCommand } from './aiBridgeRtdb';
 test('compact state includes decision data, locks, and excludes presentation fields', () => {
   const state = createInitialState();
   state.tick = 7;
-  state.snakes.p1.score = 3;
+  state.snakes.find(snake => snake.id === 'p1')!.score = 3;
   state.tokens = [{ x: 2, y: 4 }];
 
   const compact = toCompactGameState(state, { p1: true, p2: false });
@@ -23,10 +23,13 @@ test('compact state includes decision data, locks, and excludes presentation fie
 test('full state snapshots cannot mutate the live game state', () => {
   const state = createInitialState();
   const snapshot = cloneGameState(state);
-  snapshot.snakes.p1.body[0].x += 1;
+  snapshot.snakes.find(snake => snake.id === 'p1')!.body[0].x += 1;
   snapshot.tokens.push({ x: 1, y: 1 });
 
-  assert.notEqual(snapshot.snakes.p1.body[0].x, state.snakes.p1.body[0].x);
+  assert.notEqual(
+    snapshot.snakes.find(snake => snake.id === 'p1')!.body[0].x,
+    state.snakes.find(snake => snake.id === 'p1')!.body[0].x,
+  );
   assert.notEqual(snapshot.tokens.length, state.tokens.length);
 });
 
