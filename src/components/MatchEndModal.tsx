@@ -248,7 +248,7 @@ export const MatchEndModal: React.FC<MatchEndModalProps> = ({
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-2 sm:p-4 [@media(max-height:520px)]:p-1 bg-black/80 backdrop-blur-xs font-mono select-none">
-      <div className="w-full max-w-sm [@media(orientation:landscape)]:max-w-[640px] max-h-[96dvh] [@media(max-height:520px)]:max-h-[98dvh] bg-[#9BBC0F] border-4 border-[#0F380F] shadow-[8px_8px_0px_#0F380F] [@media(max-height:520px)]:shadow-[4px_4px_0px_#0F380F] text-[#0F380F] p-3 sm:p-4 [@media(max-height:520px)]:p-2 flex flex-col justify-between gap-2 [@media(max-height:520px)]:gap-1 text-center overflow-y-auto">
+      <div className="mobile-scroll-panel w-full max-w-sm [@media(orientation:landscape)]:max-w-[640px] max-h-[96dvh] [@media(max-height:520px)]:max-h-[98dvh] bg-[#9BBC0F] border-4 border-[#0F380F] shadow-[8px_8px_0px_#0F380F] [@media(max-height:520px)]:shadow-[4px_4px_0px_#0F380F] text-[#0F380F] p-3 sm:p-4 [@media(max-height:520px)]:p-2 flex flex-col justify-between gap-2 [@media(max-height:520px)]:gap-1 text-center overflow-y-auto">
         {/* Banner */}
         <div className="border-b-4 [@media(max-height:520px)]:border-b-2 border-[#0F380F] pb-2 [@media(max-height:520px)]:pb-1 shrink-0">
           <div className="flex items-center justify-center gap-2">

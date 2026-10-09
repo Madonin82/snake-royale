@@ -7,13 +7,15 @@ interface GameBoardProps {
   settings: GameSettings;
   lockedPaths?: Record<string, Position[] | undefined>;
   controlSeat: 'p1' | 'p2';
-  onDirection: (direction: Direction) => void;
+  onDirection: (direction: Direction, touchSeat?: 'p1' | 'p2') => void;
   interactionEnabled: boolean;
+  splitTouchSeats?: boolean;
   animationsDisabled?: boolean;
 }
 
 export const GameBoard: React.FC<GameBoardProps> = ({
   gameState, settings, lockedPaths, controlSeat, onDirection, interactionEnabled,
+  splitTouchSeats = false,
   animationsDisabled = false,
 }) => {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
@@ -154,17 +156,20 @@ export const GameBoard: React.FC<GameBoardProps> = ({
 
     const deltaX = event.clientX - start.x;
     const deltaY = event.clientY - start.y;
+    const canvas = canvasRef.current;
+    const rect = canvas?.getBoundingClientRect();
+    const touchSeat = splitTouchSeats && rect
+      ? start.y < rect.top + rect.height / 2 ? 'p2' : 'p1'
+      : undefined;
     if (Math.hypot(deltaX, deltaY) > 12) {
       const direction: Direction = Math.abs(deltaX) > Math.abs(deltaY)
         ? deltaX < 0 ? 'LEFT' : 'RIGHT'
         : deltaY < 0 ? 'UP' : 'DOWN';
-      onDirection(direction);
+      onDirection(direction, touchSeat);
       return;
     }
 
-    const canvas = canvasRef.current;
-    const rect = canvas?.getBoundingClientRect();
-    const snake = gameState.snakes.find(candidate => candidate.id === controlSeat);
+    const snake = gameState.snakes.find(candidate => candidate.id === (touchSeat ?? controlSeat));
     if (!snake) return;
     const head = snake.body[0];
     if (!canvas || !rect || !head) return;
@@ -189,7 +194,7 @@ export const GameBoard: React.FC<GameBoardProps> = ({
     const direction: Direction = horizontalDistance > verticalDistance
       ? x < left ? 'LEFT' : 'RIGHT'
       : y < top ? 'UP' : 'DOWN';
-    if (!isReverseDirection(snake.direction, direction)) onDirection(direction);
+    if (!isReverseDirection(snake.direction, direction)) onDirection(direction, touchSeat);
   };
 
   return (
@@ -202,6 +207,11 @@ export const GameBoard: React.FC<GameBoardProps> = ({
         onPointerUp={handlePointerUp}
         onPointerCancel={() => { pointerStartRef.current = null; }}
       />
+      {splitTouchSeats && (
+        <div aria-hidden="true" className="pointer-events-none absolute inset-3">
+          <div className="absolute inset-x-0 top-1/2 border-t-2 border-dashed border-[#0F380F]/45" />
+        </div>
+      )}
     </div>
   );
 };

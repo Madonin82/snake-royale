@@ -348,7 +348,7 @@ export const LobbyView: React.FC<LobbyViewProps> = ({
     settings.thinkTimeSeconds === null ? 'INFINITE' : `${settings.thinkTimeSeconds}S`;
 
   return (
-    <div className="w-full max-w-[460px] md:max-w-[560px] [@media(orientation:landscape)]:max-w-[560px] max-h-full bg-[#9BBC0F] border-4 border-[#0F380F] shadow-[8px_8px_0px_#0F380F] [@media(max-height:500px)]:shadow-[4px_4px_0px_#0F380F] text-[#0F380F] p-3 sm:p-4 [@media(max-height:500px)]:p-2 font-mono select-none flex flex-col justify-between gap-2.5 [@media(max-height:500px)]:gap-1.5 overflow-hidden">
+    <div className="mobile-scroll-panel w-full max-w-[460px] md:max-w-[560px] [@media(orientation:landscape)]:max-w-[560px] max-h-full bg-[#9BBC0F] border-4 border-[#0F380F] shadow-[8px_8px_0px_#0F380F] [@media(max-height:500px)]:shadow-[4px_4px_0px_#0F380F] text-[#0F380F] p-3 sm:p-4 [@media(max-height:500px)]:p-2 font-mono select-none flex flex-col justify-between gap-2.5 [@media(max-height:500px)]:gap-1.5 overflow-hidden">
       <input
         ref={fileInputRef}
         type="file"

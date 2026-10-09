@@ -290,7 +290,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-2 sm:p-4 bg-black/75 backdrop-blur-xs font-mono select-none">
-      <div className="w-full max-w-sm max-h-[96dvh] bg-[#9BBC0F] border-4 border-[#0F380F] shadow-[6px_6px_0px_#0F380F] text-[#0F380F] p-3 flex flex-col justify-between gap-2 overflow-hidden">
+      <div className="mobile-scroll-panel w-full max-w-sm max-h-[96dvh] bg-[#9BBC0F] border-4 border-[#0F380F] shadow-[6px_6px_0px_#0F380F] text-[#0F380F] p-3 flex flex-col justify-between gap-2 overflow-hidden">
         {/* Header */}
         <div className="flex items-center justify-between border-b-2 border-[#0F380F] pb-1.5 shrink-0">
           <div className="flex items-center gap-2 font-black text-sm uppercase">
