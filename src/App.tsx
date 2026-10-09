@@ -719,7 +719,7 @@ const GameApp: React.FC<{ campaignPlaytestLevel: CampaignLevel | null }> = ({ ca
                 : snake),
             }, s.gridSize, aiSnake.id, s.campaignAiDifficulties?.[aiSnake.id] ?? s.botDifficulty);
             if (aiDir && !isOppositeDirection(curDir, aiDir)) {
-              aiBuffer.push(aiDir);
+              aiBuffer.push({ type: 'move', direction: aiDir });
               curDir = aiDir;
               const nextHead = getNextHeadPosition(simBody[0], aiDir);
               simBody.unshift(nextHead);
@@ -730,7 +730,7 @@ const GameApp: React.FC<{ campaignPlaytestLevel: CampaignLevel | null }> = ({ ca
           }
           if (aiBuffer.length === 0) {
             const fallback = ['UP', 'DOWN', 'LEFT', 'RIGHT'].find(d => !isOppositeDirection(curDir, d as Direction)) as Direction || 'LEFT';
-            aiBuffer.push(fallback);
+            aiBuffer.push({ type: 'move', direction: fallback });
           }
         }
         moveBuffersRef.current = { ...moveBuffersRef.current, [aiSnake.id]: aiBuffer };
@@ -757,7 +757,10 @@ const GameApp: React.FC<{ campaignPlaytestLevel: CampaignLevel | null }> = ({ ca
       const buffer = moveBuffersRef.current[snake.id] ?? [];
       const entry = buffer.shift();
       if (entry) {
-        if (entry.type === 'dart') {
+        // Defensive: handle legacy raw direction strings
+        if (typeof entry === 'string') {
+          queueSnakeDirection(snake, entry as Direction);
+        } else if (entry.type === 'dart') {
           queueSnakeSkill(snake, { skillId: 'dart', direction: entry.direction });
         } else {
           queueSnakeDirection(snake, entry.direction);
