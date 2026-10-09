@@ -1,7 +1,7 @@
-import { Position, Direction } from '../types/game';
+import { Position, Direction, SkillId, SkillsAvailableConfig } from '../types/game';
 
 export type CampaignTokenMode = 'ESCALATING' | 'FIXED' | 'FIXED_SET';
-export type CampaignAiStyle = 'GREEDY' | 'TURTLE' | 'CUTOFF' | 'HEADHUNTER' | 'PATROL';
+export type CampaignAiStyle = 'GREEDY' | 'TURTLE' | 'CUTOFF' | 'HEADHUNTER' | 'PATROL' | 'AVALENA' | 'avalena';
 
 export interface SpawnConfig {
   enabled?: boolean;
@@ -10,6 +10,7 @@ export interface SpawnConfig {
   startLength: number;
   startingScore: number;
   aiStyle: CampaignAiStyle;
+  equippedSkill?: SkillId | null;
   body?: Position[];
 }
 
@@ -22,6 +23,7 @@ export interface CampaignLevel {
   walls: Position[];             // static wall cells (empty = open arena)
 
   spawns: SpawnConfig[];
+  skillsAvailable?: SkillsAvailableConfig;
 
   tokens: {
     positions: Position[];       // fixed spawn points (empty = random)

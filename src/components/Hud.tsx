@@ -202,6 +202,11 @@ export const Hud: React.FC<HudProps> = ({
               <span className="text-3xl [@media(max-height:540px)]:text-2xl leading-none font-black">{snake.score}</span>
               <span className="text-[10px] font-semibold uppercase tracking-tight ml-1">PTS</span>
             </div>
+            {snake.equippedSkill && (
+              <span className="text-[9px] px-1.5 py-0.5 bg-[#0F380F] text-[#9BBC0F] border border-[#0F380F] font-black uppercase">
+                ⚡ {snake.equippedSkill} (2)
+              </span>
+            )}
             {renderOutcomeBadge(who)}
             <span className="text-xs [@media(max-height:540px)]:text-[10px] font-bold opacity-80 tabular-nums">LEN: {snake.body.length}</span>
           </div>

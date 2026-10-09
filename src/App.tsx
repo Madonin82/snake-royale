@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
-import { CompactGameState, Direction, GameSettings, GameState, LatencyReport, PlayMode, Position } from './types/game';
+import { CompactGameState, Direction, GameSettings, GameState, LatencyReport, PlayMode, Position, SkillId } from './types/game';
 import { onAuthStateChanged, User } from 'firebase/auth';
 import { onValue, ref } from 'firebase/database';
 import {
@@ -12,6 +12,7 @@ import {
   processGameTick,
   queueSnakeDirection,
 } from './game/engine';
+import { canActivateSkill, isValidDartDirection, SKILLS } from './game/skills';
 import { calculateAIMove } from './game/ai';
 import { cloneGameState, toCompactGameState } from './game/aiBridge';
 import { shouldApplyRtdbBridgeCommand } from './game/aiBridgeRtdb';
@@ -211,6 +212,9 @@ const GameApp: React.FC<{ campaignPlaytestLevel: CampaignLevel | null }> = ({ ca
   const [latencyReport, setLatencyReport] = useState<LatencyReport>(() => networkManager.getLatencyReport());
   const [gamepadCount, setGamepadCount] = useState<number>(0);
   const [isNintendoController, setIsNintendoController] = useState<boolean>(false);
+  const [choosingSkillMap, setChoosingSkillMap] = useState<Record<string, boolean>>({});
+  const choosingSkillMapRef = useRef(choosingSkillMap);
+  choosingSkillMapRef.current = choosingSkillMap;
 
   useEffect(() => {
     if (gameState.phase !== 'OVER' || inLobby || inOnlineLobby) {
@@ -478,6 +482,25 @@ const GameApp: React.FC<{ campaignPlaytestLevel: CampaignLevel | null }> = ({ ca
     if (playModeRef.current === 'LOCAL_2P') return playerSlot === 2 ? 'p2' : 'p1';
     return 'p1';
   }, []);
+
+  const handleSkillButton = useCallback((playerSlot: 1 | 2) => {
+    const current = stateRef.current;
+    if (current.phase === 'OVER' || inLobby || inOnlineLobby) return;
+    const targetKey = getTargetKey(playerSlot);
+    const snake = current.snakes.find(s => s.id === targetKey);
+    if (!snake || !snake.isAlive) return;
+
+    const skillsAvail = current.skillsAvailable ?? settingsRef.current.skillsAvailable;
+    if (!canActivateSkill(snake, current, skillsAvail)) return;
+
+    soundEngine.playTick();
+    setChoosingSkillMap(prev => {
+      const nextVal = !prev[targetKey];
+      const updated = { ...prev, [targetKey]: nextVal };
+      choosingSkillMapRef.current = updated;
+      return updated;
+    });
+  }, [getTargetKey, inLobby, inOnlineLobby]);
 
   const setLock = useCallback((who: string, isAuto = false) => {
     const mode = playModeRef.current;
@@ -914,8 +937,18 @@ const GameApp: React.FC<{ campaignPlaytestLevel: CampaignLevel | null }> = ({ ca
 
   const handleBufferUndo = useCallback((playerSlot: 1 | 2) => {
     const current = stateRef.current;
-    if (current.phase === 'OVER' || inLobby || inOnlineLobby || !settingsRef.current.turnBased) return;
+    if (current.phase === 'OVER' || inLobby || inOnlineLobby) return;
     const targetKey = getTargetKey(playerSlot);
+    if (choosingSkillMapRef.current[targetKey]) {
+      setChoosingSkillMap(prev => {
+        const updated = { ...prev, [targetKey]: false };
+        choosingSkillMapRef.current = updated;
+        return updated;
+      });
+      soundEngine.playTick();
+      return;
+    }
+    if (!settingsRef.current.turnBased) return;
     if (locksRef.current[targetKey]) return;
 
     const buf = [...moveBuffersRef.current[targetKey]];
@@ -975,6 +1008,28 @@ const GameApp: React.FC<{ campaignPlaytestLevel: CampaignLevel | null }> = ({ ca
 
     const currentSnake = current.snakes.find(snake => snake.id === targetKey);
     if (!currentSnake || !currentSnake.isAlive) return false;
+
+    if (choosingSkillMapRef.current[targetKey]) {
+      setChoosingSkillMap(prev => {
+        const updated = { ...prev, [targetKey]: false };
+        choosingSkillMapRef.current = updated;
+        return updated;
+      });
+      if (!isValidDartDirection(currentSnake.direction, dir)) return false;
+
+      soundEngine.playTick();
+      currentSnake.pendingSkill = { skillId: 'dart' as SkillId, direction: dir };
+      const snakeCopy = { ...currentSnake, pendingSkill: { skillId: 'dart' as SkillId, direction: dir } };
+      setGameState(prev => ({
+        ...prev,
+        snakes: prev.snakes.map(s => s.id === targetKey ? snakeCopy : s),
+      }));
+      if (settingsRef.current.turnBased) {
+        handleBufferLock(playerSlot, bridgeSeat);
+      }
+      return true;
+    }
+
     soundEngine.playTick();
 
     if (settingsRef.current.turnBased) {
@@ -1230,7 +1285,7 @@ const GameApp: React.FC<{ campaignPlaytestLevel: CampaignLevel | null }> = ({ ca
       } else if (button === 'B') {
         handleBufferUndo(targetSlot);
       } else if (button === 'Y') {
-        handleBufferClear(targetSlot);
+        handleSkillButton(targetSlot);
       }
     });
 
@@ -1319,6 +1374,16 @@ const GameApp: React.FC<{ campaignPlaytestLevel: CampaignLevel | null }> = ({ ca
       }
 
       // In-Game buffer / snake controls
+      if (e.code === 'KeyE') {
+        handleSkillButton(1);
+        e.preventDefault();
+        return;
+      }
+      if (e.code === 'KeyO') {
+        handleSkillButton(2);
+        e.preventDefault();
+        return;
+      }
       if (e.key === 'Backspace') {
         handleBufferUndo(1);
         e.preventDefault();
@@ -2343,6 +2408,9 @@ const GameApp: React.FC<{ campaignPlaytestLevel: CampaignLevel | null }> = ({ ca
                     onLock={() => handleBufferLock(1)}
                     onUndo={() => handleBufferUndo(1)}
                     onClear={() => handleBufferClear(1)}
+                    onSkill={() => handleSkillButton(1)}
+                    choosingSkill={Boolean(choosingSkillMap[getTargetKey(1)])}
+                    canUseSkill={canActivateSkill(gameState.snakes.find(s => s.id === getTargetKey(1)), gameState, gameState.skillsAvailable ?? settings.skillsAvailable)}
                     queue={settings.turnBased
                       ? moveBuffers[getTargetKey(1)]
                       : [controlsSnake.queuedDirection]

@@ -4,6 +4,7 @@ export function cloneGameState(state: GameState, gridSize?: number): GameState {
   return {
     ...state,
     gridSize: state.gridSize ?? gridSize ?? 8,
+    skillsAvailable: state.skillsAvailable,
     lastTurnTimes: state.lastTurnTimes ? { ...state.lastTurnTimes } : null,
     totalThinkTime: { ...state.totalThinkTime },
     tokens: state.tokens.map(token => ({ ...token })),
@@ -11,6 +12,8 @@ export function cloneGameState(state: GameState, gridSize?: number): GameState {
     snakes: state.snakes.map(snake => ({
       ...snake,
       body: snake.body.map(position => ({ ...position })),
+      equippedSkill: snake.equippedSkill,
+      pendingSkill: snake.pendingSkill ? { ...snake.pendingSkill } : null,
     })),
     readyConfirmed: state.readyConfirmed ? { ...state.readyConfirmed } : undefined,
   };
@@ -34,11 +37,14 @@ export function toCompactGameState(
     telegraphRingInset: state.telegraphRingInset,
     tokens: state.tokens.map(token => ({ ...token })),
     walls: (state.walls ?? []).map(wall => ({ ...wall })),
+    skillsAvailable: state.skillsAvailable,
     snakes: Object.fromEntries(state.snakes.map(snake => [snake.id, {
       body: snake.body.map(position => ({ ...position })),
       direction: snake.direction,
       score: snake.score,
       isAlive: snake.isAlive,
+      equippedSkill: snake.equippedSkill,
+      pendingSkill: snake.pendingSkill ? { ...snake.pendingSkill } : null,
     }])),
     locks: { ...locks },
     winner: state.winner,

@@ -1,5 +1,14 @@
 export type Direction = 'UP' | 'DOWN' | 'LEFT' | 'RIGHT';
 
+export type SkillId = 'dart';
+
+export type SkillsAvailableConfig = 'immediate' | 'after_race' | `after_turns:${number}`;
+
+export interface PendingSkill {
+  skillId: SkillId;
+  direction: Direction;
+}
+
 export interface Position {
   x: number;
   y: number;
@@ -14,6 +23,8 @@ export interface Snake {
   score: number;
   isAlive: boolean;
   color: string; // Game Boy shade
+  equippedSkill: SkillId | null;
+  pendingSkill?: PendingSkill | null;
   deathReason?: 'WALL' | 'SELF' | 'OPPONENT' | 'SHRINK' | 'HEAD_ON';
   deathPosition?: Position;
 }
@@ -36,8 +47,10 @@ export interface GameSettings {
   botDifficulty: 'EASY' | 'MEDIUM' | 'HARD';
   levelId?: string;
   levelName?: string;
-  aiStyle?: 'GREEDY' | 'TURTLE' | 'CUTOFF' | 'HEADHUNTER' | 'PATROL';
+  aiStyle?: 'GREEDY' | 'TURTLE' | 'CUTOFF' | 'HEADHUNTER' | 'PATROL' | 'AVALENA' | 'avalena';
   campaignAiDifficulties?: Record<string, 'EASY' | 'MEDIUM' | 'HARD'>;
+  campaignAiStyles?: Record<string, 'GREEDY' | 'TURTLE' | 'CUTOFF' | 'HEADHUNTER' | 'PATROL' | 'AVALENA' | 'avalena'>;
+  skillsAvailable?: SkillsAvailableConfig;
 }
 
 export type CampaignObjectiveKind = 'collect' | 'first_to' | 'survive' | 'win_under' | 'shutout' | 'outscore';
@@ -82,6 +95,7 @@ export interface GameState {
   winReason: string;
   totalMatchTime: number;
   readyConfirmed?: Record<string, boolean>;
+  skillsAvailable?: SkillsAvailableConfig;
 }
 
 export interface CompactSnakeState {
@@ -89,6 +103,8 @@ export interface CompactSnakeState {
   direction: Direction;
   score: number;
   isAlive: boolean;
+  equippedSkill: SkillId | null;
+  pendingSkill?: PendingSkill | null;
 }
 
 export interface CompactGameState {
@@ -107,12 +123,14 @@ export interface CompactGameState {
   snakes: Record<string, CompactSnakeState>;
   locks: Record<string, boolean>;
   winner: GameState['winner'];
+  skillsAvailable?: SkillsAvailableConfig;
 }
 
 export interface SnakeAiBridge {
   getSeat: () => 'p1' | 'p2' | null;
   getState: (opts?: { compact?: boolean }) => GameState | CompactGameState;
   queueMoves: (moves: Direction[]) => Direction[];
+  activateSkill?: (direction?: Direction) => boolean;
   lock: () => void;
   selectSeat: (seat: 'p1' | 'p2') => void;
   onState: (
@@ -149,6 +167,7 @@ export interface NetworkInputPayload {
   matchNumber: number;
   inputSequence: number;
   dir: Direction;
+  skill?: PendingSkill | null;
   tick: number;
   clientTime: number;
 }

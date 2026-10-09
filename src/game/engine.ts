@@ -1,7 +1,8 @@
-import { Direction, GamePhase, GameSettings, GameState, Position, Snake } from '../types/game';
+import { Direction, GamePhase, GameSettings, GameState, PendingSkill, Position, Snake } from '../types/game';
 import { soundEngine } from '../audio/soundEngine';
 import { createInitialThinkTimeValues } from './thinkTime';
 import { recordFirstToResults, recordSurviveResults } from './objectives';
+import { canActivateSkill, isValidDartDirection, SKILLS } from './skills';
 
 export const GAMEBOY_COLORS = {
   DARKEST: '#0F380F',   // P1 snake, closed ring, borders, deep text
@@ -24,6 +25,7 @@ export const DEFAULT_SETTINGS: GameSettings = {
   gameBoyFrameEnabled: true,
   crtFilterEnabled: false,
   botDifficulty: 'MEDIUM',
+  skillsAvailable: 'after_race',
 };
 
 // Check if a turn is 180-degree reverse
@@ -65,6 +67,8 @@ export function createInitialState(
     score: 0,
     isAlive: true,
     color: GAMEBOY_COLORS.DARKEST,
+    equippedSkill: null,
+    pendingSkill: null,
   };
 
   const p2: Snake = {
@@ -80,6 +84,8 @@ export function createInitialState(
     score: 0,
     isAlive: true,
     color: GAMEBOY_COLORS.DARK,
+    equippedSkill: null,
+    pendingSkill: null,
   };
 
   // Spawn initial 1 token for round 1
@@ -109,6 +115,7 @@ export function createInitialState(
     winner: null,
     winReason: '',
     totalMatchTime: 0,
+    skillsAvailable: settings.skillsAvailable ?? 'after_race',
   };
 }
 
@@ -178,6 +185,19 @@ export function queueSnakeDirection(snake: Snake, newDir: Direction): boolean {
     return true;
   }
   return false;
+}
+
+export function queueSnakeSkill(snake: Snake, skill: PendingSkill | null): boolean {
+  if (!skill) {
+    snake.pendingSkill = null;
+    return true;
+  }
+  const effectiveFacing = snake.queuedDirection || snake.direction;
+  if (!isValidDartDirection(effectiveFacing, skill.direction)) {
+    return false;
+  }
+  snake.pendingSkill = { ...skill };
+  return true;
 }
 
 export interface HitstopInfo {
@@ -385,70 +405,157 @@ export function processGameTick(
     }
   }
 
-  // 2. APPLY QUEUED INPUTS
+  // 2. APPLY QUEUED INPUTS & RESOLVE MOVEMENT / SKILLS
   const snakes = state.snakes;
+  const effectiveSkillsAvailable = state.skillsAvailable ?? settings.skillsAvailable ?? 'after_race';
+
+  // Determine which snakes are executing Dart this tick (evaluated before phase transition or after? Wait: if after_race unlocks when shrink phase starts, state.phase is already updated in step 1 or already SHRINKING at start of turn)
+  // Check both currentState (at planning time) and state (at resolution time) so if unlocked at planning time or resolution time it works cleanly.
+  const activeDarts = new Map<string, Direction>();
   for (const snake of snakes) {
     if (snake.queuedDirection) {
       snake.direction = snake.queuedDirection;
       snake.queuedDirection = null;
     }
+    if (snake.pendingSkill && snake.pendingSkill.skillId === 'dart') {
+      const dartDir = snake.pendingSkill.direction;
+      snake.pendingSkill = null;
+      const unlockedNow = canActivateSkill(snake, currentState, effectiveSkillsAvailable) ||
+        canActivateSkill(snake, state, effectiveSkillsAvailable);
+      if (unlockedNow && isValidDartDirection(snake.direction, dartDir)) {
+        activeDarts.set(snake.id, dartDir);
+      }
+    }
   }
-
-  const nextHeads = snakes.map(snake =>
-    snake.isAlive ? getNextHeadPosition(snake.body[0], snake.direction) : snake.body[0],
-  );
-  const willGrow = nextHeads.map((head, index) =>
-    snakes[index].isAlive && state.tokens.some(token => token.x === head.x && token.y === head.y),
-  );
-  const deaths = snakes.map(() => ({ wall: false, self: false, body: false, headOn: false }));
 
   const isPermanentWall = (position: Position) =>
     state.walls?.some(wall => wall.x === position.x && wall.y === position.y) ?? false;
-  for (let i = 0; i < snakes.length; i++) {
-    if (!snakes[i].isAlive) continue;
-    const snake = snakes[i];
-    const head = nextHeads[i];
-    deaths[i].wall = !isCellInArena(head, settings.gridSize, state.ringInset) || isPermanentWall(head);
-    const selfBody = willGrow[i] ? snake.body : snake.body.slice(0, -1);
-    deaths[i].self = selfBody.some(segment => segment.x === head.x && segment.y === head.y);
-    for (let j = 0; j < snakes.length; j++) {
-      if (i === j) continue;
-      const otherBody = !snakes[j].isAlive || willGrow[j]
-        ? snakes[j].body
-        : snakes[j].body.slice(0, -1);
-      if (otherBody.some(segment => segment.x === head.x && segment.y === head.y)) {
-        deaths[i].body = true;
+
+  const totalSteps = activeDarts.size > 0 ? 3 : 1;
+  let totalTokensConsumedCount = 0;
+
+  for (let step = 0; step < totalSteps; step++) {
+    const movingIndices: number[] = [];
+    for (let i = 0; i < snakes.length; i++) {
+      if (!snakes[i].isAlive) continue;
+      if (step === 0 || activeDarts.has(snakes[i].id)) {
+        movingIndices.push(i);
       }
+    }
+    if (movingIndices.length === 0) break;
+
+    if (step === 1) {
+      for (const idx of movingIndices) {
+        const dartDir = activeDarts.get(snakes[idx].id);
+        if (dartDir) {
+          snakes[idx].direction = dartDir;
+        }
+      }
+    }
+
+    const nextHeads = snakes.map((snake, idx) =>
+      movingIndices.includes(idx) ? getNextHeadPosition(snake.body[0], snake.direction) : snake.body[0],
+    );
+    const willGrow = nextHeads.map((head, idx) =>
+      movingIndices.includes(idx) && state.tokens.some(token => token.x === head.x && token.y === head.y),
+    );
+    const deaths = snakes.map(() => ({ wall: false, self: false, body: false, headOn: false }));
+
+    for (const i of movingIndices) {
+      const snake = snakes[i];
+      const head = nextHeads[i];
+      deaths[i].wall = !isCellInArena(head, settings.gridSize, state.ringInset) || isPermanentWall(head);
+      const selfBody = willGrow[i] ? snake.body : snake.body.slice(0, -1);
+      deaths[i].self = selfBody.some(segment => segment.x === head.x && segment.y === head.y);
+      for (let j = 0; j < snakes.length; j++) {
+        if (i === j) continue;
+        const jMoving = movingIndices.includes(j);
+        const otherBody = !snakes[j].isAlive || !jMoving || willGrow[j]
+          ? snakes[j].body
+          : snakes[j].body.slice(0, -1);
+        if (otherBody.some(segment => segment.x === head.x && segment.y === head.y)) {
+          deaths[i].body = true;
+        }
+      }
+    }
+
+    for (let a = 0; a < movingIndices.length; a++) {
+      for (let b = a + 1; b < movingIndices.length; b++) {
+        const i = movingIndices[a];
+        const j = movingIndices[b];
+        const sameCell = nextHeads[i].x === nextHeads[j].x && nextHeads[i].y === nextHeads[j].y;
+        const crossed = nextHeads[i].x === snakes[j].body[0].x && nextHeads[i].y === snakes[j].body[0].y &&
+          nextHeads[j].x === snakes[i].body[0].x && nextHeads[j].y === snakes[i].body[0].y;
+        if (sameCell || crossed) {
+          deaths[i].headOn = true;
+          deaths[j].headOn = true;
+        }
+      }
+    }
+
+    // Also check if a darting snake in step > 0 lands on a non-moving living snake's head
+    if (step > 0) {
+      for (const i of movingIndices) {
+        for (let j = 0; j < snakes.length; j++) {
+          if (i === j || !snakes[j].isAlive || movingIndices.includes(j)) continue;
+          if (nextHeads[i].x === snakes[j].body[0].x && nextHeads[i].y === snakes[j].body[0].y) {
+            deaths[i].body = true;
+          }
+        }
+      }
+    }
+
+    const died = snakes.map((snake, i) => {
+      if (!movingIndices.includes(i) || !snake.isAlive) return false;
+      const death = deaths[i];
+      if (!death.wall && !death.self && !death.body && !death.headOn) return false;
+      snake.isAlive = false;
+      snake.deathPosition = nextHeads[i];
+      snake.deathReason = death.headOn ? 'HEAD_ON' : death.wall ? 'WALL' : death.self ? 'SELF' : 'OPPONENT';
+      return true;
+    });
+
+    if (died.some(Boolean)) {
+      events.deathOccurred = true;
+    }
+
+    const stepConsumedTokenIndices = new Set<number>();
+    for (const i of movingIndices) {
+      if (!snakes[i].isAlive) continue;
+      const tokenIndex = state.tokens.findIndex(token => token.x === nextHeads[i].x && token.y === nextHeads[i].y);
+      let ateThisStep = false;
+      if (tokenIndex !== -1) {
+        snakes[i].score += 1;
+        ateThisStep = true;
+        events.tokenEaten[snakes[i].id] = true;
+        if (snakes[i].id === 'p1' && state.campaignObjectives) {
+          state.campaignObjectives.p1TokensCollected += 1;
+        }
+        stepConsumedTokenIndices.add(tokenIndex);
+      }
+      snakes[i].body.unshift(nextHeads[i]);
+      if (!ateThisStep) {
+        snakes[i].body.pop();
+      }
+    }
+
+    if (stepConsumedTokenIndices.size > 0) {
+      totalTokensConsumedCount += stepConsumedTokenIndices.size;
+      state.tokens = state.tokens.filter((_, index) => !stepConsumedTokenIndices.has(index));
     }
   }
 
-  for (let i = 0; i < snakes.length; i++) {
-    for (let j = i + 1; j < snakes.length; j++) {
-      if (!snakes[i].isAlive || !snakes[j].isAlive) continue;
-      const sameCell = nextHeads[i].x === nextHeads[j].x && nextHeads[i].y === nextHeads[j].y;
-      const crossed = nextHeads[i].x === snakes[j].body[0].x && nextHeads[i].y === snakes[j].body[0].y &&
-        nextHeads[j].x === snakes[i].body[0].x && nextHeads[j].y === snakes[i].body[0].y;
-      if (sameCell || crossed) {
-        deaths[i].headOn = true;
-        deaths[j].headOn = true;
-      }
+  // Deduct skill costs at turn resolution time AFTER token pickups have been applied
+  for (const snake of snakes) {
+    if (activeDarts.has(snake.id)) {
+      snake.score = Math.max(0, snake.score - SKILLS.dart.cost);
     }
   }
-
-  const died = snakes.map((snake, i) => {
-    if (!snake.isAlive) return false;
-    const death = deaths[i];
-    if (!death.wall && !death.self && !death.body && !death.headOn) return false;
-    snake.isAlive = false;
-    snake.deathPosition = nextHeads[i];
-    snake.deathReason = death.headOn ? 'HEAD_ON' : death.wall ? 'WALL' : death.self ? 'SELF' : 'OPPONENT';
-    return true;
-  });
 
   recordSurviveResults(state);
+  recordFirstToResults(state);
 
-  if (died.some(Boolean)) {
-    events.deathOccurred = true;
+  if (events.deathOccurred) {
     const survivors = snakes.filter(snake => snake.isAlive);
     if (survivors.length <= 1) {
       events.matchEnded = true;
@@ -463,40 +570,19 @@ export function processGameTick(
           state.winReason = `${survivors[0].name} wins${dead?.deathReason ? ` — ${dead.deathReason.toLowerCase()}!` : '!'}`;
         }
       } else {
-        resolveMatchByTiebreakers(state, deaths.some(death => death.headOn) ? 'Mutual Head-On Collision!' : 'Simultaneous Crash!');
+        const anyHeadOn = snakes.some(s => !s.isAlive && s.deathReason === 'HEAD_ON');
+        resolveMatchByTiebreakers(state, anyHeadOn ? 'Mutual Head-On Collision!' : 'Simultaneous Crash!');
       }
       return { nextState: state, events };
     }
   }
 
-  const consumedTokenIndices = new Set<number>();
-  for (let i = 0; i < snakes.length; i++) {
-    if (!snakes[i].isAlive) continue;
-    const tokenIndex = state.tokens.findIndex(token => token.x === nextHeads[i].x && token.y === nextHeads[i].y);
-    if (tokenIndex !== -1) {
-      snakes[i].score += 1;
-      events.tokenEaten[snakes[i].id] = true;
-      if (snakes[i].id === 'p1' && state.campaignObjectives) {
-        state.campaignObjectives.p1TokensCollected += 1;
-      }
-      consumedTokenIndices.add(tokenIndex);
-    }
-  }
-  state.tokens = state.tokens.filter((_, index) => !consumedTokenIndices.has(index));
-  recordFirstToResults(state);
-
-  for (let i = 0; i < snakes.length; i++) {
-    if (!snakes[i].isAlive) continue;
-    snakes[i].body.unshift(nextHeads[i]);
-    if (!events.tokenEaten[snakes[i].id]) snakes[i].body.pop();
-  }
-
-  if (state.phase === 'RACING' && state.campaignTokenRules && consumedTokenIndices.size > 0) {
+  if (state.phase === 'RACING' && state.campaignTokenRules && totalTokensConsumedCount > 0) {
     const rules = state.campaignTokenRules;
     if (rules.respawn && rules.mode !== 'FIXED_SET') {
       const getRoundTokenCount = () =>
         rules.mode === 'ESCALATING' ? rules.count + state.round - 1 : rules.count;
-      rules.tokensEatenInRound += consumedTokenIndices.size;
+      rules.tokensEatenInRound += totalTokensConsumedCount;
       while (rules.tokensEatenInRound >= getRoundTokenCount()) {
         rules.tokensEatenInRound -= getRoundTokenCount();
         state.round += 1;

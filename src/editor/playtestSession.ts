@@ -25,8 +25,16 @@ export function getEnabledSpawns(level: CampaignLevel): SpawnConfig[] {
 export function getExportableCampaignLevel(level: CampaignLevel): CampaignLevel {
   return {
     ...level,
-    spawns: getEnabledSpawns(level).map(({ enabled: _enabled, ...spawn }) => spawn),
+    skillsAvailable: level.skillsAvailable ?? 'after_race',
+    spawns: getEnabledSpawns(level).map(({ enabled: _enabled, ...spawn }) => ({
+      ...spawn,
+      equippedSkill: isAvalenaStyle(spawn.aiStyle) ? 'dart' : (spawn.equippedSkill ?? null),
+    })),
   };
+}
+
+export function isAvalenaStyle(style: SpawnConfig['aiStyle'] | undefined): boolean {
+  return typeof style === 'string' && style.toLowerCase() === 'avalena';
 }
 
 export function setCampaignPlaytestLevel(level: CampaignLevel): void {
@@ -44,9 +52,11 @@ export function getCampaignPlaytestSettings(level: CampaignLevel): GameSettings 
     CUTOFF: 'MEDIUM',
     HEADHUNTER: 'HARD',
     PATROL: 'MEDIUM',
+    AVALENA: 'HARD',
+    avalena: 'HARD',
   } as const;
 
-  const difficultyForStyle = (style: SpawnConfig['aiStyle']) => difficulty[style];
+  const difficultyForStyle = (style: SpawnConfig['aiStyle']) => difficulty[style] ?? 'HARD';
   const aiSpawns = getEnabledSpawns(level).slice(1);
   return {
     ...DEFAULT_SETTINGS,
@@ -60,6 +70,10 @@ export function getCampaignPlaytestSettings(level: CampaignLevel): GameSettings 
     campaignAiDifficulties: Object.fromEntries(
       aiSpawns.map((spawn, index) => [`p${index + 2}`, difficultyForStyle(spawn.aiStyle)]),
     ),
+    campaignAiStyles: Object.fromEntries(
+      aiSpawns.map((spawn, index) => [`p${index + 2}`, spawn.aiStyle]),
+    ),
+    skillsAvailable: level.skillsAvailable ?? 'after_race',
   };
 }
 
@@ -141,14 +155,17 @@ export function createCampaignPlaytestState(
       ? spawn.body.map(position => ({ ...position }))
       : createSpawnBody(spawn, level.gridSize, wallCells, occupied);
     const template = initial.snakes[index] ?? initial.snakes[1];
+    const avalena = index > 0 && isAvalenaStyle(spawn.aiStyle);
     return {
       ...template,
       id: `p${index + 1}`,
-      name: index === 0 ? template.name : `BOT ${index + 1}`,
+      name: index === 0 ? template.name : avalena ? 'AVALENA' : `BOT ${index + 1}`,
       color: colors[index] ?? template.color,
       body,
       direction: spawn.direction,
-      score: spawn.startingScore,
+      score: spawn.startingScore ?? (avalena ? 3 : 0),
+      equippedSkill: avalena ? 'dart' : (spawn.equippedSkill ?? null),
+      pendingSkill: null,
     };
   });
   const occupied = new Set(snakes.flatMap(snake => snake.body.map(position => `${position.x},${position.y}`)));
@@ -179,6 +196,7 @@ export function createCampaignPlaytestState(
     tokens,
     totalThinkTime: Object.fromEntries(snakes.map(snake => [snake.id, 0])),
     readyConfirmed: Object.fromEntries(snakes.map(snake => [snake.id, true])),
+    skillsAvailable: level.skillsAvailable ?? settings.skillsAvailable ?? 'after_race',
     campaignTokenRules: {
       count: level.tokens.positions.length > 0 ? tokens.length : level.tokens.count,
       respawn: level.tokens.mode !== 'FIXED_SET' && level.tokens.respawn,
@@ -217,11 +235,13 @@ export function parseCampaignLevelJson(jsonText: string): CampaignLevel {
   }
   return {
     ...parsed,
+    skillsAvailable: parsed.skillsAvailable ?? 'after_race',
     spawns: parsed.spawns.map(spawn => ({
       ...spawn,
       enabled: spawn.enabled !== false,
-      startingScore: spawn.startingScore ?? 0,
+      startingScore: spawn.startingScore ?? (isAvalenaStyle(spawn.aiStyle) ? 3 : 0),
       aiStyle: spawn.aiStyle ?? 'GREEDY',
+      equippedSkill: isAvalenaStyle(spawn.aiStyle) ? 'dart' : (spawn.equippedSkill ?? null),
     })),
     tokens: {
       ...parsed.tokens,
@@ -242,6 +262,7 @@ export function getMultiplayerCustomLevelSettings(
     shrinkEveryTurns: level.phases?.shrinkEveryTurns ?? baseSettings.shrinkEveryTurns,
     levelId: level.id,
     levelName: level.name,
+    skillsAvailable: level.skillsAvailable ?? baseSettings.skillsAvailable ?? 'after_race',
   };
 }
 
@@ -287,6 +308,8 @@ export function createMultiplayerCustomLevelState(
       queuedDirection: null,
       score: spawn.startingScore ?? 0,
       isAlive: true,
+      equippedSkill: isAvalenaStyle(spawn.aiStyle) ? 'dart' : (spawn.equippedSkill ?? null),
+      pendingSkill: null,
     };
   });
 
@@ -318,6 +341,7 @@ export function createMultiplayerCustomLevelState(
     tokens,
     totalThinkTime: Object.fromEntries(snakes.map(snake => [snake.id, 0])),
     readyConfirmed: Object.fromEntries(snakes.map(snake => [snake.id, false])),
+    skillsAvailable: level.skillsAvailable ?? effectiveSettings.skillsAvailable ?? 'after_race',
     campaignTokenRules: {
       count: level.tokens.positions.length > 0 ? tokens.length : level.tokens.count,
       respawn: level.tokens.mode !== 'FIXED_SET' && level.tokens.respawn,

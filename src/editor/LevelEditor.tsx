@@ -1,5 +1,5 @@
 import React, { useState, useRef, useEffect, useCallback } from 'react';
-import { CampaignObjective, Position, Direction } from '../types/game';
+import { CampaignObjective, Position, Direction, SkillId, SkillsAvailableConfig } from '../types/game';
 import { parseCampaignObjective } from '../game/objectives';
 import { CampaignLevel } from './levelSchema';
 import {
@@ -7,6 +7,7 @@ import {
   createSpawnBody,
   getCampaignPlaytestLevel,
   getExportableCampaignLevel,
+  isAvalenaStyle,
   isSpawnEnabled,
   setCampaignPlaytestLevel,
 } from './playtestSession';
@@ -75,10 +76,11 @@ const DEFAULT_LEVEL: CampaignLevel = {
   description: 'SURVIVE AND OUTSLITHER THE OPPONENT IN THE ARENA.',
   gridSize: 8,
   walls: [],
+  skillsAvailable: 'after_race',
   spawns: [
-    { enabled: true, position: { x: 1, y: 1 }, direction: 'RIGHT', startLength: 3, startingScore: 0, aiStyle: 'GREEDY' },
-    { enabled: true, position: { x: 6, y: 6 }, direction: 'LEFT', startLength: 3, startingScore: 0, aiStyle: 'GREEDY' },
-    { enabled: true, position: { x: 1, y: 6 }, direction: 'UP', startLength: 3, startingScore: 0, aiStyle: 'TURTLE' },
+    { enabled: true, position: { x: 1, y: 1 }, direction: 'RIGHT', startLength: 3, startingScore: 0, aiStyle: 'GREEDY', equippedSkill: null },
+    { enabled: true, position: { x: 6, y: 6 }, direction: 'LEFT', startLength: 3, startingScore: 0, aiStyle: 'GREEDY', equippedSkill: null },
+    { enabled: true, position: { x: 1, y: 6 }, direction: 'UP', startLength: 3, startingScore: 0, aiStyle: 'TURTLE', equippedSkill: null },
   ],
   tokens: {
     positions: [],
