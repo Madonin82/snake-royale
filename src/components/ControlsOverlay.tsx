@@ -1,5 +1,5 @@
 import React from 'react';
-import { Direction } from '../types/game';
+import { BufferEntry, Direction } from '../types/game';
 import { ArrowUp, ArrowDown, ArrowLeft, ArrowRight } from 'lucide-react';
 
 interface ControlsOverlayProps {
@@ -10,7 +10,7 @@ interface ControlsOverlayProps {
   onSkill?: () => void;
   choosingSkill?: boolean;
   canUseSkill?: boolean;
-  queue: Direction[];
+  queue: BufferEntry[];
   queueLimit: number;
   locked: boolean;
   turnBased: boolean;

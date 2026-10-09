@@ -1,4 +1,4 @@
-import { Direction, GameState, GameSettings } from '../types/game';
+import { BufferEntry, Direction, GameState, GameSettings } from '../types/game';
 import { normalizeGameState } from './normalize';
 
 export interface TurnDecision {
@@ -6,7 +6,7 @@ export interface TurnDecision {
   seat: string;
   // Online clients only observe their own queue; opponent queues are fog-of-war by design.
   // A replay exported by one client may therefore omit opponent decisions; merge both exports.
-  queue: Direction[];
+  queue: BufferEntry[];
   lockedAt: number;
   autoLock: boolean;
 }
@@ -158,7 +158,14 @@ export function parseAndValidateReplayData(rawText: string): {
       typeof decision.seat === 'string' &&
       decision.seat.length > 0 &&
       Array.isArray(decision.queue) &&
-      decision.queue.every((direction: unknown) => validDirections.includes(direction as Direction)) &&
+      decision.queue.every((entry: unknown) => {
+        if (typeof entry === 'string') return validDirections.includes(entry as Direction);
+        if (typeof entry === 'object' && entry !== null) {
+          const e = entry as { type?: unknown; direction?: unknown };
+          return (e.type === 'move' || e.type === 'dart') && validDirections.includes(e.direction as Direction);
+        }
+        return false;
+      }) &&
       typeof decision.lockedAt === 'number' &&
       Number.isFinite(decision.lockedAt) &&
       typeof decision.autoLock === 'boolean',
