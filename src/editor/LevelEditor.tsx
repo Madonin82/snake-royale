@@ -98,8 +98,22 @@ const DEFAULT_LEVEL: CampaignLevel = {
   },
 };
 
+const DEFAULT_LEVEL_STORAGE_KEY = 'snake-royale-editor-default-level';
+
+function loadDefaultLevel(): CampaignLevel | null {
+  try {
+    const raw = localStorage.getItem(DEFAULT_LEVEL_STORAGE_KEY);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw);
+    if (parsed && typeof parsed === 'object') return parsed as CampaignLevel;
+  } catch {
+    // Ignore corrupt storage
+  }
+  return null;
+}
+
 export const LevelEditor: React.FC = () => {
-  const [level, setLevel] = useState<CampaignLevel>(() => getCampaignPlaytestLevel() ?? { ...DEFAULT_LEVEL });
+  const [level, setLevel] = useState<CampaignLevel>(() => getCampaignPlaytestLevel() ?? loadDefaultLevel() ?? { ...DEFAULT_LEVEL });
   const levelRef = useRef(level);
   levelRef.current = level;
   const [activeTool, setActiveTool] = useState<Tool>('WALL');
@@ -436,6 +450,26 @@ export const LevelEditor: React.FC = () => {
     if (!confirmed) return;
     setLevel({ ...DEFAULT_LEVEL });
     showStatus('RESET TO DEFAULTS');
+  };
+
+  // Save current level as the default for next load
+  const handleSetDefault = () => {
+    try {
+      localStorage.setItem(DEFAULT_LEVEL_STORAGE_KEY, JSON.stringify(level));
+      showStatus('SAVED AS DEFAULT LEVEL');
+    } catch {
+      showStatus('FAILED TO SAVE DEFAULT');
+    }
+  };
+
+  // Clear the saved default (revert to built-in defaults on next load)
+  const handleClearDefault = () => {
+    try {
+      localStorage.removeItem(DEFAULT_LEVEL_STORAGE_KEY);
+      showStatus('DEFAULT CLEARED');
+    } catch {
+      showStatus('FAILED TO CLEAR DEFAULT');
+    }
   };
 
   const handlePlaytest = () => {
@@ -1060,6 +1094,24 @@ export const LevelEditor: React.FC = () => {
             className="px-4 py-1.5 bg-[#8BAC0F] text-[#0F380F] font-black text-xs hover:bg-[#8B1E0F] hover:text-white border-2 border-[#0F380F] active:translate-y-0.5"
           >
             ✕ CLEAR
+          </button>
+
+          <button
+            type="button"
+            onClick={handleSetDefault}
+            className="px-4 py-1.5 bg-[#8BAC0F] text-[#0F380F] font-black text-xs hover:bg-[#9BBC0F] border-2 border-[#0F380F] active:translate-y-0.5"
+            title="Save current level as the default loaded on next visit"
+          >
+            ★ SET AS DEFAULT
+          </button>
+
+          <button
+            type="button"
+            onClick={handleClearDefault}
+            className="px-4 py-1.5 bg-[#8BAC0F] text-[#0F380F] font-black text-xs hover:bg-[#9BBC0F] border-2 border-[#0F380F] active:translate-y-0.5"
+            title="Remove saved default (revert to built-in defaults)"
+          >
+            ☆ CLEAR DEFAULT
           </button>
         </div>
 
