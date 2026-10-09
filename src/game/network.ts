@@ -424,6 +424,17 @@ export class NetworkManager {
       });
       this.rtdbListeners.push(unsubReady);
 
+      const matchStartAcksRef = ref(rtdb, `rooms/${this.roomId}/matchStartAcks/p2`);
+      const unsubMatchStartAcks = onValue(matchStartAcksRef, (snapshot) => {
+        const matchId = snapshot.val();
+        this.notifyHandlers({
+          type: 'MATCH_START_ACK_SYNC',
+          role: 'p2',
+          matchId: typeof matchId === 'string' ? matchId : null,
+        });
+      });
+      this.rtdbListeners.push(unsubMatchStartAcks);
+
       // 4. Initialize WebRTC P2P Signaling in the background
       if (this.role === 'p1' || this.role === 'p2') {
         this.setupWebRtcSignaling();
@@ -522,6 +533,26 @@ export class NetworkManager {
         type: 'STATE_SYNC',
         stateRevision: Number.isSafeInteger(message.stateRevision) ? message.stateRevision : 0,
       });
+    }
+  }
+
+  public async acknowledgeMatchStart(match: MatchIdentity): Promise<boolean> {
+    if (
+      !this.isConnected ||
+      this.role !== 'p2' ||
+      !isCurrentMatch(this.getCurrentMatch(), match)
+    ) return false;
+    this.sendDataChannelMessage({
+      type: 'MATCH_START_ACK_SYNC',
+      role: 'p2',
+      matchId: match.matchId,
+    });
+    try {
+      await set(ref(rtdb, `rooms/${this.roomId}/matchStartAcks/p2`), match.matchId);
+      return true;
+    } catch (error) {
+      this.reportTransportError('Acknowledging match start', error);
+      return false;
     }
   }
 
@@ -931,35 +962,42 @@ export class NetworkManager {
         timestamp,
       };
 
-      this.sendDataChannelMessage(payload);
-
       const roomRef = ref(rtdb, `rooms/${roomId}`);
-      update(roomRef, {
+      const roomUpdate = update(roomRef, {
         status: 'racing',
         matchId,
         matchNumber,
         matchStartTrigger: timestamp,
         settings: settings || null,
+        matchStartAcks: { p2: null },
         lastActive: timestamp,
-        // Reset ready flags so this match's confirms are real false->true
-        // transitions. onValue only fires on change — stale `true`s from a
-        // previous match would leave both clients stuck at the ready check.
+        // Clear the prior match's acknowledgment and ready flags before this start.
+        // Stale `true`s would otherwise leave clients past the ready check.
         ready: {
           p1: { ready: false, updatedAt: timestamp },
           p2: { ready: false, updatedAt: timestamp },
         },
-      }).catch(error => this.reportTransportError('Writing match start to RTDB', error));
-
+      });
       const stateRef = ref(rtdb, `rooms/${roomId}/state/current`);
-      set(stateRef, {
-        matchId,
-        matchNumber,
-        stateRevision,
-        state: initialState,
-        locks: { p1: false, p2: false },
-        tick: initialState.tick,
-        updatedAt: timestamp,
-      }).catch(error => this.reportTransportError('Writing initial state to RTDB', error));
+      roomUpdate
+        .then(() => {
+          if (connectionGeneration !== this.connectionGeneration) return;
+          return set(stateRef, {
+            matchId,
+            matchNumber,
+            stateRevision,
+            state: initialState,
+            locks: { p1: false, p2: false },
+            tick: initialState.tick,
+            updatedAt: timestamp,
+          });
+        })
+        .then(() => {
+          if (connectionGeneration === this.connectionGeneration) {
+            this.sendDataChannelMessage(payload);
+          }
+        })
+        .catch(error => this.reportTransportError('Writing match start to RTDB', error));
     });
     return { matchId, matchNumber };
   }

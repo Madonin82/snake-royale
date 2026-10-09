@@ -18,7 +18,17 @@ import { shouldApplyRtdbBridgeCommand } from './game/aiBridgeRtdb';
 import { gamepadController, GamepadMenuAction } from './game/gamepad';
 import { networkManager } from './game/network';
 import { ADMIN_UIDS, auth, rtdb } from './firebase';
-import { canAcceptState, canAdoptMatch, isCurrentMatch, isNewerSequence, MatchIdentity } from './game/networkProtocol';
+import {
+  areBothOnlinePlayersReady,
+  canAcceptState,
+  canAdoptMatch,
+  canLockOnlineMatch,
+  isCurrentMatch,
+  isMatchStartAcknowledged,
+  mergeOnlineReadyFlags,
+  isNewerSequence,
+  MatchIdentity,
+} from './game/networkProtocol';
 import { normalizeGameState } from './game/normalize';
 import { exportReplayToFile, parseAndValidateReplayData, TurnDecision } from './game/replayFile';
 import {
@@ -180,6 +190,11 @@ const GameApp: React.FC<{ campaignPlaytestLevel: CampaignLevel | null }> = ({ ca
   const [gameState, setGameState] = useState<GameState>(() =>
     initialCampaignState ?? createLobbyState(initialCampaignSettings ?? DEFAULT_SETTINGS)
   );
+  const [joinerAcknowledgedMatchStart, setJoinerAcknowledgedMatchStart] = useState(false);
+  const joinerAcknowledgedMatchStartRef = useRef(false);
+  const [hasAcknowledgedMatchStart, setHasAcknowledgedMatchStart] = useState(false);
+  const hasAcknowledgedMatchStartRef = useRef(false);
+  const acknowledgedMatchStartRef = useRef<string | null>(null);
   const [gameOverConfirmed, setGameOverConfirmed] = useState(false);
   const [activeHitstop, setActiveHitstop] = useState<HitstopInfo | null>(null);
   const activeHitstopRef = useRef<HitstopInfo | null>(null);
@@ -465,6 +480,18 @@ const GameApp: React.FC<{ campaignPlaytestLevel: CampaignLevel | null }> = ({ ca
   }, []);
 
   const setLock = useCallback((who: string, isAuto = false) => {
+    const mode = playModeRef.current;
+    const isOnline = mode === 'ONLINE_HOST' || mode === 'ONLINE_JOIN' || mode === 'ONLINE_SERVER';
+    const isAuthority = mode === 'ONLINE_HOST' || mode === 'ONLINE_SERVER';
+    if (
+      isOnline &&
+      !canLockOnlineMatch(
+        stateRef.current.readyConfirmed,
+        isAuthority,
+        joinerAcknowledgedMatchStartRef.current,
+      )
+    ) return false;
+
     thinkTimeEndsRef.current = { ...thinkTimeEndsRef.current, [who]: null };
     lastThinkTimeTickRef.current = { ...lastThinkTimeTickRef.current, [who]: null };
     notifiedPlanningWindowRef.current = { ...notifiedPlanningWindowRef.current, [who]: false };
@@ -480,6 +507,7 @@ const GameApp: React.FC<{ campaignPlaytestLevel: CampaignLevel | null }> = ({ ca
       lockedAt: Date.now(),
       autoLock: isAuto,
     });
+    return true;
   }, [commitLocks]);
 
   const clearLocks = useCallback(() => {
@@ -618,10 +646,15 @@ const GameApp: React.FC<{ campaignPlaytestLevel: CampaignLevel | null }> = ({ ca
     const s = settingsRef.current;
     if (!s.turnBased || current.phase === 'OVER') return;
     const isOnline = playModeRef.current === 'ONLINE_HOST' || playModeRef.current === 'ONLINE_JOIN' || playModeRef.current === 'ONLINE_SERVER';
-    const bothReady = !isOnline || current.snakes
-      .filter(snake => snake.isAlive)
-      .every(snake => current.readyConfirmed?.[snake.id]);
-    if (!bothReady) return;
+    const isAuthority = playModeRef.current === 'ONLINE_HOST' || playModeRef.current === 'ONLINE_SERVER';
+    if (
+      isOnline &&
+      !canLockOnlineMatch(
+        current.readyConfirmed,
+        isAuthority,
+        joinerAcknowledgedMatchStartRef.current,
+      )
+    ) return;
 
     const aiSnakes = current.snakes.filter(snake =>
       snake.isAlive &&
@@ -752,7 +785,7 @@ const GameApp: React.FC<{ campaignPlaytestLevel: CampaignLevel | null }> = ({ ca
     const current = stateRef.current;
     const buffer = moveBuffersRef.current[who];
 
-    setLock(who, true);
+    if (!setLock(who, true)) return;
     if (playModeRef.current === 'ONLINE_JOIN') {
       if (buffer.length > 0 && sentTickRef.current !== current.tick) {
         sentTickRef.current = current.tick;
@@ -915,7 +948,7 @@ const GameApp: React.FC<{ campaignPlaytestLevel: CampaignLevel | null }> = ({ ca
     if (buf.length === 0 || locksRef.current[targetKey]) return;
 
     soundEngine.playTick();
-    setLock(targetKey);
+    if (!setLock(targetKey)) return;
 
     if (playModeRef.current === 'ONLINE_JOIN') {
       if (sentTickRef.current !== current.tick) {
@@ -936,6 +969,7 @@ const GameApp: React.FC<{ campaignPlaytestLevel: CampaignLevel | null }> = ({ ca
     const current = stateRef.current;
     if (current.phase === 'OVER' || inLobby || inOnlineLobby) return false;
     if (playModeRef.current === 'ONLINE_SERVER' || playModeRef.current === 'ONLINE_SPECTATOR') return false;
+    if (playModeRef.current === 'ONLINE_HOST' && !joinerAcknowledgedMatchStartRef.current) return false;
 
     const targetKey = getTargetKey(playerSlot, bridgeSeat);
 
@@ -1520,9 +1554,7 @@ const GameApp: React.FC<{ campaignPlaytestLevel: CampaignLevel | null }> = ({ ca
               playModeRef.current === 'ONLINE_JOIN' &&
               (onlineRoleRef.current === 'p1' || onlineRoleRef.current === 'p2') &&
               !locksRef.current[onlineRoleRef.current] &&
-              snapshot.state.snakes
-                .filter(snake => snake.isAlive)
-                .every(snake => snapshot.state.readyConfirmed?.[snake.id]) &&
+              areBothOnlinePlayersReady(snapshot.state.readyConfirmed) &&
               snapshot.state.phase !== 'OVER' &&
               snapshot.state.snakes.find(snake => snake.id === onlineRoleRef.current)?.isAlive
             ) {
@@ -1558,6 +1590,13 @@ const GameApp: React.FC<{ campaignPlaytestLevel: CampaignLevel | null }> = ({ ca
             (playModeRef.current === 'ONLINE_SERVER' && (msg.role === 'p1' || msg.role === 'p2'));
           if (isAuthority && msg.dir) {
             const current = stateRef.current;
+            if (
+              !canLockOnlineMatch(
+                current.readyConfirmed,
+                true,
+                joinerAcknowledgedMatchStartRef.current,
+              )
+            ) break;
             networkManager.recordTickLag(msg.tick, current.tick);
             const key = msg.role === 'p1' ? 'p1' : 'p2';
             const snake = current.snakes.find(candidate => candidate.id === key);
@@ -1572,7 +1611,7 @@ const GameApp: React.FC<{ campaignPlaytestLevel: CampaignLevel | null }> = ({ ca
               }
             }
             if (settingsRef.current.turnBased) {
-              setLock(key);
+              if (!setLock(key)) break;
               maybeAdvanceTurn();
             }
           }
@@ -1588,22 +1627,31 @@ const GameApp: React.FC<{ campaignPlaytestLevel: CampaignLevel | null }> = ({ ca
           if (msg.ready) {
             setGameState(prev => ({
               ...prev,
-              readyConfirmed: Object.fromEntries(prev.snakes.map(snake => [
-                snake.id,
-                !!msg.ready[snake.id],
-              ])),
+              readyConfirmed: mergeOnlineReadyFlags(prev.readyConfirmed, msg.ready),
             }));
           }
           break;
         }
 
         case 'READY_CONFIRM': {
-          if (msg.role) {
+          if (msg.role === 'p1' || msg.role === 'p2') {
             setGameState(prev => {
               const cur = prev.readyConfirmed || Object.fromEntries(prev.snakes.map(snake => [snake.id, false]));
               const updated = { ...cur, [msg.role]: true };
               return { ...prev, readyConfirmed: updated };
             });
+          }
+          break;
+        }
+
+        case 'MATCH_START_ACK_SYNC': {
+          if (
+            (playModeRef.current === 'ONLINE_HOST' || playModeRef.current === 'ONLINE_SERVER') &&
+            msg.role === 'p2' &&
+            isMatchStartAcknowledged(activeMatchRef.current, msg.matchId)
+          ) {
+            joinerAcknowledgedMatchStartRef.current = true;
+            setJoinerAcknowledgedMatchStart(true);
           }
           break;
         }
@@ -1626,6 +1674,22 @@ const GameApp: React.FC<{ campaignPlaytestLevel: CampaignLevel | null }> = ({ ca
       unsubscribe();
     };
   }, [inOnlineLobby, clearLocks, maybeAdvanceTurn, setLock, adoptRoomSettings, commitLocks, applyThinkTransition, dispatchAiState]);
+
+  useEffect(() => {
+    if (playMode !== 'ONLINE_JOIN' || inLobby || inOnlineLobby) return;
+    const match = activeMatchRef.current;
+    if (!match || acknowledgedMatchStartRef.current === match.matchId) return;
+
+    acknowledgedMatchStartRef.current = match.matchId;
+    hasAcknowledgedMatchStartRef.current = false;
+    setHasAcknowledgedMatchStart(false);
+    void networkManager.acknowledgeMatchStart(match).then(acknowledged => {
+      if (acknowledged && activeMatchRef.current?.matchId === match.matchId) {
+        hasAcknowledgedMatchStartRef.current = true;
+        setHasAcknowledgedMatchStart(true);
+      }
+    });
+  }, [gameState, inLobby, inOnlineLobby, playMode]);
 
   // Latency Report Polling
   useEffect(() => {
@@ -1680,7 +1744,14 @@ const GameApp: React.FC<{ campaignPlaytestLevel: CampaignLevel | null }> = ({ ca
       if (current.phase === 'OVER') return;
       const isOnlineAuthority =
         playModeRef.current === 'ONLINE_HOST' || playModeRef.current === 'ONLINE_SERVER';
-      if (isOnlineAuthority && current.snakes.some(snake => !current.readyConfirmed?.[snake.id])) return;
+      if (
+        isOnlineAuthority &&
+        !canLockOnlineMatch(
+          current.readyConfirmed,
+          true,
+          joinerAcknowledgedMatchStartRef.current,
+        )
+      ) return;
 
       for (const snake of current.snakes) {
         const buffered = realTimeInputBufferRef.current[snake.id];
@@ -1754,6 +1825,11 @@ const GameApp: React.FC<{ campaignPlaytestLevel: CampaignLevel | null }> = ({ ca
   const handleConfirmReady = useCallback(() => {
     const isOnline = playModeRef.current === 'ONLINE_HOST' || playModeRef.current === 'ONLINE_JOIN' || playModeRef.current === 'ONLINE_SERVER';
     if (!isOnline) return;
+    if (
+      (playModeRef.current === 'ONLINE_HOST' || playModeRef.current === 'ONLINE_SERVER') &&
+      !joinerAcknowledgedMatchStartRef.current
+    ) return;
+    if (playModeRef.current === 'ONLINE_JOIN' && !hasAcknowledgedMatchStartRef.current) return;
     const mySeat = onlineRoleRef.current === 'p2' ? 'p2' : 'p1';
 
     setGameState(prev => {
@@ -1790,6 +1866,15 @@ const GameApp: React.FC<{ campaignPlaytestLevel: CampaignLevel | null }> = ({ ca
         : { p1: playerNamesRef.current.p1 || 'PLAYER 1', p2: me || 'PLAYER 2' };
     }
     const isOnline = playMode === 'ONLINE_HOST' || playMode === 'ONLINE_JOIN' || playMode === 'ONLINE_SERVER';
+    const isOnlineAuthority = playMode === 'ONLINE_HOST' || playMode === 'ONLINE_SERVER';
+    if (isOnlineAuthority) {
+      joinerAcknowledgedMatchStartRef.current = false;
+      setJoinerAcknowledgedMatchStart(false);
+    }
+    if (playMode === 'ONLINE_JOIN') {
+      hasAcknowledgedMatchStartRef.current = false;
+      setHasAcknowledgedMatchStart(false);
+    }
     const hostCustomLevel = (playMode === 'ONLINE_HOST' || playMode === 'ONLINE_SERVER')
       ? customOnlineLevelRef.current
       : null;
@@ -2179,6 +2264,15 @@ const GameApp: React.FC<{ campaignPlaytestLevel: CampaignLevel | null }> = ({ ca
                   hitstop={activeHitstop}
                   fatalMoveAnimating={fatalMoveSnakes}
                 />
+                {!replayActive &&
+                  (playMode === 'ONLINE_HOST' || playMode === 'ONLINE_SERVER') &&
+                  !joinerAcknowledgedMatchStart && (
+                    <div role="status" className="absolute inset-0 bg-[#0F380F]/90 backdrop-blur-xs flex items-center justify-center p-3 z-20 font-mono text-[#9BBC0F]">
+                      <div className="bg-[#9BBC0F] border-4 border-[#0F380F] shadow-[6px_6px_0px_#0F380F] p-4 max-w-[340px] w-full text-center text-sm font-black text-[#0F380F]">
+                        WAITING FOR PLAYER 2 TO LOAD THE MATCH...
+                      </div>
+                    </div>
+                  )}
                 {showTurnHint && displayState.turnBased && displayState.phase !== 'OVER' && !replayActive && (
                   <div role="status" className="absolute top-1 left-1/2 z-30 flex w-[min(20rem,calc(100%-1rem))] -translate-x-1/2 items-center justify-between gap-2 border-2 border-[#0F380F] bg-[#9BBC0F] px-2 py-1 font-mono text-[10px] font-bold text-[#0F380F] shadow-[2px_2px_0px_#0F380F]">
                     <span>BOTH LOCK → BOARD STEPS</span>
@@ -2195,7 +2289,10 @@ const GameApp: React.FC<{ campaignPlaytestLevel: CampaignLevel | null }> = ({ ca
                     </button>
                   </div>
                 )}
-                {!replayActive && (playMode === 'ONLINE_HOST' || playMode === 'ONLINE_JOIN' || playMode === 'ONLINE_SERVER') && !(displayState.readyConfirmed?.p1 && displayState.readyConfirmed?.p2) && (
+                {!replayActive &&
+                  (playMode === 'ONLINE_HOST' || playMode === 'ONLINE_JOIN' || playMode === 'ONLINE_SERVER') &&
+                  !((playMode === 'ONLINE_HOST' || playMode === 'ONLINE_SERVER') && !joinerAcknowledgedMatchStart) &&
+                  !areBothOnlinePlayersReady(displayState.readyConfirmed) && (
                   <div className="absolute inset-0 bg-[#0F380F]/90 backdrop-blur-xs flex flex-col items-center justify-center p-3 z-20 font-mono text-[#9BBC0F]">
                     <div className="bg-[#9BBC0F] border-4 border-[#0F380F] shadow-[6px_6px_0px_#0F380F] p-3 sm:p-4 max-w-[340px] w-full text-center flex flex-col gap-2.5">
                       <div className="text-xs font-black uppercase tracking-wider text-[#0F380F]">
@@ -2217,13 +2314,19 @@ const GameApp: React.FC<{ campaignPlaytestLevel: CampaignLevel | null }> = ({ ca
                       </div>
 
                       {!(displayState.readyConfirmed?.[onlineRole === 'p2' ? 'p2' : 'p1']) ? (
-                        <button
-                          onClick={handleConfirmReady}
-                          className="w-full py-2.5 bg-[#0F380F] hover:bg-[#306230] text-[#9BBC0F] border-2 border-[#0F380F] font-black text-sm cursor-pointer shadow-[3px_3px_0px_#0F380F] flex items-center justify-center gap-2 animate-pulse"
-                        >
-                          <span>PRESS A TO START</span>
-                          <span className="text-[10px] bg-[#9BBC0F] text-[#0F380F] px-1.5 py-0.5 font-bold">[A / ENTER]</span>
-                        </button>
+                        playMode === 'ONLINE_JOIN' && !hasAcknowledgedMatchStart ? (
+                          <div className="bg-[#8BAC0F] text-[#0F380F] p-2.5 border-2 border-[#0F380F] text-xs font-black">
+                            SYNCING MATCH START...
+                          </div>
+                        ) : (
+                          <button
+                            onClick={handleConfirmReady}
+                            className="w-full py-2.5 bg-[#0F380F] hover:bg-[#306230] text-[#9BBC0F] border-2 border-[#0F380F] font-black text-sm cursor-pointer shadow-[3px_3px_0px_#0F380F] flex items-center justify-center gap-2 animate-pulse"
+                          >
+                            <span>PRESS A TO START</span>
+                            <span className="text-[10px] bg-[#9BBC0F] text-[#0F380F] px-1.5 py-0.5 font-bold">[A / ENTER]</span>
+                          </button>
+                        )
                       ) : (
                         <div className="bg-[#306230] text-[#9BBC0F] p-2.5 border-2 border-[#0F380F] text-xs font-black">
                           ✅ YOU ARE READY! WAITING FOR OPPONENT...
