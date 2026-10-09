@@ -699,6 +699,35 @@ export const LevelEditor: React.FC = () => {
               </select>
             </div>
 
+            {/* Skills Available */}
+            <div>
+              <label className="block font-black mb-1">SKILLS AVAILABLE:</label>
+              <select
+                value={level.skillsAvailable === undefined || level.skillsAvailable === 'after_race' ? 'after_race' : level.skillsAvailable.startsWith('after_turns:') ? 'after_turns' : level.skillsAvailable}
+                onChange={(e) => {
+                  const sel = e.target.value;
+                  if (sel === 'after_turns') {
+                    setLevel({ ...level, skillsAvailable: 'after_turns:30' as SkillsAvailableConfig });
+                  } else {
+                    setLevel({ ...level, skillsAvailable: sel as SkillsAvailableConfig });
+                  }
+                }}
+                className="w-full bg-[#9BBC0F] border-2 border-[#0F380F] px-2 py-1 font-mono font-bold text-[#0F380F] outline-none cursor-pointer"
+              >
+                <option value="immediate">IMMEDIATE</option>
+                <option value="after_race">AFTER RACE</option>
+                <option value="after_turns">AFTER N TURNS</option>
+              </select>
+              {(level.skillsAvailable ?? 'after_race').startsWith('after_turns:') && (
+                <label className="flex flex-col gap-1 font-bold mt-2">
+                  TURNS
+                  <input type="number" min="0" value={Number((level.skillsAvailable as string).slice('after_turns:'.length)) || 0}
+                    onChange={e => setLevel({ ...level, skillsAvailable: `after_turns:${Math.max(0, parseInt(e.target.value) || 0)}` as SkillsAvailableConfig })}
+                    className="w-full bg-[#9BBC0F] border-2 border-[#0F380F] px-2 py-1 font-mono font-bold outline-none" />
+                </label>
+              )}
+            </div>
+
             {/* Spawn configuration */}
             <div className="space-y-2 pt-1 border-t-2 border-[#0F380F]">
               {level.spawns.slice(0, 3).map((spawn, index) => {
@@ -749,6 +778,14 @@ export const LevelEditor: React.FC = () => {
                       </select>
                     </label>
                   )}
+                  <label className="flex flex-col gap-1 font-bold">
+                    SKILL
+                    <select value={spawn.equippedSkill ?? ''} onChange={e => updateSpawn(index, { equippedSkill: (e.target.value || null) as SkillId | null })}
+                      className="w-full bg-[#9BBC0F] border-2 border-[#0F380F] px-2 py-1 font-mono font-bold outline-none">
+                      <option value="">NONE</option>
+                      <option value="dart">DART</option>
+                    </select>
+                  </label>
                   <div className="col-span-2 text-[9px] font-bold opacity-80">
                     CELL {spawn.position.x},{spawn.position.y} · {spawn.body ? `${spawn.body.length} PAINTED CELLS` : 'AUTO BODY'}
                   </div>
