@@ -1,7 +1,7 @@
 import { Direction, GamePhase, GameSettings, GameState, Position, Snake } from '../types/game';
 import { soundEngine } from '../audio/soundEngine';
 import { createInitialThinkTimeValues } from './thinkTime';
-import { withLegacySnakeAccessors } from './snakeArray';
+import { recordFirstToResults, recordSurviveResults } from './objectives';
 
 export const GAMEBOY_COLORS = {
   DARKEST: '#0F380F',   // P1 snake, closed ring, borders, deep text
@@ -101,7 +101,7 @@ export function createInitialState(
     phaseEndTime: now + raceDurationMs,
     round: initialRound,
     tokens: initialTokens,
-    snakes: withLegacySnakeAccessors([p1, p2]),
+    snakes: [p1, p2],
     ringInset: 0,
     isTelegraphingShrink: false,
     telegraphRingInset: 0,
@@ -213,8 +213,21 @@ export function processGameTick(
     tick: currentState.tick + 1,
     totalMatchTime: currentState.totalMatchTime + deltaMs,
     phaseTimeRemaining: Math.max(0, currentState.phaseTimeRemaining - deltaMs),
-    snakes: withLegacySnakeAccessors(currentState.snakes.map(snake => ({ ...snake, body: [...snake.body] }))),
+    snakes: currentState.snakes.map(snake => ({ ...snake, body: [...snake.body] })),
     tokens: [...currentState.tokens],
+    ...(currentState.campaignTokenRules
+      ? { campaignTokenRules: { ...currentState.campaignTokenRules } }
+      : {}),
+    ...(currentState.campaignObjectives
+      ? {
+          campaignObjectives: {
+            ...currentState.campaignObjectives,
+            bonus: [...currentState.campaignObjectives.bonus],
+            firstToResults: [...currentState.campaignObjectives.firstToResults],
+            surviveResults: [...currentState.campaignObjectives.surviveResults],
+          },
+        }
+      : {}),
   };
 
   const events: TickResult['events'] = {
@@ -374,6 +387,8 @@ export function processGameTick(
     return true;
   });
 
+  recordSurviveResults(state);
+
   if (died.some(Boolean)) {
     events.deathOccurred = true;
     const survivors = snakes.filter(snake => snake.isAlive);
@@ -403,10 +418,14 @@ export function processGameTick(
     if (tokenIndex !== -1) {
       snakes[i].score += 1;
       events.tokenEaten[snakes[i].id] = true;
+      if (snakes[i].id === 'p1' && state.campaignObjectives) {
+        state.campaignObjectives.p1TokensCollected += 1;
+      }
       consumedTokenIndices.add(tokenIndex);
     }
   }
   state.tokens = state.tokens.filter((_, index) => !consumedTokenIndices.has(index));
+  recordFirstToResults(state);
 
   for (let i = 0; i < snakes.length; i++) {
     if (!snakes[i].isAlive) continue;
@@ -414,11 +433,45 @@ export function processGameTick(
     if (!events.tokenEaten[snakes[i].id]) snakes[i].body.pop();
   }
 
-  // 8. ESCALATE TOKEN SPAWNS (Only during Phase 1 Racing)
+  if (state.phase === 'RACING' && state.campaignTokenRules && consumedTokenIndices.size > 0) {
+    const rules = state.campaignTokenRules;
+    if (rules.respawn && rules.mode !== 'FIXED_SET') {
+      const getRoundTokenCount = () =>
+        rules.mode === 'ESCALATING' ? rules.count + state.round - 1 : rules.count;
+      rules.tokensEatenInRound += consumedTokenIndices.size;
+      while (rules.tokensEatenInRound >= getRoundTokenCount()) {
+        rules.tokensEatenInRound -= getRoundTokenCount();
+        state.round += 1;
+      }
+      const desiredCount = getRoundTokenCount();
+      const replacementCount = Math.max(0, desiredCount - state.tokens.length);
+      state.tokens.push(...spawnTokens(
+        replacementCount,
+        settings.gridSize,
+        state.ringInset,
+        snakes,
+        state.tokens,
+        state.walls,
+      ));
+    }
+  }
+
+  // 8. TOKEN SPAWNS (Only during Phase 1 Racing)
   if (state.phase === 'RACING' && state.tokens.length === 0) {
-    state.round += 1;
-    const newTokens = spawnTokens(state.round, settings.gridSize, state.ringInset, snakes, [], state.walls);
-    state.tokens.push(...newTokens);
+    if (state.campaignTokenRules) {
+      state.phase = 'SHRINKING';
+      if (settings.turnBased) {
+        state.phaseTurnsRemaining = settings.shrinkEveryTurns;
+        state.isTelegraphingShrink = false;
+      } else {
+        state.phaseTimeRemaining = 120 * 1000;
+        state.phaseEndTime = Date.now() + 120 * 1000;
+      }
+    } else {
+      state.round += 1;
+      const newTokens = spawnTokens(state.round, settings.gridSize, state.ringInset, snakes, [], state.walls);
+      state.tokens.push(...newTokens);
+    }
   }
 
   return { nextState: state, events };

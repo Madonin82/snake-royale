@@ -25,6 +25,21 @@ test('replay v2 exports and parses decision metadata', () => {
   );
 });
 
+test('replay settings retain campaign level and AI style metadata', () => {
+  const settings = {
+    ...DEFAULT_SETTINGS,
+    levelId: 'boss-01',
+    levelName: 'THE BOSS',
+    aiStyle: 'HEADHUNTER' as const,
+  };
+  const replay = createReplayDataObject(states, settings, [], { p1: false, p2: false });
+
+  assert.equal(replay.settings.levelId, 'boss-01');
+  assert.equal(replay.settings.levelName, 'THE BOSS');
+  assert.equal(replay.settings.aiStyle, 'HEADHUNTER');
+  assert.deepEqual(parseAndValidateReplayData(JSON.stringify(replay)).settings, replay.settings);
+});
+
 test('legacy replay v1 defaults decision metadata', () => {
   const replay = {
     format: 'snake-royale-replay',

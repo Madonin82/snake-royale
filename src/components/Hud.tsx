@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { Direction, GameState, LatencyReport, PlayMode } from '../types/game';
 import { Activity, Gamepad, Wifi } from 'lucide-react';
+import { getCampaignObjectiveProgress, isCampaignObjectiveComplete } from '../game/objectives';
 
 interface HudProps {
   gameState: GameState;
@@ -35,15 +36,21 @@ export const Hud: React.FC<HudProps> = ({
   onP2Lock,
 }) => {
   // Who is "you" on this screen, per seat — drives the (YOU) tags.
-  const seatTag = (seat: 'p1' | 'p2'): string => {
-    if (playMode === 'ONLINE_SERVER' || playMode === 'ONLINE_SPECTATOR') return seat === 'p1' ? '(P1)' : '(P2)';
-    if (playMode === 'SOLO_AI') return seat === 'p1' ? '(YOU)' : '(BOT)';
-    if (playMode === 'LOCAL_2P') return seat === 'p1' ? '(P1)' : '(P2)';
+  const seatTag = (seat: string): string => {
+    const seatNumber = Number(seat.slice(1));
+    if (playMode === 'ONLINE_SERVER' || playMode === 'ONLINE_SPECTATOR') return `(P${seatNumber})`;
+    if (playMode === 'SOLO_AI') return seat === 'p1' ? '(YOU)' : `(BOT ${seatNumber})`;
+    if (playMode === 'LOCAL_2P') return `(P${seatNumber})`;
     if (viewerSeat) return viewerSeat === seat ? '(YOU)' : '(REMOTE)';
     return seat === 'p1' ? '(YOU)' : '';
   };
   const isRacing = gameState.phase === 'RACING';
   const isShrinking = gameState.phase === 'SHRINKING';
+  const objectiveList = gameState.campaignObjectives
+    ? [gameState.campaignObjectives.primary, ...gameState.campaignObjectives.bonus]
+        .map((objective, index) => ({ objective, index }))
+        .filter((item): item is { objective: NonNullable<typeof item.objective>; index: number } => item.objective !== null)
+    : [];
 
   // Live clock for the turn timer (re-renders 4x/sec while a turn is open)
   const [nowMs, setNowMs] = useState<number>(() => Date.now());
@@ -59,10 +66,10 @@ export const Hud: React.FC<HudProps> = ({
     const s = Math.floor(secs % 60);
     return m > 0 ? `${m}:${s < 10 ? '0' : ''}${s}` : `${s}s`;
   };
-  const thinkLabel = (who: 'p1' | 'p2') => {
+  const thinkLabel = (who: string) => {
     const snake = gameState.snakes.find(candidate => candidate.id === who);
     if (!snake) return who;
-    if (!thinkSessions) return snake.name;
+    if (!thinkSessions || !thinkSessions[who]) return snake.name;
     const session = thinkSessions[who];
     const locked = isLocked(who);
     const lastTurn = gameState.lastTurnTimes?.[who] ?? null;
@@ -73,12 +80,12 @@ export const Hud: React.FC<HudProps> = ({
     return `${snake.name} … ${fmtSecs(elapsed)}`;
   };
 
-  const isLocked = (who: 'p1' | 'p2') => {
+  const isLocked = (who: string) => {
     if (!locks) return false;
     return locks[who] ?? false;
   };
 
-  const isLocalSeat = (seat: 'p1' | 'p2'): boolean => {
+  const isLocalSeat = (seat: string): boolean => {
     if (playMode === 'LOCAL_2P') return true;
     if (playMode === 'SOLO_AI') return seat === 'p1';
     if (playMode === 'ONLINE_HOST' || playMode === 'ONLINE_SERVER') return seat === 'p1';
@@ -150,7 +157,7 @@ export const Hud: React.FC<HudProps> = ({
     </div>
   );
 
-  const renderOutcomeBadge = (who: 'p1' | 'p2') => {
+  const renderOutcomeBadge = (who: string) => {
     if (gameState.phase !== 'OVER' || !gameState.winner) return null;
     const isWinner = gameState.winner === who;
     const isDraw = gameState.winner === 'DRAW';
@@ -170,11 +177,11 @@ export const Hud: React.FC<HudProps> = ({
     );
   };
 
-  const renderDesktopPlayerPanel = (who: 'p1' | 'p2') => {
+  const renderDesktopPlayerPanel = (who: string) => {
     const snake = gameState.snakes.find(candidate => candidate.id === who);
     if (!snake) return null;
     const locked = isLocked(who);
-    const canSeeMoves = replayActive || playMode === 'LOCAL_2P' || viewerSeat === who;
+    const canSeeMoves = replayActive || playMode === 'LOCAL_2P' || viewerSeat === who || gameState.snakes.length > 2;
     const lastTurn = gameState.lastTurnTimes?.[who] ?? null;
     const totalThink = gameState.totalThinkTime?.[who] ?? 0;
     const buffer = moveBuffers?.[who] ?? [];
@@ -253,13 +260,12 @@ export const Hud: React.FC<HudProps> = ({
   };
 
   const renderMobileCards = (
-    <div className="mobile-cards-area grid grid-cols-2 gap-2 w-full font-mono text-[#0F380F] shrink-0">
-      {(['p1', 'p2'] as const).map((who) => {
-        const snake = gameState.snakes.find(candidate => candidate.id === who);
-        if (!snake) return null;
+    <div className={`mobile-cards-area grid ${gameState.snakes.length > 2 ? 'grid-cols-3' : 'grid-cols-2'} gap-2 w-full font-mono text-[#0F380F] shrink-0`}>
+    {gameState.snakes.map((snake) => {
+      const who = snake.id;
         const locked = isLocked(who);
         const buffer = moveBuffers?.[who] ?? [];
-        const local = replayActive || isLocalSeat(who);
+        const local = replayActive || isLocalSeat(who) || gameState.snakes.length > 2;
         const countdown = thinkTimeRemaining?.[who] ?? null;
         const lastTurn = gameState.lastTurnTimes?.[who] ?? null;
         const totalThink = gameState.totalThinkTime?.[who] ?? 0;
@@ -290,6 +296,9 @@ export const Hud: React.FC<HudProps> = ({
               local ? (
                 <div className="mt-1.5 bg-[#8BAC0F]/40 border border-[#0F380F] px-1.5 h-7 flex items-center justify-between gap-1 text-[9px] font-bold">
                   <span className="shrink-0 tabular-nums">{locked ? '🔒 ' : ''}QUEUE {buffer.length}/{snake.body.length}</span>
+                  <span className="min-w-0 flex-1 truncate text-right opacity-80">
+                    {buffer.map(dir => dir === 'UP' ? '↑' : dir === 'DOWN' ? '↓' : dir === 'LEFT' ? '←' : '→').join('')}
+                  </span>
                   <span className="shrink-0 w-7 text-right text-base leading-none font-black tabular-nums">
                     {!locked && countdown !== null && gameState.phase !== 'OVER' ? `${countdown}s` : ''}
                   </span>
@@ -344,12 +353,25 @@ export const Hud: React.FC<HudProps> = ({
           </div>
         </div>
         {topStripContent}
+        {objectiveList.length > 0 && (
+          <div className="w-full border-x-2 border-b-2 border-[#0F380F] bg-[#9BBC0F] px-2 py-1 font-mono text-[9px] font-bold text-[#0F380F]">
+            {objectiveList.map(({ objective, index }) => {
+              const complete = isCampaignObjectiveComplete(objective, gameState, index);
+              const icon = complete ? '✓' : gameState.phase === 'OVER' ? '✗' : '○';
+              return (
+                <div key={`${index}-${objective.text}`} className="flex justify-between gap-2">
+                  <span className="truncate">{icon} {getCampaignObjectiveProgress(objective, gameState, index)}</span>
+                  <span className="shrink-0">{index === 0 ? 'PRIMARY' : `BONUS ${index}`}</span>
+                </div>
+              );
+            })}
+          </div>
+        )}
       </div>
 
       <div className="portrait-opponents hidden w-full items-center gap-1 border-2 border-[#0F380F] bg-[#9BBC0F] px-1 py-0.5 font-mono text-[10px] font-bold text-[#0F380F]">
-        {(['p1', 'p2'] as const).map((who) => {
-          const snake = gameState.snakes.find(candidate => candidate.id === who);
-          if (!snake) return null;
+        {gameState.snakes.map((snake) => {
+          const who = snake.id;
           return (
             <div key={who} className="flex min-w-0 flex-1 items-center gap-1">
               <span className={`h-2 w-2 shrink-0 border border-[#0F380F] ${who === 'p1' ? 'bg-[#0F380F]' : 'bg-[#306230]'}`} />
@@ -363,11 +385,13 @@ export const Hud: React.FC<HudProps> = ({
       </div>
 
       <div className="desktop-panel-left">
-        {renderDesktopPlayerPanel('p1')}
+        {gameState.snakes[0] && renderDesktopPlayerPanel(gameState.snakes[0].id)}
       </div>
 
       <div className="desktop-panel-right">
-        {renderDesktopPlayerPanel('p2')}
+        {gameState.snakes.slice(1).map(snake => (
+          <React.Fragment key={snake.id}>{renderDesktopPlayerPanel(snake.id)}</React.Fragment>
+        ))}
       </div>
 
       {renderMobileCards}

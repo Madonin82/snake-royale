@@ -1,5 +1,4 @@
 import { CompactGameState, GameState } from '../types/game';
-import { withLegacySnakeAccessors } from './snakeArray';
 
 export function cloneGameState(state: GameState): GameState {
   return {
@@ -8,10 +7,10 @@ export function cloneGameState(state: GameState): GameState {
     totalThinkTime: { ...state.totalThinkTime },
     tokens: state.tokens.map(token => ({ ...token })),
     walls: state.walls?.map(wall => ({ ...wall })),
-    snakes: withLegacySnakeAccessors(state.snakes.map(snake => ({
+    snakes: state.snakes.map(snake => ({
       ...snake,
       body: snake.body.map(position => ({ ...position })),
-    }))),
+    })),
     readyConfirmed: state.readyConfirmed ? { ...state.readyConfirmed } : undefined,
   };
 }

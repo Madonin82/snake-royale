@@ -1,29 +1,32 @@
 import { Position, Direction } from '../types/game';
 
+export type CampaignTokenMode = 'ESCALATING' | 'FIXED' | 'FIXED_SET';
+export type CampaignAiStyle = 'GREEDY' | 'TURTLE' | 'CUTOFF' | 'HEADHUNTER' | 'PATROL';
+
+export interface SpawnConfig {
+  position: Position;
+  direction: Direction;
+  startLength: number;
+  startingScore: number;
+  aiStyle: CampaignAiStyle;
+  body?: Position[];
+}
+
 export interface CampaignLevel {
   id: string;                    // slug, e.g. "maze-snake-01"
   name: string;                  // display name, e.g. "The Maze"
   description: string;           // one-line briefing shown before the stage
 
-  gridSize: number;              // 8, 12, or 16
+  gridSize: number;              // 4 through 16
   walls: Position[];             // static wall cells (empty = open arena)
 
-  playerSpawn: {                 // P1 (the human)
-    position: Position;
-    direction: Direction;
-    startLength: number;         // e.g. 3
-  };
-  opponentSpawn: {               // P2 (the AI)
-    position: Position;
-    direction: Direction;
-    startLength: number;         // e.g. 20 for maze-snake
-    aiStyle: 'GREEDY' | 'TURTLE' | 'CUTOFF' | 'HEADHUNTER' | 'PATROL';
-  };
+  spawns: SpawnConfig[];
 
   tokens: {
     positions: Position[];       // fixed spawn points (empty = random)
     count: number;               // how many active at once
     respawn: boolean;
+    mode: CampaignTokenMode;
   };
 
   phases: {
@@ -32,7 +35,9 @@ export interface CampaignLevel {
   };
 
   objectives: {
-    primary: string;             // e.g. "Survive 30 turns"
-    bonus: string[];             // e.g. ["Collect 5 tokens", "Opponent scores zero"]
+    // Objective strings use "collect:N", "first_to:N", "survive:N",
+    // "win_under:N", "shutout", or "outscore:N" (for example "collect:5").
+    primary: string;
+    bonus: string[];
   };
 }
