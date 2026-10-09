@@ -129,10 +129,9 @@ export class NetworkManager {
         p2Name = this.role === 'p2' && cleanName ? cleanName : null;
 
         createdRoom = true;
-        const settings = hostSettings ? { ...hostSettings } : null;
-        if (settings && settings.levelId === undefined) {
-          delete settings.levelId;
-        }
+        const settings = hostSettings
+          ? Object.fromEntries(Object.entries(hostSettings).filter(([, value]) => value !== undefined))
+          : null;
         await set(roomRef, {
           createdAt: Date.now(),
           p1Uid: this.role === 'p1' ? uid : null,
