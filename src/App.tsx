@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
-import { CompactGameState, Direction, GameSettings, GameState, LatencyReport, PlayMode, Position, SkillId } from './types/game';
+import { BufferEntry, CompactGameState, Direction, GameSettings, GameState, LatencyReport, PlayMode, Position, SkillId } from './types/game';
 import { onAuthStateChanged, User } from 'firebase/auth';
 import { onValue, ref } from 'firebase/database';
 import {
@@ -11,6 +11,7 @@ import {
   isOppositeDirection,
   processGameTick,
   queueSnakeDirection,
+  queueSnakeSkill,
 } from './game/engine';
 import { canActivateSkill, isValidDartDirection, SKILLS } from './game/skills';
 import { calculateAIMove } from './game/ai';
@@ -62,26 +63,45 @@ import {
 } from './editor/playtestSession';
 import { ArrowLeft, Volume2, VolumeX } from 'lucide-react';
 
-function computePreviewSnake(snake: any, buffer: Direction[]): Position[] {
+function computePreviewSnake(snake: any, buffer: BufferEntry[]): Position[] {
   if (buffer.length === 0) return snake.body;
   let body = [...snake.body.map((seg: any) => ({ ...seg }))];
-  for (const dir of buffer) {
-    const nextHead = getNextHeadPosition(body[0], dir);
-    body.unshift(nextHead);
-    body.pop();
+  for (const entry of buffer) {
+    if (entry.type === 'dart') {
+      // Dart: 1 normal cell + 2 dart cells in the chosen direction
+      for (let i = 0; i < 3; i++) {
+        const nextHead = getNextHeadPosition(body[0], entry.direction);
+        body.unshift(nextHead);
+        body.pop();
+      }
+    } else {
+      const nextHead = getNextHeadPosition(body[0], entry.direction);
+      body.unshift(nextHead);
+      body.pop();
+    }
   }
   return body;
 }
 
-function computeCommittedPath(snake: any, buffer: Direction[]): Position[] {
+function computeCommittedPath(snake: any, buffer: BufferEntry[]): Position[] {
   if (buffer.length === 0) return [];
   let body = [...snake.body.map((seg: any) => ({ ...seg }))];
   const path: Position[] = [];
-  for (const dir of buffer) {
-    const nextHead = getNextHeadPosition(body[0], dir);
-    path.push(nextHead);
-    body.unshift(nextHead);
-    body.pop();
+  for (const entry of buffer) {
+    if (entry.type === 'dart') {
+      // Dart: 1 normal cell + 2 dart cells — show all intermediate cells
+      for (let i = 0; i < 3; i++) {
+        const nextHead = getNextHeadPosition(body[0], entry.direction);
+        path.push(nextHead);
+        body.unshift(nextHead);
+        body.pop();
+      }
+    } else {
+      const nextHead = getNextHeadPosition(body[0], entry.direction);
+      path.push(nextHead);
+      body.unshift(nextHead);
+      body.pop();
+    }
   }
   return path;
 }
@@ -273,9 +293,9 @@ const GameApp: React.FC<{ campaignPlaytestLevel: CampaignLevel | null }> = ({ ca
 
   const stateRef = useRef<GameState>(gameState);
   stateRef.current = gameState;
-  const initialBuffers = Object.fromEntries(gameState.snakes.map(snake => [snake.id, [] as Direction[]]));
-  const [moveBuffers, setMoveBuffers] = useState<Record<string, Direction[]>>(initialBuffers);
-  const moveBuffersRef = useRef<Record<string, Direction[]>>(initialBuffers);
+  const initialBuffers = Object.fromEntries(gameState.snakes.map(snake => [snake.id, [] as BufferEntry[]]));
+  const [moveBuffers, setMoveBuffers] = useState<Record<string, BufferEntry[]>>(initialBuffers);
+  const moveBuffersRef = useRef<Record<string, BufferEntry[]>>(initialBuffers);
   moveBuffersRef.current = moveBuffers;
 
   const clearMoveBuffers = useCallback(() => {
@@ -327,8 +347,8 @@ const GameApp: React.FC<{ campaignPlaytestLevel: CampaignLevel | null }> = ({ ca
     const baseState = matchHistory[replayIdx] ?? gameState;
     const currentTick = baseState.tick;
     const decisions = turnDecisionsRef.current;
-    const queues: Record<string, Direction[]> = Object.fromEntries(
-      baseState.snakes.map(snake => [snake.id, [] as Direction[]]),
+    const queues: Record<string, BufferEntry[]> = Object.fromEntries(
+      baseState.snakes.map(snake => [snake.id, [] as BufferEntry[]]),
     );
     for (const d of decisions) {
       if (d.tick === currentTick) {
@@ -699,7 +719,7 @@ const GameApp: React.FC<{ campaignPlaytestLevel: CampaignLevel | null }> = ({ ca
                 : snake),
             }, s.gridSize, aiSnake.id, s.campaignAiDifficulties?.[aiSnake.id] ?? s.botDifficulty);
             if (aiDir && !isOppositeDirection(curDir, aiDir)) {
-              aiBuffer.push(aiDir);
+              aiBuffer.push({ type: 'move', direction: aiDir });
               curDir = aiDir;
               const nextHead = getNextHeadPosition(simBody[0], aiDir);
               simBody.unshift(nextHead);
@@ -710,7 +730,7 @@ const GameApp: React.FC<{ campaignPlaytestLevel: CampaignLevel | null }> = ({ ca
           }
           if (aiBuffer.length === 0) {
             const fallback = ['UP', 'DOWN', 'LEFT', 'RIGHT'].find(d => !isOppositeDirection(curDir, d as Direction)) as Direction || 'LEFT';
-            aiBuffer.push(fallback);
+            aiBuffer.push({ type: 'move', direction: fallback });
           }
         }
         moveBuffersRef.current = { ...moveBuffersRef.current, [aiSnake.id]: aiBuffer };
@@ -735,8 +755,19 @@ const GameApp: React.FC<{ campaignPlaytestLevel: CampaignLevel | null }> = ({ ca
     for (const snake of current.snakes) {
       if (!snake.isAlive) continue;
       const buffer = moveBuffersRef.current[snake.id] ?? [];
-      const direction = buffer.shift() || snake.direction;
-      queueSnakeDirection(snake, direction);
+      const entry = buffer.shift();
+      if (entry) {
+        // Defensive: handle legacy raw direction strings
+        if (typeof entry === 'string') {
+          queueSnakeDirection(snake, entry as Direction);
+        } else if (entry.type === 'dart') {
+          queueSnakeSkill(snake, { skillId: 'dart', direction: entry.direction });
+        } else {
+          queueSnakeDirection(snake, entry.direction);
+        }
+      } else {
+        queueSnakeDirection(snake, snake.direction);
+      }
     }
 
     const prevState = stateRef.current;
@@ -794,6 +825,20 @@ const GameApp: React.FC<{ campaignPlaytestLevel: CampaignLevel | null }> = ({ ca
     };
 
     const freezeMs = triggerHitstop(prevState, nextState, openNextLockPhase);
+    // Dart resolution effects: zing sound + haptics
+    if (nextState.dartTrail && nextState.dartTrail.length > 0) {
+      soundEngine.playDart();
+      for (const trail of nextState.dartTrail) {
+        const who = trail.snakeId;
+        // Controller rumble for the darting player's gamepad
+        const slot = who === 'p2' ? 2 : 1;
+        gamepadController.rumble(slot);
+        // Phone vibration
+        if (typeof navigator !== 'undefined' && typeof navigator.vibrate === 'function') {
+          navigator.vibrate(50);
+        }
+      }
+    }
     if (freezeMs > 0) {
       // During hitstop between board resolution and next lock phase, release
       // human seat locks so inputs pressed during the freeze buffer cleanly,
@@ -812,7 +857,7 @@ const GameApp: React.FC<{ campaignPlaytestLevel: CampaignLevel | null }> = ({ ca
     if (playModeRef.current === 'ONLINE_JOIN') {
       if (buffer.length > 0 && sentTickRef.current !== current.tick) {
         sentTickRef.current = current.tick;
-        networkManager.sendInput(buffer[0], current.tick);
+        networkManager.sendInput(buffer[0].direction, current.tick);
       }
       return;
     }
@@ -986,7 +1031,7 @@ const GameApp: React.FC<{ campaignPlaytestLevel: CampaignLevel | null }> = ({ ca
     if (playModeRef.current === 'ONLINE_JOIN') {
       if (sentTickRef.current !== current.tick) {
         sentTickRef.current = current.tick;
-        networkManager.sendInput(buf[0], current.tick);
+        networkManager.sendInput(buf[0].direction, current.tick);
       }
       return;
     }
@@ -1018,14 +1063,21 @@ const GameApp: React.FC<{ campaignPlaytestLevel: CampaignLevel | null }> = ({ ca
       if (!isValidDartDirection(currentSnake.direction, dir)) return false;
 
       soundEngine.playTick();
-      currentSnake.pendingSkill = { skillId: 'dart' as SkillId, direction: dir };
-      const snakeCopy = { ...currentSnake, pendingSkill: { skillId: 'dart' as SkillId, direction: dir } };
-      setGameState(prev => ({
-        ...prev,
-        snakes: prev.snakes.map(s => s.id === targetKey ? snakeCopy : s),
-      }));
+      // Queue dart as a buffer entry — no auto-lock, player continues planning
       if (settingsRef.current.turnBased) {
-        handleBufferLock(playerSlot, bridgeSeat);
+        if (locksRef.current[targetKey]) return false;
+        const buf = [...moveBuffersRef.current[targetKey]];
+        if (buf.length >= currentSnake.body.length) return false;
+        buf.push({ type: 'dart', direction: dir });
+        moveBuffersRef.current = { ...moveBuffersRef.current, [targetKey]: buf };
+        setMoveBuffers({ ...moveBuffersRef.current });
+      } else {
+        currentSnake.pendingSkill = { skillId: 'dart' as SkillId, direction: dir };
+        const snakeCopy = { ...currentSnake, pendingSkill: { skillId: 'dart' as SkillId, direction: dir } };
+        setGameState(prev => ({
+          ...prev,
+          snakes: prev.snakes.map(s => s.id === targetKey ? snakeCopy : s),
+        }));
       }
       return true;
     }
@@ -1038,10 +1090,11 @@ const GameApp: React.FC<{ campaignPlaytestLevel: CampaignLevel | null }> = ({ ca
       const buf = [...moveBuffersRef.current[targetKey]];
       if (buf.length >= currentSnake.body.length) return false;
 
-      const lastDir = buf.length > 0 ? buf[buf.length - 1] : currentSnake.direction;
+      const lastEntry = buf.length > 0 ? buf[buf.length - 1] : null;
+      const lastDir = lastEntry ? lastEntry.direction : currentSnake.direction;
       if (isOppositeDirection(lastDir, dir)) return false;
 
-      buf.push(dir);
+      buf.push({ type: 'move', direction: dir });
       moveBuffersRef.current = { ...moveBuffersRef.current, [targetKey]: buf };
       setMoveBuffers({ ...moveBuffersRef.current });
       return true;
@@ -1284,7 +1337,7 @@ const GameApp: React.FC<{ campaignPlaytestLevel: CampaignLevel | null }> = ({ ca
         }
       } else if (button === 'B') {
         handleBufferUndo(targetSlot);
-      } else if (button === 'Y') {
+      } else if (button === 'NORTH') {
         handleSkillButton(targetSlot);
       }
     });
@@ -1605,7 +1658,7 @@ const GameApp: React.FC<{ campaignPlaytestLevel: CampaignLevel | null }> = ({ ca
                   if (buf.length > 0) {
                     if (sentTickRef.current !== safeState.tick) {
                       sentTickRef.current = safeState.tick;
-                      networkManager.sendInput(buf[0], safeState.tick);
+                      networkManager.sendInput(buf[0].direction, safeState.tick);
                     }
                   }
                 }
@@ -1668,9 +1721,10 @@ const GameApp: React.FC<{ campaignPlaytestLevel: CampaignLevel | null }> = ({ ca
             if (!snake) break;
             const buf = [...moveBuffersRef.current[key]];
             if (buf.length < snake.body.length) {
-              const lastDir = buf.length > 0 ? buf[buf.length - 1] : snake.direction;
+              const lastEntry = buf.length > 0 ? buf[buf.length - 1] : null;
+              const lastDir = lastEntry ? lastEntry.direction : snake.direction;
               if (!isOppositeDirection(lastDir, msg.dir)) {
-                buf.push(msg.dir);
+                buf.push({ type: 'move', direction: msg.dir });
                 moveBuffersRef.current = { ...moveBuffersRef.current, [key]: buf };
                 setMoveBuffers({ ...moveBuffersRef.current });
               }

@@ -9,6 +9,11 @@ export interface PendingSkill {
   direction: Direction;
 }
 
+export interface BufferEntry {
+  type: 'move' | 'dart';
+  direction: Direction;
+}
+
 export interface Position {
   x: number;
   y: number;
@@ -96,6 +101,7 @@ export interface GameState {
   totalMatchTime: number;
   readyConfirmed?: Record<string, boolean>;
   skillsAvailable?: SkillsAvailableConfig;
+  dartTrail?: Array<{ snakeId: string; cells: Position[] }>;
 }
 
 export interface CompactSnakeState {
