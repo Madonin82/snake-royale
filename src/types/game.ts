@@ -50,6 +50,7 @@ export interface CampaignObjective {
 
 export interface GameState {
   tick: number;
+  gridSize?: number;
   turnBased: boolean; // copied from settings at match start (host is authoritative in online play)
   phaseTurnsRemaining: number; // turn-based only: turns left in race phase / turns until next ring closes
   lastTurnTimes: Record<string, number> | null; // Turn-based seconds spent planning before the most recent lock.
@@ -92,6 +93,7 @@ export interface CompactSnakeState {
 
 export interface CompactGameState {
   tick: number;
+  gridSize: number;
   phase: GamePhase;
   turnBased: boolean;
   phaseTurnsRemaining: number;
@@ -101,6 +103,7 @@ export interface CompactGameState {
   isTelegraphingShrink: boolean;
   telegraphRingInset: number;
   tokens: Position[];
+  walls: Position[];
   snakes: Record<string, CompactSnakeState>;
   locks: Record<string, boolean>;
   winner: GameState['winner'];

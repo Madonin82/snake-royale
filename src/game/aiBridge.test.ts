@@ -13,11 +13,35 @@ test('compact state includes decision data, locks, and excludes presentation fie
   const compact = toCompactGameState(state, { p1: true, p2: false });
 
   assert.equal(compact.tick, 7);
+  assert.equal(compact.gridSize, 8);
+  assert.deepEqual(compact.walls, []);
   assert.equal(compact.snakes.p1.score, 3);
   assert.deepEqual(compact.tokens, [{ x: 2, y: 4 }]);
   assert.deepEqual(compact.locks, { p1: true, p2: false });
   assert.equal('name' in compact.snakes.p1, false);
   assert.equal('color' in compact.snakes.p1, false);
+});
+
+test('bridge state exposes custom level walls and gridSize in both full and compact modes', () => {
+  const state = createInitialState({
+    ...createInitialState(),
+    gridSize: 12,
+  } as any);
+  state.gridSize = 12;
+  state.walls = [{ x: 3, y: 3 }, { x: 4, y: 4 }];
+
+  const full = cloneGameState(state);
+  const compact = toCompactGameState(state, { p1: false, p2: false });
+
+  assert.equal(full.gridSize, 12);
+  assert.deepEqual(full.walls, [{ x: 3, y: 3 }, { x: 4, y: 4 }]);
+  assert.equal(compact.gridSize, 12);
+  assert.deepEqual(compact.walls, [{ x: 3, y: 3 }, { x: 4, y: 4 }]);
+
+  // Mutating returned walls does not mutate live state
+  full.walls![0].x = 99;
+  compact.walls[0].y = 99;
+  assert.deepEqual(state.walls, [{ x: 3, y: 3 }, { x: 4, y: 4 }]);
 });
 
 test('full state snapshots cannot mutate the live game state', () => {

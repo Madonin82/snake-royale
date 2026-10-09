@@ -138,7 +138,7 @@ export function getPlanningEnteredEvents(
   for (const snake of state.snakes) {
     const player = snake.id;
     if (
-      (builtInAiActive && player === 'p2') ||
+      (builtInAiActive && player !== 'p1') ||
       locks[player] ||
       !snake.isAlive
     ) continue;

@@ -93,6 +93,7 @@ export function createInitialState(
 
   return {
     tick: 0,
+    gridSize: size,
     turnBased: settings.turnBased,
     phaseTurnsRemaining: settings.turnBased ? settings.raceTurns : 0,
     ...createInitialThinkTimeValues(),
@@ -177,6 +178,63 @@ export function queueSnakeDirection(snake: Snake, newDir: Direction): boolean {
     return true;
   }
   return false;
+}
+
+export interface HitstopInfo {
+  durationMs: number;
+  kind: 'TOKEN' | 'DEATH' | 'BOSS_DEATH';
+  flashCells: Position[];
+}
+
+export function getHitstopForTransition(
+  prevState: GameState | null | undefined,
+  nextState: GameState,
+  isCampaign: boolean = Boolean(nextState.campaignObjectives || nextState.campaignTokenRules),
+): HitstopInfo | null {
+  if (!prevState || nextState.tick <= prevState.tick) return null;
+
+  const newlyDead = nextState.snakes.filter(snake => {
+    const prevSnake = prevState.snakes.find(candidate => candidate.id === snake.id);
+    return prevSnake?.isAlive && !snake.isAlive;
+  });
+
+  if (newlyDead.length > 0) {
+    const flashCells = newlyDead
+      .map(snake => {
+        const pos = snake.deathPosition;
+        if (pos && pos.x >= 0 && pos.y >= 0) return pos;
+        return snake.body[0] ?? pos;
+      })
+      .filter((pos): pos is Position => Boolean(pos));
+    const bossDead = isCampaign && newlyDead.some(snake => snake.id !== 'p1');
+    if (bossDead) {
+      return {
+        durationMs: 500,
+        kind: 'BOSS_DEATH',
+        flashCells,
+      };
+    }
+    return {
+      durationMs: 300,
+      kind: 'DEATH',
+      flashCells,
+    };
+  }
+
+  const tokenEaten = nextState.snakes.some(snake => {
+    const prevSnake = prevState.snakes.find(candidate => candidate.id === snake.id);
+    return prevSnake && snake.score > prevSnake.score;
+  });
+
+  if (tokenEaten) {
+    return {
+      durationMs: 100,
+      kind: 'TOKEN',
+      flashCells: [],
+    };
+  }
+
+  return null;
 }
 
 export interface TickResult {
@@ -459,13 +517,21 @@ export function processGameTick(
   // 8. TOKEN SPAWNS (Only during Phase 1 Racing)
   if (state.phase === 'RACING' && state.tokens.length === 0) {
     if (state.campaignTokenRules) {
-      state.phase = 'SHRINKING';
-      if (settings.turnBased) {
-        state.phaseTurnsRemaining = settings.shrinkEveryTurns;
-        state.isTelegraphingShrink = false;
+      const rules = state.campaignTokenRules;
+      if (rules.mode === 'ESCALATING' && !rules.respawn) {
+        state.round += 1;
+        const desiredCount = rules.count + state.round - 1;
+        const newTokens = spawnTokens(desiredCount, settings.gridSize, state.ringInset, snakes, [], state.walls);
+        state.tokens.push(...newTokens);
       } else {
-        state.phaseTimeRemaining = 120 * 1000;
-        state.phaseEndTime = Date.now() + 120 * 1000;
+        state.phase = 'SHRINKING';
+        if (settings.turnBased) {
+          state.phaseTurnsRemaining = settings.shrinkEveryTurns;
+          state.isTelegraphingShrink = false;
+        } else {
+          state.phaseTimeRemaining = 120 * 1000;
+          state.phaseEndTime = Date.now() + 120 * 1000;
+        }
       }
     } else {
       state.round += 1;

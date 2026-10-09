@@ -1,6 +1,6 @@
 import React, { PointerEvent as ReactPointerEvent, useEffect, useRef } from 'react';
 import { Direction, GameSettings, GameState, Position, Snake } from '../types/game';
-import { GAMEBOY_COLORS } from '../game/engine';
+import { GAMEBOY_COLORS, HitstopInfo } from '../game/engine';
 
 interface GameBoardProps {
   gameState: GameState;
@@ -11,12 +11,16 @@ interface GameBoardProps {
   interactionEnabled: boolean;
   splitTouchSeats?: boolean;
   animationsDisabled?: boolean;
+  hitstop?: HitstopInfo | null;
+  fatalMoveAnimating?: string[];
 }
 
 export const GameBoard: React.FC<GameBoardProps> = ({
   gameState, settings, lockedPaths, controlSeat, onDirection, interactionEnabled,
   splitTouchSeats = false,
   animationsDisabled = false,
+  hitstop = null,
+  fatalMoveAnimating = [],
 }) => {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const pointerStartRef = useRef<{ id: number; x: number; y: number } | null>(null);
@@ -27,7 +31,7 @@ export const GameBoard: React.FC<GameBoardProps> = ({
     const ctx = canvas.getContext('2d');
     if (!ctx) return;
 
-    const gridSize = settings.gridSize;
+    const gridSize = gameState.gridSize ?? settings.gridSize;
     const cellSize = 32; // Crisp base internal cell size in pixels
     const boardPixelSize = gridSize * cellSize;
 
@@ -116,24 +120,67 @@ export const GameBoard: React.FC<GameBoardProps> = ({
     // 7. Render Snakes
     for (const snake of gameState.snakes) {
       const isFirst = gameState.snakes[0]?.id === snake.id;
+      const isAnimatingFatalMove = !snake.isAlive && fatalMoveAnimating.includes(snake.id);
+      const isDuringDeathHitstop = Boolean(
+        !snake.isAlive &&
+        hitstop &&
+        (hitstop.kind === 'DEATH' || hitstop.kind === 'BOSS_DEATH') &&
+        hitstop.flashCells.some(cell =>
+          (snake.body[0] && cell.x === snake.body[0].x && cell.y === snake.body[0].y) ||
+          (snake.deathPosition && cell.x === snake.deathPosition.x && cell.y === snake.deathPosition.y),
+        ),
+      );
+      const renderAsAlive = snake.isAlive || isDuringDeathHitstop || isAnimatingFatalMove;
+      const bodyColor = !renderAsAlive
+        ? GAMEBOY_COLORS.DARKEST
+        : isFirst
+          ? GAMEBOY_COLORS.DARKEST
+          : GAMEBOY_COLORS.DARK;
+      const accentColor = !renderAsAlive
+        ? GAMEBOY_COLORS.DARKEST
+        : isFirst
+          ? GAMEBOY_COLORS.LIGHT
+          : GAMEBOY_COLORS.LIGHTEST;
       renderSnake(
         ctx,
         snake,
         cellSize,
-        isFirst ? GAMEBOY_COLORS.DARKEST : GAMEBOY_COLORS.DARK,
-        isFirst ? GAMEBOY_COLORS.LIGHT : GAMEBOY_COLORS.LIGHTEST,
+        bodyColor,
+        accentColor,
         snake.id,
+        isAnimatingFatalMove,
       );
     }
 
-    // 8. Mark dead snake heads after the sprites so the death marker stays visible.
-    if (gameState.phase === 'OVER') {
-      for (const snake of gameState.snakes) {
-        const pos = snake.deathPosition || snake.body[0];
-        if (!snake.isAlive && pos) {
-          renderDeathMarker(ctx, pos.x * cellSize, pos.y * cellSize, cellSize);
-        }
+    // 8. Persistent red direction arrow on dead snake head cell for the rest of the match
+    for (const snake of gameState.snakes) {
+      if (snake.isAlive) continue;
+      if (fatalMoveAnimating.includes(snake.id)) continue;
+      const headPos = snake.body[0] || snake.deathPosition;
+      if (!headPos) continue;
+      const isFlashingNow = Boolean(
+        hitstop &&
+        (hitstop.kind === 'DEATH' || hitstop.kind === 'BOSS_DEATH') &&
+        hitstop.flashCells.some(cell =>
+          (cell.x === headPos.x && cell.y === headPos.y) ||
+          (snake.deathPosition && cell.x === snake.deathPosition.x && cell.y === snake.deathPosition.y),
+        ),
+      );
+      if (!isFlashingNow) {
+        renderDeathMarker(ctx, headPos.x * cellSize, headPos.y * cellSize, cellSize, snake.direction);
       }
+    }
+
+    // 8b. White flash on the death cell during death hitstop
+    if (hitstop && (hitstop.kind === 'DEATH' || hitstop.kind === 'BOSS_DEATH') && hitstop.flashCells.length > 0) {
+      ctx.save();
+      ctx.fillStyle = '#FFFFFF';
+      for (const cell of hitstop.flashCells) {
+        const cx = Math.max(0, Math.min(gridSize - 1, cell.x));
+        const cy = Math.max(0, Math.min(gridSize - 1, cell.y));
+        ctx.fillRect(cx * cellSize, cy * cellSize, cellSize, cellSize);
+      }
+      ctx.restore();
     }
 
     // 9. Outer Frame Border
@@ -141,7 +188,7 @@ export const GameBoard: React.FC<GameBoardProps> = ({
     ctx.lineWidth = 4;
     ctx.strokeRect(2, 2, boardPixelSize - 4, boardPixelSize - 4);
 
-  }, [gameState, settings, lockedPaths, animationsDisabled]);
+  }, [gameState, settings, lockedPaths, animationsDisabled, hitstop, fatalMoveAnimating]);
 
   const handlePointerDown = (event: ReactPointerEvent<HTMLCanvasElement>) => {
     if (!interactionEnabled || event.pointerType !== 'touch') return;
@@ -230,7 +277,8 @@ function renderSnake(
   cellSize: number,
   bodyColor: string,
   accentColor: string,
-  _label: string
+  _label: string,
+  lungeFatalMove: boolean = false,
 ) {
   if (snake.body.length === 0) return;
 
@@ -274,10 +322,20 @@ function renderSnake(
     }
   }
 
-  // Render Head
+  // Render Head (with fatal move lunge offset if playing back the fatal move)
   const head = snake.body[0];
-  const hx = head.x * cellSize;
-  const hy = head.y * cellSize;
+  const lungeOffset = lungeFatalMove ? Math.round(cellSize * 0.42) : 0;
+  const lungeDx = snake.direction === 'LEFT' ? -lungeOffset : snake.direction === 'RIGHT' ? lungeOffset : 0;
+  const lungeDy = snake.direction === 'UP' ? -lungeOffset : snake.direction === 'DOWN' ? lungeOffset : 0;
+  const hx = head.x * cellSize + lungeDx;
+  const hy = head.y * cellSize + lungeDy;
+
+  if (lungeFatalMove) {
+    // Keep neck/head cell connected during the lunge into the fatal cell
+    ctx.fillStyle = bodyColor;
+    ctx.fillRect(head.x * cellSize + 4, head.y * cellSize + 4, cellSize - 8, cellSize - 8);
+  }
+
   ctx.fillStyle = bodyColor;
   ctx.fillRect(hx + 1, hy + 1, cellSize - 2, cellSize - 2);
 
@@ -303,20 +361,86 @@ function renderSnake(
   }
 }
 
-function renderDeathMarker(ctx: CanvasRenderingContext2D, x: number, y: number, cellSize: number) {
+function renderDeathMarker(
+  ctx: CanvasRenderingContext2D,
+  x: number,
+  y: number,
+  cellSize: number,
+  direction: Direction = 'RIGHT',
+) {
   ctx.save();
   ctx.strokeStyle = '#FF0000';
+  ctx.fillStyle = '#FF0000';
   ctx.lineWidth = 2;
   ctx.strokeRect(x + 1, y + 1, cellSize - 2, cellSize - 2);
 
+  const cx = x + cellSize / 2;
+  const cy = y + cellSize / 2;
+  const pad = 5;
+  const tipOffset = cellSize / 2 - pad;
+  const tailOffset = cellSize / 2 - pad - 1;
+  const wingSpan = Math.round(cellSize * 0.28);
+  const headLen = Math.round(cellSize * 0.28);
+
   ctx.lineWidth = 3;
   ctx.lineCap = 'square';
+  ctx.lineJoin = 'miter';
+
   ctx.beginPath();
-  ctx.moveTo(x + 3, y + 3);
-  ctx.lineTo(x + cellSize - 3, y + cellSize - 3);
-  ctx.moveTo(x + cellSize - 3, y + 3);
-  ctx.lineTo(x + 3, y + cellSize - 3);
-  ctx.stroke();
+  if (direction === 'LEFT') {
+    const tipX = cx - tipOffset;
+    const endX = cx + tailOffset;
+    ctx.moveTo(endX, cy);
+    ctx.lineTo(tipX + 2, cy);
+    ctx.stroke();
+
+    ctx.beginPath();
+    ctx.moveTo(tipX, cy);
+    ctx.lineTo(tipX + headLen, cy - wingSpan);
+    ctx.lineTo(tipX + headLen, cy + wingSpan);
+    ctx.closePath();
+    ctx.fill();
+  } else if (direction === 'RIGHT') {
+    const tipX = cx + tipOffset;
+    const endX = cx - tailOffset;
+    ctx.moveTo(endX, cy);
+    ctx.lineTo(tipX - 2, cy);
+    ctx.stroke();
+
+    ctx.beginPath();
+    ctx.moveTo(tipX, cy);
+    ctx.lineTo(tipX - headLen, cy - wingSpan);
+    ctx.lineTo(tipX - headLen, cy + wingSpan);
+    ctx.closePath();
+    ctx.fill();
+  } else if (direction === 'UP') {
+    const tipY = cy - tipOffset;
+    const endY = cy + tailOffset;
+    ctx.moveTo(cx, endY);
+    ctx.lineTo(cx, tipY + 2);
+    ctx.stroke();
+
+    ctx.beginPath();
+    ctx.moveTo(cx, tipY);
+    ctx.lineTo(cx - wingSpan, tipY + headLen);
+    ctx.lineTo(cx + wingSpan, tipY + headLen);
+    ctx.closePath();
+    ctx.fill();
+  } else {
+    // DOWN
+    const tipY = cy + tipOffset;
+    const endY = cy - tailOffset;
+    ctx.moveTo(cx, endY);
+    ctx.lineTo(cx, tipY - 2);
+    ctx.stroke();
+
+    ctx.beginPath();
+    ctx.moveTo(cx, tipY);
+    ctx.lineTo(cx - wingSpan, tipY - headLen);
+    ctx.lineTo(cx + wingSpan, tipY - headLen);
+    ctx.closePath();
+    ctx.fill();
+  }
   ctx.restore();
 }
 

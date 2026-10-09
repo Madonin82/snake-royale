@@ -6,7 +6,11 @@ import { isCampaignObjectiveComplete } from '../game/objectives';
 import { CampaignLevel } from './levelSchema';
 import {
   createCampaignPlaytestState,
+  createMultiplayerCustomLevelState,
   getCampaignPlaytestSettings,
+  getExportableCampaignLevel,
+  getMultiplayerCustomLevelSettings,
+  parseCampaignLevelJson,
 } from './playtestSession';
 
 const createLevel = (): CampaignLevel => ({
@@ -81,6 +85,28 @@ test('campaign playtest builds P3 with its own AI style, painted body, and start
   assert.equal(settings.campaignAiDifficulties?.p3, 'HARD');
   assert.deepEqual(getSnake(state, 'p3').body, level.spawns[2].body);
   assert.equal(getSnake(state, 'p3').score, 17);
+});
+
+test('disabled spawn is excluded from exported JSON and playtest runs with 2 snakes', () => {
+  const level = createLevel();
+  level.spawns.push({
+    enabled: false,
+    position: { x: 1, y: 6 },
+    direction: 'UP',
+    startLength: 3,
+    startingScore: 0,
+    aiStyle: 'HEADHUNTER',
+  });
+
+  const exported = getExportableCampaignLevel(level);
+  assert.equal(exported.spawns.length, 2);
+  assert.equal('enabled' in exported.spawns[0], false);
+
+  const settings = getCampaignPlaytestSettings(level);
+  const state = createCampaignPlaytestState(level, settings);
+  assert.equal(state.snakes.length, 2);
+  assert.deepEqual(state.snakes.map(snake => snake.id), ['p1', 'p2']);
+  assert.equal(settings.campaignAiDifficulties?.p3, undefined);
 });
 
 test('campaign walls are rendered as blocked cells and rejected by the AI', () => {
@@ -170,12 +196,13 @@ test('campaign playtest spawns the configured count and safely skips unavailable
   assert.deepEqual(createCampaignPlaytestState(fullBoard).tokens, []);
 });
 
-test('campaign playtest with respawn disabled ends the race when its final tokens are collected', () => {
+test('campaign playtest with FIXED and respawn disabled ends the race when its final tokens are collected', () => {
   const level = createLevel();
   level.spawns[0] = { ...level.spawns[0], position: { x: 1, y: 1 }, direction: 'RIGHT', startLength: 1 };
   level.spawns[1] = { ...level.spawns[1], position: { x: 6, y: 6 }, direction: 'LEFT', startLength: 1, aiStyle: 'TURTLE' };
   level.tokens.count = 5;
   level.tokens.respawn = false;
+  level.tokens.mode = 'FIXED';
   level.tokens.positions = [2, 3, 4, 5, 6].map(x => ({ x, y: 1 }));
   const settings = getCampaignPlaytestSettings(level);
   let state = createCampaignPlaytestState(level, settings);
@@ -187,6 +214,32 @@ test('campaign playtest with respawn disabled ends the race when its final token
   assert.equal(getSnake(state, 'p1').score, 5);
   assert.equal(state.tokens.length, 0);
   assert.equal(state.phase, 'SHRINKING');
+});
+
+test('ESCALATING with respawn disabled waits until all round tokens are cleared before spawning the next wave', () => {
+  const level = createLevel();
+  level.spawns[0] = { ...level.spawns[0], position: { x: 1, y: 1 }, direction: 'RIGHT', startLength: 1 };
+  level.spawns[1] = { ...level.spawns[1], position: { x: 6, y: 6 }, direction: 'LEFT', startLength: 1, aiStyle: 'TURTLE' };
+  level.tokens = {
+    positions: [{ x: 2, y: 1 }, { x: 3, y: 1 }],
+    count: 2,
+    respawn: false,
+    mode: 'ESCALATING',
+  };
+  const settings = getCampaignPlaytestSettings(level);
+  let state = createCampaignPlaytestState(level, settings);
+
+  // Eat first token of round 1 -> 1 token left on board, no respawn yet
+  state = processGameTick(state, settings, 0).nextState;
+  assert.equal(state.round, 1);
+  assert.equal(state.tokens.length, 1);
+  assert.equal(state.phase, 'RACING');
+
+  // Eat final token of round 1 -> board clears, round 2 spawns wave of 3 tokens
+  state = processGameTick(state, settings, 0).nextState;
+  assert.equal(state.round, 2);
+  assert.equal(state.tokens.length, 3);
+  assert.equal(state.phase, 'RACING');
 });
 
 test('FIXED keeps its configured token count across rounds', () => {
@@ -268,4 +321,48 @@ test('campaign AI styles map to the requested temporary game difficulties', () =
     level.spawns[1].aiStyle = aiStyle as CampaignLevel['spawns'][number]['aiStyle'];
     assert.equal(getCampaignPlaytestSettings(level).botDifficulty, difficulty);
   }
+});
+
+test('multiplayer custom level applies 12x12 grid, walls, token config, startingScore, and caps at 2 human spawns', () => {
+  const level = createLevel();
+  level.gridSize = 12;
+  level.walls = [{ x: 5, y: 5 }, { x: 6, y: 5 }];
+  level.spawns = [
+    { position: { x: 2, y: 2 }, direction: 'DOWN', startLength: 4, startingScore: 3, aiStyle: 'HEADHUNTER' },
+    { position: { x: 9, y: 9 }, direction: 'UP', startLength: 5, startingScore: 7, aiStyle: 'TURTLE' },
+    { position: { x: 2, y: 9 }, direction: 'RIGHT', startLength: 3, startingScore: 99, aiStyle: 'GREEDY' },
+  ];
+  level.tokens = {
+    positions: [{ x: 4, y: 4 }, { x: 7, y: 7 }],
+    count: 2,
+    respawn: false,
+    mode: 'FIXED',
+  };
+
+  const parsed = parseCampaignLevelJson(JSON.stringify(level));
+  const settings = getMultiplayerCustomLevelSettings(parsed);
+  const state = createMultiplayerCustomLevelState(parsed, settings, { p1: 'HOST', p2: 'GUEST' });
+
+  assert.equal(settings.gridSize, 12);
+  assert.equal(state.gridSize, 12);
+  assert.deepEqual(state.walls, [{ x: 5, y: 5 }, { x: 6, y: 5 }]);
+  assert.equal(state.snakes.length, 2);
+  assert.deepEqual(state.snakes.map(s => s.id), ['p1', 'p2']);
+  assert.equal(getSnake(state, 'p1').name, 'HOST');
+  assert.equal(getSnake(state, 'p2').name, 'GUEST');
+  assert.deepEqual(getSnake(state, 'p1').body[0], { x: 2, y: 2 });
+  assert.equal(getSnake(state, 'p1').direction, 'DOWN');
+  assert.equal(getSnake(state, 'p1').body.length, 4);
+  assert.equal(getSnake(state, 'p1').score, 3);
+  assert.deepEqual(getSnake(state, 'p2').body[0], { x: 9, y: 9 });
+  assert.equal(getSnake(state, 'p2').direction, 'UP');
+  assert.equal(getSnake(state, 'p2').body.length, 5);
+  assert.equal(getSnake(state, 'p2').score, 7);
+  assert.deepEqual(state.tokens, [{ x: 4, y: 4 }, { x: 7, y: 7 }]);
+  assert.deepEqual(state.campaignTokenRules, {
+    count: 2,
+    respawn: false,
+    mode: 'FIXED',
+    tokensEatenInRound: 0,
+  });
 });

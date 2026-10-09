@@ -307,7 +307,7 @@ export const OnlineRoomLobby: React.FC<OnlineRoomLobbyProps> = ({
         <div className="flex items-center justify-between text-[10px] font-bold">
           <span className="flex items-center gap-1">
             <Settings className="w-3 h-3" />
-            <span>MATCH RULES:</span>
+            <span>MATCH RULES{settings.levelName ? ` · ${settings.levelName}` : ''}:</span>
           </span>
           <span className="bg-[#0F380F] text-[#9BBC0F] px-1 py-0.5 text-[9px] font-black uppercase">
             {canStart ? '⚙️ HOST CONTROL' : '👑 HOST RULES ADOPTED'}

@@ -2,13 +2,15 @@ import React, { useState, useEffect, useRef } from 'react';
 import { GameSettings } from '../types/game';
 import { GamepadMenuAction } from '../game/gamepad';
 import { soundEngine } from '../audio/soundEngine';
-import { Bot, Gamepad, Globe, Play, Settings, Users, Sparkles, ArrowLeft } from 'lucide-react';
+import { CampaignLevel } from '../editor/levelSchema';
+import { parseCampaignLevelJson, createMultiplayerCustomLevelState } from '../editor/playtestSession';
+import { Bot, Gamepad, Globe, Play, Settings, Users, Sparkles, ArrowLeft, Upload, X } from 'lucide-react';
 
 interface LobbyViewProps {
   onStartSolo: (difficulty: 'EASY' | 'MEDIUM' | 'HARD') => void;
   onStartLocal2P: () => void;
-  onCreateOnlineRoom: () => void;
-  onCreateServerRoom: () => void;
+  onCreateOnlineRoom: (customLevel?: CampaignLevel | null) => void;
+  onCreateServerRoom: (customLevel?: CampaignLevel | null) => void;
   onSpectateRoom: (roomCode: string) => void;
   onJoinOnlineRoom: (roomCode: string) => void;
   onOpenSettings: () => void;
@@ -26,6 +28,8 @@ interface LobbyViewProps {
   importError: string | null;
   joinError: string | null;
   initialRoom?: string;
+  customOnlineLevel?: CampaignLevel | null;
+  onSelectCustomOnlineLevel?: (level: CampaignLevel | null) => void;
 }
 
 type ScreenId = 'MAIN' | 'SOLO' | 'VERSUS' | 'ONLINE' | 'SETTINGS';
@@ -52,17 +56,36 @@ export const LobbyView: React.FC<LobbyViewProps> = ({
   importError,
   joinError,
   initialRoom = '',
+  customOnlineLevel = null,
+  onSelectCustomOnlineLevel,
 }) => {
   const [screen, setScreen] = useState<ScreenId>(initialRoom ? 'ONLINE' : 'MAIN');
   const [difficulty, setDifficulty] = useState<'EASY' | 'MEDIUM' | 'HARD'>(settings.botDifficulty || 'MEDIUM');
   const [roomInput, setRoomInput] = useState(initialRoom);
   const [focusIndex, setFocusIndex] = useState<number>(0);
+  const [levelLoadError, setLevelLoadError] = useState<string | null>(null);
 
   const nameInputRef = useRef<HTMLInputElement>(null);
   const p1InputRef = useRef<HTMLInputElement>(null);
   const p2InputRef = useRef<HTMLInputElement>(null);
   const roomInputRef = useRef<HTMLInputElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const customLevelInputRef = useRef<HTMLInputElement>(null);
+
+  const handleCustomLevelFile = async (file: File) => {
+    setLevelLoadError(null);
+    try {
+      const text = await file.text();
+      const parsed = parseCampaignLevelJson(text);
+      // Validate that the first 2 spawns + tokens + walls can build a valid 2P state
+      createMultiplayerCustomLevelState(parsed);
+      onSelectCustomOnlineLevel?.(parsed);
+      soundEngine.playMenuSelect();
+    } catch (err: any) {
+      setLevelLoadError(err?.message || 'INVALID CUSTOM LEVEL JSON');
+      soundEngine.playCrash();
+    }
+  };
 
   const confirmKeyLabel = isNintendoController ? '[A] SELECT' : '[A] SELECT';
   const startKeyLabel = isNintendoController ? '[A / START]' : '[A / START]';
@@ -147,7 +170,7 @@ export const LobbyView: React.FC<LobbyViewProps> = ({
       case 'VERSUS':
         return ['BACK', 'P1_NAME', 'P2_NAME', 'START_VERSUS'];
       case 'ONLINE':
-        return ['BACK', 'PLAYER_NAME', 'CREATE_ROOM', 'ROOM_CODE', 'JOIN_ROOM', 'SPECTATE_ROOM', 'SERVER_ROOM'];
+        return ['BACK', 'PLAYER_NAME', 'CUSTOM_LEVEL', 'CREATE_ROOM', 'ROOM_CODE', 'JOIN_ROOM', 'SPECTATE_ROOM', 'SERVER_ROOM'];
       case 'SETTINGS':
         return [
           'BACK',
@@ -194,7 +217,7 @@ export const LobbyView: React.FC<LobbyViewProps> = ({
           if (roomInput.trim()) handleJoin();
           else {
             soundEngine.playMenuSelect();
-            onCreateOnlineRoom();
+            onCreateOnlineRoom(customOnlineLevel);
           }
         }
         return;
@@ -287,9 +310,12 @@ export const LobbyView: React.FC<LobbyViewProps> = ({
           if (currentItem === 'PLAYER_NAME') {
             soundEngine.playMenuSelect();
             nameInputRef.current?.focus();
+          } else if (currentItem === 'CUSTOM_LEVEL') {
+            soundEngine.playMenuSelect();
+            customLevelInputRef.current?.click();
           } else if (currentItem === 'CREATE_ROOM') {
             soundEngine.playMenuSelect();
-            onCreateOnlineRoom();
+            onCreateOnlineRoom(customOnlineLevel);
           } else if (currentItem === 'ROOM_CODE') {
             soundEngine.playMenuSelect();
             roomInputRef.current?.focus();
@@ -299,7 +325,7 @@ export const LobbyView: React.FC<LobbyViewProps> = ({
             handleSpectate();
           } else if (currentItem === 'SERVER_ROOM') {
             soundEngine.playMenuSelect();
-            onCreateServerRoom();
+            onCreateServerRoom(customOnlineLevel);
           }
           return;
         }
@@ -357,6 +383,18 @@ export const LobbyView: React.FC<LobbyViewProps> = ({
         onChange={(e) => {
           if (e.target.files && e.target.files[0]) {
             onImportReplay(e.target.files[0]);
+            e.target.value = '';
+          }
+        }}
+      />
+      <input
+        ref={customLevelInputRef}
+        type="file"
+        accept=".json,application/json"
+        className="hidden"
+        onChange={(e) => {
+          if (e.target.files && e.target.files[0]) {
+            handleCustomLevelFile(e.target.files[0]);
             e.target.value = '';
           }
         }}
@@ -785,9 +823,9 @@ export const LobbyView: React.FC<LobbyViewProps> = ({
                   type="button"
                   onClick={() => {
                     soundEngine.playMenuSelect();
-                    onCreateOnlineRoom();
+                    onCreateOnlineRoom(customOnlineLevel);
                   }}
-                  onMouseEnter={() => setFocusIndex(2)}
+                  onMouseEnter={() => setFocusIndex(items.indexOf('CREATE_ROOM'))}
                   className={`w-full py-2.5 [@media(max-height:500px)]:py-1.5 px-3 border-2 border-[#0F380F] font-black text-xs sm:text-sm flex items-center justify-center gap-1.5 cursor-pointer transition-all shadow-[2px_2px_0px_#0F380F] ${
                     currentItem === 'CREATE_ROOM'
                       ? 'bg-[#0F380F] text-[#9BBC0F] ring-3 ring-[#0F380F]'
@@ -802,6 +840,61 @@ export const LobbyView: React.FC<LobbyViewProps> = ({
             </div>
 
             <div className="flex flex-col gap-1 [@media(max-height:500px)]:gap-0.5">
+              <div className="flex items-center justify-between text-[10px] font-bold uppercase tracking-wider">
+                <span className="flex items-center gap-1">
+                  {currentItem === 'CUSTOM_LEVEL' && <span className="animate-pulse">►</span>}
+                  <span>HOST ARENA MAP:</span>
+                </span>
+                {customOnlineLevel && (
+                  <span className="bg-[#0F380F] text-[#9BBC0F] px-1.5 py-0.5 text-[9px] font-black">
+                    {customOnlineLevel.gridSize}×{customOnlineLevel.gridSize} · {customOnlineLevel.walls.length} WALLS
+                  </span>
+                )}
+              </div>
+              <div className="flex gap-1.5">
+                <button
+                  type="button"
+                  onClick={() => {
+                    soundEngine.playMenuSelect();
+                    customLevelInputRef.current?.click();
+                  }}
+                  onMouseEnter={() => setFocusIndex(items.indexOf('CUSTOM_LEVEL'))}
+                  className={`flex-1 py-1.5 px-2.5 border-2 border-[#0F380F] font-black text-xs flex items-center justify-between gap-1.5 cursor-pointer transition-colors ${
+                    currentItem === 'CUSTOM_LEVEL'
+                      ? 'bg-[#0F380F] text-[#9BBC0F] ring-2 ring-[#0F380F]'
+                      : customOnlineLevel
+                        ? 'bg-[#306230] text-[#9BBC0F] hover:bg-[#0F380F]'
+                        : 'bg-[#9BBC0F] text-[#0F380F] hover:bg-[#0F380F] hover:text-[#9BBC0F]'
+                  }`}
+                >
+                  <span className="truncate">
+                    {customOnlineLevel ? `🗺 ${customOnlineLevel.name}` : '🗺 DEFAULT ARENA (LOAD LEVEL JSON...)'}
+                  </span>
+                  <Upload className="w-3.5 h-3.5 shrink-0" />
+                </button>
+                {customOnlineLevel && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      soundEngine.playMenuBack();
+                      setLevelLoadError(null);
+                      onSelectCustomOnlineLevel?.(null);
+                    }}
+                    title="Reset to Default Arena"
+                    className="px-2 py-1.5 border-2 border-[#0F380F] bg-[#9BBC0F] hover:bg-[#8B1E0F] hover:text-white text-[#0F380F] font-black text-xs cursor-pointer flex items-center justify-center"
+                  >
+                    <X className="w-3.5 h-3.5" />
+                  </button>
+                )}
+              </div>
+              {levelLoadError && (
+                <div className="text-[10px] font-bold text-red-700 bg-red-100 border border-red-700 px-2 py-0.5">
+                  ⚠️ {levelLoadError}
+                </div>
+              )}
+            </div>
+
+            <div className="flex flex-col gap-1 [@media(max-height:500px)]:gap-0.5">
               <label className="text-[10px] font-bold uppercase tracking-wider flex items-center gap-1">
                 {currentItem === 'ROOM_CODE' && <span className="animate-pulse">►</span>}
                 <span>ROOM CODE</span>
@@ -810,7 +903,7 @@ export const LobbyView: React.FC<LobbyViewProps> = ({
                 ref={roomInputRef}
                 type="text"
                 value={roomInput}
-                onFocus={() => setFocusIndex(3)}
+                onFocus={() => setFocusIndex(items.indexOf('ROOM_CODE'))}
                 onChange={(e) => setRoomInput(e.target.value.toUpperCase())}
                 placeholder="XXXX"
                 maxLength={6}
@@ -825,7 +918,7 @@ export const LobbyView: React.FC<LobbyViewProps> = ({
                 type="button"
                 onClick={handleJoin}
                 disabled={!roomInput.trim()}
-                onMouseEnter={() => setFocusIndex(4)}
+                onMouseEnter={() => setFocusIndex(items.indexOf('JOIN_ROOM'))}
                 className={`py-2 [@media(max-height:500px)]:py-1.5 px-2 border-2 border-[#0F380F] font-black text-xs [@media(max-height:500px)]:text-[11px] cursor-pointer disabled:opacity-50 transition-colors ${
                   currentItem === 'JOIN_ROOM'
                     ? 'bg-[#0F380F] text-[#9BBC0F] ring-2 ring-[#0F380F]'
@@ -840,7 +933,7 @@ export const LobbyView: React.FC<LobbyViewProps> = ({
                 type="button"
                 onClick={handleSpectate}
                 disabled={!roomInput.trim()}
-                onMouseEnter={() => setFocusIndex(5)}
+                onMouseEnter={() => setFocusIndex(items.indexOf('SPECTATE_ROOM'))}
                 className={`py-2 [@media(max-height:500px)]:py-1.5 px-2 border-2 border-dashed border-[#0F380F] font-bold text-xs [@media(max-height:500px)]:text-[11px] cursor-pointer disabled:opacity-50 transition-colors ${
                   currentItem === 'SPECTATE_ROOM'
                     ? 'bg-[#0F380F] text-[#9BBC0F] ring-2 ring-[#0F380F]'
@@ -855,9 +948,9 @@ export const LobbyView: React.FC<LobbyViewProps> = ({
                 type="button"
                 onClick={() => {
                   soundEngine.playMenuSelect();
-                  onCreateServerRoom();
+                  onCreateServerRoom(customOnlineLevel);
                 }}
-                onMouseEnter={() => setFocusIndex(6)}
+                onMouseEnter={() => setFocusIndex(items.indexOf('SERVER_ROOM'))}
                 className={`col-span-2 [@media(max-height:500px)]:col-span-1 py-1.5 px-2 border-2 border-dashed border-[#0F380F] font-bold text-[11px] flex items-center justify-center gap-1.5 cursor-pointer transition-all ${
                   currentItem === 'SERVER_ROOM'
                     ? 'bg-[#0F380F] text-[#9BBC0F] ring-2 ring-[#0F380F]'

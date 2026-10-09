@@ -26,6 +26,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
 }) => {
   const [focusIndex, setFocusIndex] = useState<number>(0);
   const [signedInUser, setSignedInUser] = useState<User | null>(auth.currentUser);
+  const isGoogleSignedIn = Boolean(signedInUser && !signedInUser.isAnonymous);
   const [adminRooms, setAdminRooms] = useState<Array<{
     id: string;
     status: string;
@@ -194,7 +195,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
             break;
           case 'ACCOUNT':
             if (!authBusy) {
-              if (signedInUser) void handleSignOut();
+              if (isGoogleSignedIn) void handleSignOut();
               else void handleGoogleSignIn();
             }
             break;
@@ -281,7 +282,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
     onRegisterHandler,
     isOnlineGuest,
     authBusy,
-    signedInUser,
+    isGoogleSignedIn,
     handleSignOut,
     handleGoogleSignIn,
   ]);
@@ -590,12 +591,12 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
               <div className="flex min-w-0 items-center gap-1">
                 {currentRow === 'ACCOUNT' && <span className="animate-pulse">►</span>}
                 <span>ACCOUNT:</span>
-                {signedInUser && (
+                {isGoogleSignedIn && signedInUser && (
                   <span className="truncate">
                     {signedInUser.displayName || signedInUser.email || 'Google account'}
                   </span>
                 )}
-                {signedInUser && ADMIN_UIDS.includes(signedInUser.uid) && (
+                {isGoogleSignedIn && signedInUser && ADMIN_UIDS.includes(signedInUser.uid) && (
                   <span className="shrink-0 bg-[#0F380F] text-[#9BBC0F] px-1 text-[9px]">ADMIN ✓</span>
                 )}
               </div>
@@ -603,12 +604,12 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                 type="button"
                 disabled={authBusy}
                 onClick={() => {
-                  if (signedInUser) void handleSignOut();
+                  if (isGoogleSignedIn) void handleSignOut();
                   else void handleGoogleSignIn();
                 }}
                 className="shrink-0 px-2 py-1 border border-[#0F380F] font-black cursor-pointer disabled:cursor-wait disabled:opacity-60"
               >
-                {authBusy ? 'PLEASE WAIT…' : signedInUser ? 'SIGN OUT' : 'SIGN IN WITH GOOGLE'}
+                {authBusy ? 'PLEASE WAIT…' : isGoogleSignedIn ? 'SIGN OUT' : 'SIGN IN WITH GOOGLE'}
               </button>
             </div>
             {authError && <div role="status" className="text-[9px] font-bold">{authError}</div>}

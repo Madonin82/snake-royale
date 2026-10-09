@@ -4,6 +4,7 @@ export type CampaignTokenMode = 'ESCALATING' | 'FIXED' | 'FIXED_SET';
 export type CampaignAiStyle = 'GREEDY' | 'TURTLE' | 'CUTOFF' | 'HEADHUNTER' | 'PATROL';
 
 export interface SpawnConfig {
+  enabled?: boolean;
   position: Position;
   direction: Direction;
   startLength: number;

@@ -1,14 +1,49 @@
 import React, { useState, useRef, useEffect, useCallback } from 'react';
-import { Position, Direction } from '../types/game';
+import { CampaignObjective, Position, Direction } from '../types/game';
+import { parseCampaignObjective } from '../game/objectives';
 import { CampaignLevel } from './levelSchema';
 import {
   createCampaignPlaytestState,
   createSpawnBody,
   getCampaignPlaytestLevel,
+  getExportableCampaignLevel,
+  isSpawnEnabled,
   setCampaignPlaytestLevel,
 } from './playtestSession';
 
 type Tool = 'WALL' | 'TOKEN' | 'ERASER' | `SPAWN_${number}` | `PAINT_${number}`;
+type ObjectiveKind = CampaignObjective['kind'];
+
+const OBJECTIVE_OPTIONS: Array<{
+  kind: ObjectiveKind;
+  label: string;
+  hasParam: boolean;
+  defaultTarget: number;
+}> = [
+  { kind: 'collect', label: 'COLLECT N TOKENS', hasParam: true, defaultTarget: 5 },
+  { kind: 'first_to', label: 'FIRST TO N TOKENS', hasParam: true, defaultTarget: 10 },
+  { kind: 'survive', label: 'SURVIVE N TURNS', hasParam: true, defaultTarget: 30 },
+  { kind: 'win_under', label: 'WIN IN UNDER N TURNS', hasParam: true, defaultTarget: 40 },
+  { kind: 'shutout', label: 'SHUTOUT (NO PARAMETER)', hasParam: false, defaultTarget: 0 },
+  { kind: 'outscore', label: 'OUTSCORE BY N', hasParam: true, defaultTarget: 5 },
+];
+
+function formatObjectiveString(kind: ObjectiveKind, target: number): string {
+  if (kind === 'shutout') return 'SHUTOUT';
+  const safeTarget = Math.max(1, Math.floor(target) || 1);
+  return `${kind.toUpperCase()}:${safeTarget}`;
+}
+
+function getObjectiveParts(text: string): { kind: ObjectiveKind; target: number } {
+  const parsed = parseCampaignObjective(text);
+  if (parsed) {
+    return {
+      kind: parsed.kind,
+      target: parsed.kind === 'shutout' ? 5 : parsed.target,
+    };
+  }
+  return { kind: 'collect', target: 5 };
+}
 
 const NEXT_DIRECTION: Record<Direction, Direction> = {
   UP: 'RIGHT',
@@ -41,9 +76,9 @@ const DEFAULT_LEVEL: CampaignLevel = {
   gridSize: 8,
   walls: [],
   spawns: [
-    { position: { x: 1, y: 1 }, direction: 'RIGHT', startLength: 3, startingScore: 0, aiStyle: 'GREEDY' },
-    { position: { x: 6, y: 6 }, direction: 'LEFT', startLength: 3, startingScore: 0, aiStyle: 'GREEDY' },
-    { position: { x: 1, y: 6 }, direction: 'UP', startLength: 3, startingScore: 0, aiStyle: 'TURTLE' },
+    { enabled: true, position: { x: 1, y: 1 }, direction: 'RIGHT', startLength: 3, startingScore: 0, aiStyle: 'GREEDY' },
+    { enabled: true, position: { x: 6, y: 6 }, direction: 'LEFT', startLength: 3, startingScore: 0, aiStyle: 'GREEDY' },
+    { enabled: true, position: { x: 1, y: 6 }, direction: 'UP', startLength: 3, startingScore: 0, aiStyle: 'TURTLE' },
   ],
   tokens: {
     positions: [],
@@ -67,9 +102,11 @@ export const LevelEditor: React.FC = () => {
   levelRef.current = level;
   const [activeTool, setActiveTool] = useState<Tool>('WALL');
   const [isMouseDown, setIsMouseDown] = useState(false);
-  const [bonusText, setBonusText] = useState<string>(() => level.objectives.bonus.join('\n'));
+  const [bonusDraftKind, setBonusDraftKind] = useState<ObjectiveKind>('first_to');
+  const [bonusDraftTarget, setBonusDraftTarget] = useState<number>(10);
   const [statusMessage, setStatusMessage] = useState<string>('READY');
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const primaryParts = getObjectiveParts(level.objectives.primary);
   const updateSpawn = (index: number, changes: Partial<CampaignLevel['spawns'][number]>) => {
     setLevel(prev => ({
       ...prev,
@@ -79,18 +116,34 @@ export const LevelEditor: React.FC = () => {
     }));
   };
 
-  // Sync bonus objectives text to level
-  const handleBonusTextChange = (text: string) => {
-    setBonusText(text);
-    const parsed = text
-      .split('\n')
-      .map((s) => s.trim().toUpperCase())
-      .filter((s) => s.length > 0);
-    setLevel((prev) => ({
+  const handlePrimaryObjectiveChange = (kind: ObjectiveKind, target: number) => {
+    const formatted = formatObjectiveString(kind, target);
+    setLevel(prev => ({
       ...prev,
       objectives: {
         ...prev.objectives,
-        bonus: parsed,
+        primary: formatted,
+      },
+    }));
+  };
+
+  const handleAddBonusObjective = () => {
+    const formatted = formatObjectiveString(bonusDraftKind, bonusDraftTarget);
+    setLevel(prev => ({
+      ...prev,
+      objectives: {
+        ...prev.objectives,
+        bonus: [...prev.objectives.bonus, formatted],
+      },
+    }));
+  };
+
+  const handleRemoveBonusObjective = (removeIndex: number) => {
+    setLevel(prev => ({
+      ...prev,
+      objectives: {
+        ...prev.objectives,
+        bonus: prev.objectives.bonus.filter((_, idx) => idx !== removeIndex),
       },
     }));
   };
@@ -114,6 +167,7 @@ export const LevelEditor: React.FC = () => {
     (x: number, y: number, isInitialClick: boolean) => {
       if (activeTool === 'WALL' || activeTool === 'TOKEN') {
         const snakeOccupiesCell = levelRef.current.spawns.some(spawn =>
+          isSpawnEnabled(spawn) &&
           (spawn.body ?? [spawn.position]).some(segment => segment.x === x && segment.y === y),
         );
         if (snakeOccupiesCell) {
@@ -126,15 +180,15 @@ export const LevelEditor: React.FC = () => {
         const prev = levelRef.current;
         const spawnIndex = Number(activeTool.slice('PAINT_'.length));
         const spawn = prev.spawns[spawnIndex];
-        if (!spawn) return;
+        if (!spawn || !isSpawnEnabled(spawn)) return;
         const position = { x, y };
         const body = spawn.body ?? [];
         const wallCells = new Set(prev.walls.map(wall => `${wall.x},${wall.y}`));
         const occupiedByOtherSnake = prev.spawns.some((otherSpawn, index) => {
-          if (index === spawnIndex) return false;
+          if (index === spawnIndex || !isSpawnEnabled(otherSpawn)) return false;
           try {
             const occupied = new Set<string>();
-            const preceding = prev.spawns.slice(0, index);
+            const preceding = prev.spawns.slice(0, index).filter(isSpawnEnabled);
             let otherBody: Position[] = [];
             for (const earlier of preceding) {
               otherBody = earlier.body
@@ -197,7 +251,7 @@ export const LevelEditor: React.FC = () => {
         const isToken = prev.tokens.positions.some((t) => t.x === x && t.y === y);
         const spawnIndex = activeTool.startsWith('SPAWN_') ? Number(activeTool.slice('SPAWN_'.length)) : -1;
         const clickedSpawnIndex = prev.spawns.findIndex(spawn =>
-          spawn.position.x === x && spawn.position.y === y,
+          isSpawnEnabled(spawn) && spawn.position.x === x && spawn.position.y === y,
         );
 
         if (activeTool === 'WALL') {
@@ -243,7 +297,7 @@ export const LevelEditor: React.FC = () => {
         if (spawnIndex >= 0) {
           if (!isInitialClick) return prev;
           const spawn = prev.spawns[spawnIndex];
-          if (!spawn) return prev;
+          if (!spawn || !isSpawnEnabled(spawn)) return prev;
           if (clickedSpawnIndex === spawnIndex) {
             if (spawn.body) return prev;
             return {
@@ -302,7 +356,8 @@ export const LevelEditor: React.FC = () => {
   // Export JSON
   const handleExportJson = () => {
     try {
-      const jsonStr = JSON.stringify(level, null, 2);
+      const exportLevel = getExportableCampaignLevel(level);
+      const jsonStr = JSON.stringify(exportLevel, null, 2);
       const blob = new Blob([jsonStr], { type: 'application/json' });
       const url = URL.createObjectURL(blob);
       const link = document.createElement('a');
@@ -343,18 +398,26 @@ export const LevelEditor: React.FC = () => {
           throw new Error('INVALID LEVEL SCHEMA: MISSING REQUIRED FIELDS');
         }
 
+        const nextSpawns = DEFAULT_LEVEL.spawns.map((defaultSpawn, index) => {
+          const importedSpawn = parsed.spawns[index];
+          if (!importedSpawn) {
+            return { ...defaultSpawn, enabled: false };
+          }
+          return {
+            ...importedSpawn,
+            enabled: importedSpawn.enabled !== false,
+            startingScore: importedSpawn.startingScore ?? 0,
+            aiStyle: importedSpawn.aiStyle ?? 'GREEDY',
+          };
+        });
+
         const nextLevel = {
           ...parsed,
-          spawns: parsed.spawns.map(spawn => ({
-            ...spawn,
-            startingScore: spawn.startingScore ?? 0,
-            aiStyle: spawn.aiStyle ?? 'GREEDY',
-          })),
+          spawns: nextSpawns,
           tokens: { ...parsed.tokens, mode: parsed.tokens.mode ?? 'ESCALATING' },
         };
         levelRef.current = nextLevel;
         setLevel(nextLevel);
-        setBonusText((parsed.objectives.bonus || []).join('\n'));
         showStatus(`LOADED ${file.name}`);
       } catch (err: any) {
         alert(`ERROR LOADING FILE: ${err.message || err}`);
@@ -370,7 +433,6 @@ export const LevelEditor: React.FC = () => {
     const confirmed = window.confirm('CLEAR ALL LEVEL DATA AND RESET TO DEFAULT?');
     if (!confirmed) return;
     setLevel({ ...DEFAULT_LEVEL });
-    setBonusText(DEFAULT_LEVEL.objectives.bonus.join('\n'));
     showStatus('RESET TO DEFAULTS');
   };
 
@@ -445,8 +507,9 @@ export const LevelEditor: React.FC = () => {
                 <React.Fragment key={index}>
                   <button
                     type="button"
+                    disabled={!isSpawnEnabled(spawn)}
                     onClick={() => setActiveTool(`SPAWN_${index}`)}
-                    className={`py-2 px-1 text-[10px] font-black border-4 border-[#0F380F] transition-colors ${
+                    className={`py-2 px-1 text-[10px] font-black border-4 border-[#0F380F] transition-colors disabled:opacity-40 disabled:cursor-not-allowed ${
                       activeTool === `SPAWN_${index}`
                         ? index === 2 ? 'bg-[#8B1E0F] text-white' : 'bg-[#306230] text-[#9BBC0F]'
                         : 'bg-[#8BAC0F] hover:bg-[#9BBC0F] text-[#0F380F]'
@@ -456,8 +519,9 @@ export const LevelEditor: React.FC = () => {
                   </button>
                   <button
                     type="button"
+                    disabled={!isSpawnEnabled(spawn)}
                     onClick={() => setActiveTool(`PAINT_${index}`)}
-                    className={`py-2 px-1 text-[10px] font-black border-4 border-[#0F380F] transition-colors ${
+                    className={`py-2 px-1 text-[10px] font-black border-4 border-[#0F380F] transition-colors disabled:opacity-40 disabled:cursor-not-allowed ${
                       activeTool === `PAINT_${index}`
                         ? index === 2 ? 'bg-[#8B1E0F] text-white' : 'bg-[#306230] text-[#9BBC0F]'
                         : 'bg-[#8BAC0F] hover:bg-[#9BBC0F] text-[#0F380F]'
@@ -515,6 +579,7 @@ export const LevelEditor: React.FC = () => {
                     const isWall = level.walls.some((w) => w.x === x && w.y === y);
                     const isToken = level.tokens.positions.some((t) => t.x === x && t.y === y);
                     const spawnIndex = level.spawns.findIndex(spawn =>
+                      isSpawnEnabled(spawn) &&
                       (spawn.body ?? [spawn.position]).some(segment => segment.x === x && segment.y === y),
                     );
                     const snakeSegmentIndex = spawnIndex < 0
@@ -634,9 +699,22 @@ export const LevelEditor: React.FC = () => {
 
             {/* Spawn configuration */}
             <div className="space-y-2 pt-1 border-t-2 border-[#0F380F]">
-              {level.spawns.slice(0, 3).map((spawn, index) => (
-                <div key={index} className="grid grid-cols-2 gap-2 border border-[#0F380F] p-2">
-                  <div className="col-span-2 font-black">P{index + 1} {index === 0 ? 'HUMAN' : 'AI'} SPAWN</div>
+              {level.spawns.slice(0, 3).map((spawn, index) => {
+                const enabled = isSpawnEnabled(spawn);
+                return (
+                <div key={index} className={`grid grid-cols-2 gap-2 border border-[#0F380F] p-2 ${enabled ? '' : 'opacity-60'}`}>
+                  <div className="col-span-2 flex items-center justify-between font-black">
+                    <span>P{index + 1} {index === 0 ? 'HUMAN' : 'AI'} SPAWN</span>
+                    <label className="flex items-center gap-1.5 cursor-pointer text-[10px]">
+                      <input
+                        type="checkbox"
+                        checked={enabled}
+                        onChange={e => updateSpawn(index, { enabled: e.target.checked })}
+                        className="accent-[#0F380F] cursor-pointer"
+                      />
+                      <span>ENABLED</span>
+                    </label>
+                  </div>
                   <label className="flex flex-col gap-1 font-bold">
                     LENGTH
                     <input type="number" min="1" max="50" value={spawn.startLength}
@@ -673,7 +751,8 @@ export const LevelEditor: React.FC = () => {
                     CELL {spawn.position.x},{spawn.position.y} · {spawn.body ? `${spawn.body.length} PAINTED CELLS` : 'AUTO BODY'}
                   </div>
                 </div>
-              ))}
+                );
+              })}
             </div>
 
             {/* Tokens */}
@@ -790,34 +869,113 @@ export const LevelEditor: React.FC = () => {
             </div>
 
             {/* Objectives */}
-            <div className="pt-1 border-t-2 border-[#0F380F]">
-              <label className="block font-black mb-1">PRIMARY OBJECTIVE (E.G. COLLECT:5):</label>
-              <input
-                type="text"
-                value={level.objectives.primary}
-                onChange={(e) =>
-                  setLevel({
-                    ...level,
-                    objectives: {
-                      ...level.objectives,
-                      primary: e.target.value.toUpperCase(),
-                    },
-                  })
-                }
-                className="w-full bg-[#9BBC0F] border-2 border-[#0F380F] px-2 py-1 font-mono font-bold text-[#0F380F] outline-none"
-                placeholder="e.g. collect:5, first_to:10, survive:30"
-              />
+            <div className="pt-1 border-t-2 border-[#0F380F] space-y-2">
+              <div className="flex items-center justify-between">
+                <label className="block font-black">PRIMARY OBJECTIVE:</label>
+                <span className="px-1.5 py-0.5 bg-[#0F380F] text-[#9BBC0F] font-black text-[10px]">
+                  {level.objectives.primary}
+                </span>
+              </div>
+              <div className="flex gap-2">
+                <select
+                  value={primaryParts.kind}
+                  onChange={(e) => {
+                    const nextKind = e.target.value as ObjectiveKind;
+                    const opt = OBJECTIVE_OPTIONS.find(o => o.kind === nextKind);
+                    const nextTarget = primaryParts.kind === 'shutout' && opt?.hasParam
+                      ? opt.defaultTarget
+                      : primaryParts.target;
+                    handlePrimaryObjectiveChange(nextKind, nextTarget);
+                  }}
+                  className="flex-1 bg-[#9BBC0F] border-2 border-[#0F380F] px-2 py-1 font-mono font-bold text-[#0F380F] outline-none cursor-pointer"
+                >
+                  {OBJECTIVE_OPTIONS.map(opt => (
+                    <option key={opt.kind} value={opt.kind}>{opt.label}</option>
+                  ))}
+                </select>
+                {primaryParts.kind !== 'shutout' && (
+                  <input
+                    type="number"
+                    min="1"
+                    max="999"
+                    value={primaryParts.target}
+                    onChange={(e) =>
+                      handlePrimaryObjectiveChange(
+                        primaryParts.kind,
+                        Math.max(1, parseInt(e.target.value) || 1),
+                      )
+                    }
+                    className="w-20 bg-[#9BBC0F] border-2 border-[#0F380F] px-2 py-1 font-mono font-bold text-[#0F380F] outline-none"
+                  />
+                )}
+              </div>
             </div>
 
-            <div>
-              <label className="block font-black mb-1">BONUS OBJECTIVES (ONE PER LINE):</label>
-              <textarea
-                rows={3}
-                value={bonusText}
-                onChange={(e) => handleBonusTextChange(e.target.value)}
-                className="w-full bg-[#9BBC0F] border-2 border-[#0F380F] p-2 font-mono font-bold text-[#0F380F] outline-none resize-none"
-                placeholder="collect:5&#10;shutout"
-              />
+            <div className="space-y-2">
+              <div className="flex items-center justify-between">
+                <label className="block font-black">BONUS OBJECTIVES:</label>
+                <span className="text-[10px] font-bold text-[#306230]">
+                  DRAFT: {formatObjectiveString(bonusDraftKind, bonusDraftTarget)}
+                </span>
+              </div>
+              <div className="flex gap-2">
+                <select
+                  value={bonusDraftKind}
+                  onChange={(e) => {
+                    const nextKind = e.target.value as ObjectiveKind;
+                    const opt = OBJECTIVE_OPTIONS.find(o => o.kind === nextKind);
+                    setBonusDraftKind(nextKind);
+                    if (opt?.hasParam) {
+                      setBonusDraftTarget(opt.defaultTarget);
+                    }
+                  }}
+                  className="flex-1 bg-[#9BBC0F] border-2 border-[#0F380F] px-2 py-1 font-mono font-bold text-[#0F380F] outline-none cursor-pointer"
+                >
+                  {OBJECTIVE_OPTIONS.map(opt => (
+                    <option key={opt.kind} value={opt.kind}>{opt.label}</option>
+                  ))}
+                </select>
+                {bonusDraftKind !== 'shutout' && (
+                  <input
+                    type="number"
+                    min="1"
+                    max="999"
+                    value={bonusDraftTarget}
+                    onChange={(e) => setBonusDraftTarget(Math.max(1, parseInt(e.target.value) || 1))}
+                    className="w-16 bg-[#9BBC0F] border-2 border-[#0F380F] px-2 py-1 font-mono font-bold text-[#0F380F] outline-none"
+                  />
+                )}
+                <button
+                  type="button"
+                  onClick={handleAddBonusObjective}
+                  className="px-2.5 py-1 bg-[#0F380F] text-[#9BBC0F] font-black border-2 border-[#0F380F] hover:bg-[#306230] shrink-0"
+                >
+                  + ADD BONUS
+                </button>
+              </div>
+              {level.objectives.bonus.length === 0 ? (
+                <div className="text-[10px] font-bold text-[#306230] border border-[#0F380F] bg-[#9BBC0F]/50 px-2 py-1.5">
+                  NO BONUS OBJECTIVES CONFIGURED.
+                </div>
+              ) : (
+                <div className="space-y-1">
+                  {level.objectives.bonus.map((bonusStr, idx) => (
+                    <div
+                      key={`${bonusStr}-${idx}`}
+                      className="flex items-center justify-between bg-[#9BBC0F] border-2 border-[#0F380F] px-2 py-1"
+                    >
+                      <span className="font-mono font-black text-[#0F380F]">{bonusStr}</span>
+                      <button
+                        type="button"
+                        onClick={() => handleRemoveBonusObjective(idx)}
+                        className="px-1.5 py-0.5 bg-[#0F380F] text-[#9BBC0F] text-[10px] font-black hover:bg-[#8B1E0F] hover:text-white"
+                      >
+                        ✕
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              )}
             </div>
           </div>
         </div>

@@ -5,7 +5,9 @@ import { onValue, ref } from 'firebase/database';
 import {
   createInitialState,
   DEFAULT_SETTINGS,
+  getHitstopForTransition,
   getNextHeadPosition,
+  HitstopInfo,
   isOppositeDirection,
   processGameTick,
   queueSnakeDirection,
@@ -42,8 +44,10 @@ import { LevelEditor } from './editor/LevelEditor';
 import { CampaignLevel } from './editor/levelSchema';
 import {
   createCampaignPlaytestState,
+  createMultiplayerCustomLevelState,
   getCampaignPlaytestLevel,
   getCampaignPlaytestSettings,
+  getMultiplayerCustomLevelSettings,
 } from './editor/playtestSession';
 import { ArrowLeft, Volume2, VolumeX } from 'lucide-react';
 
@@ -123,7 +127,12 @@ export const App: React.FC = () => {
     );
   }
 
-  return <GameApp campaignPlaytestLevel={campaignPlaytestLevel} />;
+  return (
+    <GameApp
+      key={campaignPlaytestLevel ? `playtest-${campaignPlaytestLevel.id}-${campaignPlaytestLevel.spawns.length}` : 'default'}
+      campaignPlaytestLevel={campaignPlaytestLevel}
+    />
+  );
 };
 
 const GameApp: React.FC<{ campaignPlaytestLevel: CampaignLevel | null }> = ({ campaignPlaytestLevel }) => {
@@ -161,6 +170,9 @@ const GameApp: React.FC<{ campaignPlaytestLevel: CampaignLevel | null }> = ({ ca
   const [onlineRoomId, setOnlineRoomId] = useState<string>('');
   const [bridgeSecret, setBridgeSecret] = useState<string | null>(null);
   const [onlineRole, setOnlineRole] = useState<'p1' | 'p2' | 'spectator' | 'server' | null>(null);
+  const [customOnlineLevel, setCustomOnlineLevel] = useState<CampaignLevel | null>(null);
+  const customOnlineLevelRef = useRef<CampaignLevel | null>(null);
+  customOnlineLevelRef.current = customOnlineLevel;
   const [hasP1, setHasP1] = useState<boolean>(false);
   const [hasP2, setHasP2] = useState<boolean>(false);
   const [spectatorsCount, setSpectatorsCount] = useState<number>(0);
@@ -169,6 +181,16 @@ const GameApp: React.FC<{ campaignPlaytestLevel: CampaignLevel | null }> = ({ ca
     initialCampaignState ?? createLobbyState(initialCampaignSettings ?? DEFAULT_SETTINGS)
   );
   const [gameOverConfirmed, setGameOverConfirmed] = useState(false);
+  const [activeHitstop, setActiveHitstop] = useState<HitstopInfo | null>(null);
+  const activeHitstopRef = useRef<HitstopInfo | null>(null);
+  activeHitstopRef.current = activeHitstop;
+  const hitstopUntilRef = useRef<number>(0);
+  const hitstopTimerRef = useRef<NodeJS.Timeout | null>(null);
+  const [fatalMoveSnakes, setFatalMoveSnakes] = useState<string[]>([]);
+  const fatalMoveSnakesRef = useRef<string[]>([]);
+  fatalMoveSnakesRef.current = fatalMoveSnakes;
+  const fatalMoveTimerRef = useRef<NodeJS.Timeout | null>(null);
+  const realTimeInputBufferRef = useRef<Record<string, Direction[]>>({});
   const [latencyModalOpen, setLatencyModalOpen] = useState<boolean>(false);
   const [settingsModalOpen, setSettingsModalOpen] = useState<boolean>(false);
   const [latencyReport, setLatencyReport] = useState<LatencyReport>(() => networkManager.getLatencyReport());
@@ -286,15 +308,15 @@ const GameApp: React.FC<{ campaignPlaytestLevel: CampaignLevel | null }> = ({ ca
     const baseState = matchHistory[replayIdx] ?? gameState;
     const currentTick = baseState.tick;
     const decisions = turnDecisionsRef.current;
-    let p1Queue: Direction[] = [];
-    let p2Queue: Direction[] = [];
+    const queues: Record<string, Direction[]> = Object.fromEntries(
+      baseState.snakes.map(snake => [snake.id, [] as Direction[]]),
+    );
     for (const d of decisions) {
       if (d.tick === currentTick) {
-        if (d.seat === 'p1') p1Queue = d.queue;
-        else if (d.seat === 'p2') p2Queue = d.queue;
+        queues[d.seat] = d.queue;
       }
     }
-    return { p1: p1Queue, p2: p2Queue };
+    return queues;
   }, [replayActive, matchHistory, replayIdx, gameState]);
 
   const displayState = useMemo(() => {
@@ -338,7 +360,9 @@ const GameApp: React.FC<{ campaignPlaytestLevel: CampaignLevel | null }> = ({ ca
   const bridgeSeatRef = useRef<'p1' | 'p2'>('p1');
   const soloAiP2OverriddenRef = useRef(false);
   const dispatchAiState = useCallback((state: GameState = stateRef.current) => {
-    window.dispatchEvent(new CustomEvent<GameState>('snake-ai-state', { detail: cloneGameState(state) }));
+    window.dispatchEvent(new CustomEvent<GameState>('snake-ai-state', {
+      detail: cloneGameState(state, state.gridSize ?? settingsRef.current.gridSize),
+    }));
   }, []);
 
   const settingsRef = useRef<GameSettings>(settings);
@@ -413,7 +437,7 @@ const GameApp: React.FC<{ campaignPlaytestLevel: CampaignLevel | null }> = ({ ca
       }
     } else if (mode !== 'ONLINE_SPECTATOR') {
       for (const event of events) {
-        if (event.player === 'p2' && isBuiltInAiActive()) continue;
+        if (event.player !== 'p1' && isBuiltInAiActive()) continue;
         if (event.type === 'PLANNING_ENTERED') {
           const state = stateRef.current;
           if (state.phase === 'OVER' || !state.snakes.find(snake => snake.id === event.player)?.isAlive) continue;
@@ -487,11 +511,99 @@ const GameApp: React.FC<{ campaignPlaytestLevel: CampaignLevel | null }> = ({ ca
 
   const turnTimeoutRef = useRef<NodeJS.Timeout | null>(null);
 
+  const clearHitstop = useCallback(() => {
+    if (hitstopTimerRef.current) {
+      clearTimeout(hitstopTimerRef.current);
+      hitstopTimerRef.current = null;
+    }
+    if (fatalMoveTimerRef.current) {
+      clearTimeout(fatalMoveTimerRef.current);
+      fatalMoveTimerRef.current = null;
+    }
+    hitstopUntilRef.current = 0;
+    activeHitstopRef.current = null;
+    setActiveHitstop(null);
+    fatalMoveSnakesRef.current = [];
+    setFatalMoveSnakes([]);
+  }, []);
+
+  const triggerHitstop = useCallback((
+    prevState: GameState | null | undefined,
+    nextState: GameState,
+    onResume?: () => void,
+  ): number => {
+    if (aiMode || inLobby || inOnlineLobby || replayActive) {
+      onResume?.();
+      return 0;
+    }
+    const isCampaign = Boolean(
+      campaignPlaytestLevel ||
+      settingsRef.current.levelId ||
+      nextState.campaignObjectives ||
+      nextState.campaignTokenRules,
+    );
+    const info = getHitstopForTransition(prevState, nextState, isCampaign);
+    if (!info) {
+      onResume?.();
+      return 0;
+    }
+
+    const newlyDeadIds = prevState
+      ? nextState.snakes
+          .filter(snake => {
+            const prevSnake = prevState.snakes.find(candidate => candidate.id === snake.id);
+            return prevSnake?.isAlive && !snake.isAlive;
+          })
+          .map(snake => snake.id)
+      : [];
+
+    if (hitstopTimerRef.current) {
+      clearTimeout(hitstopTimerRef.current);
+    }
+    if (fatalMoveTimerRef.current) {
+      clearTimeout(fatalMoveTimerRef.current);
+      fatalMoveTimerRef.current = null;
+    }
+    fatalMoveSnakesRef.current = [];
+    setFatalMoveSnakes([]);
+    hitstopUntilRef.current = Date.now() + info.durationMs;
+    activeHitstopRef.current = info;
+    setActiveHitstop(info);
+    hitstopTimerRef.current = setTimeout(() => {
+      hitstopTimerRef.current = null;
+      hitstopUntilRef.current = 0;
+      activeHitstopRef.current = null;
+      setActiveHitstop(null);
+
+      if ((info.kind === 'DEATH' || info.kind === 'BOSS_DEATH') && newlyDeadIds.length > 0) {
+        fatalMoveSnakesRef.current = newlyDeadIds;
+        setFatalMoveSnakes(newlyDeadIds);
+        fatalMoveTimerRef.current = setTimeout(() => {
+          fatalMoveTimerRef.current = null;
+          fatalMoveSnakesRef.current = [];
+          setFatalMoveSnakes([]);
+          onResume?.();
+        }, 220);
+      } else {
+        onResume?.();
+      }
+    }, info.durationMs);
+    return info.durationMs;
+  }, [aiMode, campaignPlaytestLevel, inLobby, inOnlineLobby, replayActive]);
+
   useEffect(() => {
     return () => {
       if (turnTimeoutRef.current) {
         clearTimeout(turnTimeoutRef.current);
         turnTimeoutRef.current = null;
+      }
+      if (hitstopTimerRef.current) {
+        clearTimeout(hitstopTimerRef.current);
+        hitstopTimerRef.current = null;
+      }
+      if (fatalMoveTimerRef.current) {
+        clearTimeout(fatalMoveTimerRef.current);
+        fatalMoveTimerRef.current = null;
       }
     };
   }, []);
@@ -513,9 +625,7 @@ const GameApp: React.FC<{ campaignPlaytestLevel: CampaignLevel | null }> = ({ ca
 
     const aiSnakes = current.snakes.filter(snake =>
       snake.isAlive &&
-      (campaignPlaytestLevel
-        ? snake.id !== 'p1'
-        : snake.id === 'p2') &&
+      snake.id !== 'p1' &&
       !locksRef.current[snake.id],
     );
     if (isBuiltInAiActive()) {
@@ -573,7 +683,8 @@ const GameApp: React.FC<{ campaignPlaytestLevel: CampaignLevel | null }> = ({ ca
       queueSnakeDirection(snake, direction);
     }
 
-    const { nextState, events } = processGameTick(stateRef.current, s, 0);
+    const prevState = stateRef.current;
+    const { nextState, events } = processGameTick(prevState, s, 0);
     playTickEvents(events);
 
     const nextBuffers = Object.fromEntries(nextState.snakes.map(snake => [
@@ -588,33 +699,53 @@ const GameApp: React.FC<{ campaignPlaytestLevel: CampaignLevel | null }> = ({ ca
       snake.isAlive && nextBuffers[snake.id].length > 0 && locksRef.current[snake.id],
     ]));
     stateRef.current = nextState;
-    commitLocks(nextLocks, false);
 
     setGameState(nextState);
     setMatchHistory(prev => [...prev, nextState]);
     dispatchAiState(nextState);
 
     if (playModeRef.current === 'ONLINE_HOST' || playModeRef.current === 'ONLINE_SERVER') {
-      networkManager.broadcastState(nextState, locksRef.current);
+      networkManager.broadcastState(nextState, nextLocks);
     }
 
-    const canProgress =
-      nextState.phase !== 'OVER' &&
-      (nextState.snakes.filter(snake => snake.isAlive).every(snake => moveBuffersRef.current[snake.id]?.length > 0) ||
-       (playModeRef.current === 'SOLO_AI' && current.snakes.some(snake => snake.id !== 'p1' && snake.isAlive && !locksRef.current[snake.id])));
+    const openNextLockPhase = () => {
+      const mergedLocks = Object.fromEntries(stateRef.current.snakes.map(snake => [
+        snake.id,
+        snake.isAlive && (moveBuffersRef.current[snake.id]?.length ?? 0) > 0 && Boolean(nextLocks[snake.id] || locksRef.current[snake.id]),
+      ]));
+      commitLocks(mergedLocks, false);
 
-    if (canProgress && aiMode) {
-      queueMicrotask(() => {
-        turnTimeoutRef.current = null;
-        maybeAdvanceTurn();
-      });
-    } else if (canProgress) {
-      turnTimeoutRef.current = setTimeout(() => {
-        turnTimeoutRef.current = null;
-        maybeAdvanceTurn();
-      }, 550);
+      const canProgress =
+        nextState.phase !== 'OVER' &&
+        nextState.snakes
+          .filter(snake => snake.isAlive)
+          .every(snake =>
+            (moveBuffersRef.current[snake.id]?.length ?? 0) > 0 ||
+            (isBuiltInAiActive() && snake.id !== 'p1')
+          );
+
+      if (canProgress && aiMode) {
+        queueMicrotask(() => {
+          turnTimeoutRef.current = null;
+          maybeAdvanceTurn();
+        });
+      } else if (canProgress) {
+        turnTimeoutRef.current = setTimeout(() => {
+          turnTimeoutRef.current = null;
+          maybeAdvanceTurn();
+        }, 550);
+      }
+    };
+
+    const freezeMs = triggerHitstop(prevState, nextState, openNextLockPhase);
+    if (freezeMs > 0) {
+      // During hitstop between board resolution and next lock phase, release
+      // human seat locks so inputs pressed during the freeze buffer cleanly,
+      // while deferring planning session opening until hitstop finishes.
+      locksRef.current = nextLocks;
+      setLocks(nextLocks);
     }
-  }, [aiMode, applyThinkTransition, campaignPlaytestLevel, commitLocks, dispatchAiState, isBuiltInAiActive, playTickEvents]);
+  }, [aiMode, applyThinkTransition, campaignPlaytestLevel, commitLocks, dispatchAiState, isBuiltInAiActive, playTickEvents, triggerHitstop]);
 
   const autoLockPlayer = useCallback((who: string) => {
     if (locksRef.current[who]) return;
@@ -667,6 +798,7 @@ const GameApp: React.FC<{ campaignPlaytestLevel: CampaignLevel | null }> = ({ ca
         !inLobby &&
         !inOnlineLobby &&
         !replayActive &&
+        Date.now() >= hitstopUntilRef.current &&
         current.phase !== 'OVER' &&
         (!isOnline || (ready?.p1 && ready?.p2));
 
@@ -827,12 +959,34 @@ const GameApp: React.FC<{ campaignPlaytestLevel: CampaignLevel | null }> = ({ ca
     }
 
     if (playModeRef.current === 'ONLINE_JOIN') {
+      if (Date.now() < hitstopUntilRef.current) {
+        const q = realTimeInputBufferRef.current[targetKey] ?? [];
+        const lastDir = q.length > 0 ? q[q.length - 1] : (currentSnake.queuedDirection || currentSnake.direction);
+        if (isOppositeDirection(lastDir, dir)) return false;
+        realTimeInputBufferRef.current[targetKey] = [...q, dir];
+      }
       networkManager.sendInput(dir, current.tick);
       const snakeCopy = { ...current.snakes.find(snake => snake.id === targetKey)!, queuedDirection: dir };
       setGameState(prev => ({
         ...prev,
         snakes: prev.snakes.map(snake => snake.id === targetKey ? snakeCopy : snake),
       }));
+      return true;
+    }
+
+    if (Date.now() < hitstopUntilRef.current) {
+      const q = realTimeInputBufferRef.current[targetKey] ?? [];
+      const lastDir = q.length > 0 ? q[q.length - 1] : (currentSnake.queuedDirection || currentSnake.direction);
+      if (isOppositeDirection(lastDir, dir)) return false;
+      realTimeInputBufferRef.current[targetKey] = [...q, dir];
+      if (!currentSnake.queuedDirection && !isOppositeDirection(currentSnake.direction, dir)) {
+        currentSnake.queuedDirection = dir;
+        const snakeCopy = { ...currentSnake, queuedDirection: dir };
+        setGameState(prev => ({
+          ...prev,
+          snakes: prev.snakes.map(snake => snake.id === targetKey ? snakeCopy : snake),
+        }));
+      }
       return true;
     }
 
@@ -928,7 +1082,8 @@ const GameApp: React.FC<{ campaignPlaytestLevel: CampaignLevel | null }> = ({ ca
   ) => {
     const listener = (event: Event) => {
       const state = (event as CustomEvent<GameState>).detail;
-      cb(opts?.compact ? toCompactGameState(state, locksRef.current) : state);
+      const gSize = state.gridSize ?? settingsRef.current.gridSize;
+      cb(opts?.compact ? toCompactGameState(state, locksRef.current, gSize) : state);
     };
     window.addEventListener('snake-ai-state', listener);
     return () => window.removeEventListener('snake-ai-state', listener);
@@ -939,9 +1094,10 @@ const GameApp: React.FC<{ campaignPlaytestLevel: CampaignLevel | null }> = ({ ca
       getSeat: getBridgeSeat,
       getState: (opts?: { compact?: boolean }) => {
         const state = stateRef.current;
+        const gSize = state.gridSize ?? settingsRef.current.gridSize;
         return opts?.compact
-          ? toCompactGameState(state, locksRef.current)
-          : cloneGameState(state);
+          ? toCompactGameState(state, locksRef.current, gSize)
+          : cloneGameState(state, gSize);
       },
       queueMoves: queueBridgeMoves,
       lock: lockBridgeSeat,
@@ -975,6 +1131,8 @@ const GameApp: React.FC<{ campaignPlaytestLevel: CampaignLevel | null }> = ({ ca
   }, []);
 
   const handleReturnToLobby = useCallback(() => {
+    clearHitstop();
+    realTimeInputBufferRef.current = {};
     if (campaignPlaytestLevel) {
       window.location.hash = '#/level-editor';
       return;
@@ -1068,7 +1226,7 @@ const GameApp: React.FC<{ campaignPlaytestLevel: CampaignLevel | null }> = ({ ca
         inOnlineLobby ||
         settingsModalOpen ||
         latencyModalOpen ||
-        gameState.phase === 'OVER' ||
+        (gameState.phase === 'OVER' && !activeHitstopRef.current && fatalMoveSnakesRef.current.length === 0) ||
         replayActive;
 
       if (isInMenuOrModal) {
@@ -1250,6 +1408,7 @@ const GameApp: React.FC<{ campaignPlaytestLevel: CampaignLevel | null }> = ({ ca
           if (typeof msg.matchId !== 'string' || !Number.isSafeInteger(msg.matchNumber)) break;
           const incomingMatch = { matchId: msg.matchId, matchNumber: msg.matchNumber };
           if (!canAdoptMatch(activeMatchRef.current, incomingMatch)) break;
+          if (msg.settings) adoptRoomSettings(msg.settings);
           if (!isCurrentMatch(activeMatchRef.current, incomingMatch)) {
             activeMatchRef.current = incomingMatch;
             lastStateRevisionRef.current = -1;
@@ -1301,14 +1460,22 @@ const GameApp: React.FC<{ campaignPlaytestLevel: CampaignLevel | null }> = ({ ca
             const safeState = normalizeGameState(msg.state);
             if (safeState.tick < lastStateTickRef.current) break;
 
+            if (typeof safeState.gridSize === 'number' && safeState.gridSize !== settingsRef.current.gridSize) {
+              adoptRoomSettings({ gridSize: safeState.gridSize });
+            }
+
             const isNewTick = safeState.tick > lastStateTickRef.current;
             lastStateRevisionRef.current = msg.stateRevision;
             lastStateTickRef.current = safeState.tick;
 
+            const prevState = stateRef.current;
             const snapshot = adoptThinkTimeSnapshot(thinkRef.current, safeState);
             thinkRef.current = snapshot.model;
             stateRef.current = snapshot.state;
             setGameState(snapshot.state);
+            if (isNewTick) {
+              triggerHitstop(prevState, snapshot.state);
+            }
             setMatchHistory(prev => {
               if (prev.length === 0 || snapshot.state.tick > prev[prev.length - 1].tick) {
                 return [...prev, snapshot.state];
@@ -1474,7 +1641,8 @@ const GameApp: React.FC<{ campaignPlaytestLevel: CampaignLevel | null }> = ({ ca
       turn: gameState.tick,
       phase: gameState.phase,
       round: gameState.round,
-      gridSize: settings.gridSize,
+      gridSize: gameState.gridSize ?? settings.gridSize,
+      walls: gameState.walls ?? [],
       snakes: Object.fromEntries(gameState.snakes.map(snake => [snake.id, {
         head: snake.body[0] || { x: 0, y: 0 },
         body: snake.body,
@@ -1507,15 +1675,24 @@ const GameApp: React.FC<{ campaignPlaytestLevel: CampaignLevel | null }> = ({ ca
     const tickIntervalMs = 1000 / settings.tickRate;
 
     const intervalId = setInterval(() => {
+      if (Date.now() < hitstopUntilRef.current) return;
       const current = stateRef.current;
       if (current.phase === 'OVER') return;
       const isOnlineAuthority =
         playModeRef.current === 'ONLINE_HOST' || playModeRef.current === 'ONLINE_SERVER';
       if (isOnlineAuthority && current.snakes.some(snake => !current.readyConfirmed?.[snake.id])) return;
 
+      for (const snake of current.snakes) {
+        const buffered = realTimeInputBufferRef.current[snake.id];
+        if (buffered && buffered.length > 0 && !snake.queuedDirection) {
+          const nextDir = buffered.shift()!;
+          queueSnakeDirection(snake, nextDir);
+        }
+      }
+
       if (isBuiltInAiActive()) {
         for (const bot of current.snakes.filter(snake =>
-          snake.isAlive && (campaignPlaytestLevel ? snake.id !== 'p1' : snake.id === 'p2'),
+          snake.isAlive && snake.id !== 'p1',
         )) {
           const aiDir = calculateAIMove(
             current,
@@ -1528,6 +1705,14 @@ const GameApp: React.FC<{ campaignPlaytestLevel: CampaignLevel | null }> = ({ ca
       }
 
       const { nextState, events } = processGameTick(current, settingsRef.current, tickIntervalMs);
+      triggerHitstop(current, nextState);
+      for (const snake of nextState.snakes) {
+        const buffered = realTimeInputBufferRef.current[snake.id];
+        if (buffered && buffered.length > 0 && !snake.queuedDirection) {
+          const nextDir = buffered.shift()!;
+          queueSnakeDirection(snake, nextDir);
+        }
+      }
 
       if (Object.values(events.tokenEaten).some(Boolean)) soundEngine.playTokenEat();
       if (events.shrinkTelegraphStarted) soundEngine.playShrinkWarning();
@@ -1583,6 +1768,8 @@ const GameApp: React.FC<{ campaignPlaytestLevel: CampaignLevel | null }> = ({ ca
   }, []);
 
   const startNewMatch = () => {
+    clearHitstop();
+    realTimeInputBufferRef.current = {};
     setGameOverConfirmed(false);
     activeHandlerRef.current = null;
     soloAiP2OverriddenRef.current = playMode === 'SOLO_AI' && bridgeSeatRef.current === 'p2';
@@ -1603,9 +1790,21 @@ const GameApp: React.FC<{ campaignPlaytestLevel: CampaignLevel | null }> = ({ ca
         : { p1: playerNamesRef.current.p1 || 'PLAYER 1', p2: me || 'PLAYER 2' };
     }
     const isOnline = playMode === 'ONLINE_HOST' || playMode === 'ONLINE_JOIN' || playMode === 'ONLINE_SERVER';
+    const hostCustomLevel = (playMode === 'ONLINE_HOST' || playMode === 'ONLINE_SERVER')
+      ? customOnlineLevelRef.current
+      : null;
+    const matchSettings = hostCustomLevel
+      ? getMultiplayerCustomLevelSettings(hostCustomLevel, settingsRef.current)
+      : settingsRef.current;
+    if (hostCustomLevel && matchSettings !== settingsRef.current) {
+      settingsRef.current = matchSettings;
+      setSettings(matchSettings);
+    }
     const initial = campaignPlaytestLevel
-      ? createCampaignPlaytestState(campaignPlaytestLevel, settingsRef.current, matchNames)
-      : createInitialState(settingsRef.current, matchNames);
+      ? createCampaignPlaytestState(campaignPlaytestLevel, matchSettings, matchNames)
+      : hostCustomLevel
+        ? createMultiplayerCustomLevelState(hostCustomLevel, matchSettings, matchNames)
+        : createInitialState(matchSettings, matchNames);
     if (isOnline) {
       initial.readyConfirmed = Object.fromEntries(initial.snakes.map(snake => [snake.id, false]));
     } else {
@@ -1653,16 +1852,28 @@ const GameApp: React.FC<{ campaignPlaytestLevel: CampaignLevel | null }> = ({ ca
     startNewMatch();
   };
 
-  const handleCreateOnlineRoom = async () => {
+  const handleCreateOnlineRoom = async (levelOverride?: CampaignLevel | null) => {
     setJoinError(null);
     setBridgeSecret(null);
+    const chosenLevel = levelOverride !== undefined ? levelOverride : customOnlineLevelRef.current;
+    customOnlineLevelRef.current = chosenLevel;
+    setCustomOnlineLevel(chosenLevel);
+    const hostSettings: GameSettings = chosenLevel
+      ? getMultiplayerCustomLevelSettings(chosenLevel, settingsRef.current)
+      : {
+          ...settingsRef.current,
+          levelId: undefined,
+          levelName: undefined,
+        };
+    settingsRef.current = hostSettings;
+    setSettings(hostSettings);
     const code = Math.random().toString(36).substring(2, 6).toUpperCase();
     setOnlineRoomId(code);
     setPlayMode('ONLINE_HOST');
     setInOnlineLobby(true);
     setInLobby(false);
 
-    const ok = await networkManager.connect(code, 'p1', displayName.trim() || undefined, settings);
+    const ok = await networkManager.connect(code, 'p1', displayName.trim() || undefined, hostSettings);
     if (!ok) {
       const error = networkManager.getLastConnectionError();
       networkManager.disconnect();
@@ -1675,16 +1886,28 @@ const GameApp: React.FC<{ campaignPlaytestLevel: CampaignLevel | null }> = ({ ca
     setOnlineRole('p1');
   };
 
-  const handleCreateServerRoom = async () => {
+  const handleCreateServerRoom = async (levelOverride?: CampaignLevel | null) => {
     setJoinError(null);
     setBridgeSecret(null);
+    const chosenLevel = levelOverride !== undefined ? levelOverride : customOnlineLevelRef.current;
+    customOnlineLevelRef.current = chosenLevel;
+    setCustomOnlineLevel(chosenLevel);
+    const hostSettings: GameSettings = chosenLevel
+      ? getMultiplayerCustomLevelSettings(chosenLevel, settingsRef.current)
+      : {
+          ...settingsRef.current,
+          levelId: undefined,
+          levelName: undefined,
+        };
+    settingsRef.current = hostSettings;
+    setSettings(hostSettings);
     const code = Math.random().toString(36).substring(2, 6).toUpperCase();
     setOnlineRoomId(code);
     setPlayMode('ONLINE_SERVER');
     setInOnlineLobby(true);
     setInLobby(false);
 
-    const ok = await networkManager.connect(code, 'server', displayName.trim() || undefined, settings);
+    const ok = await networkManager.connect(code, 'server', displayName.trim() || undefined, hostSettings);
     if (!ok) {
       const error = networkManager.getLastConnectionError();
       networkManager.disconnect();
@@ -1905,6 +2128,8 @@ const GameApp: React.FC<{ campaignPlaytestLevel: CampaignLevel | null }> = ({ ca
               importError={importError}
               joinError={joinError}
               initialRoom={initialRoomParam}
+              customOnlineLevel={customOnlineLevel}
+              onSelectCustomOnlineLevel={setCustomOnlineLevel}
             />
           ) : inOnlineLobby ? (
             <OnlineRoomLobby
@@ -1951,6 +2176,8 @@ const GameApp: React.FC<{ campaignPlaytestLevel: CampaignLevel | null }> = ({ ca
                   interactionEnabled={!replayActive}
                   splitTouchSeats={playMode === 'LOCAL_2P'}
                   animationsDisabled={aiMode}
+                  hitstop={activeHitstop}
+                  fatalMoveAnimating={fatalMoveSnakes}
                 />
                 {showTurnHint && displayState.turnBased && displayState.phase !== 'OVER' && !replayActive && (
                   <div role="status" className="absolute top-1 left-1/2 z-30 flex w-[min(20rem,calc(100%-1rem))] -translate-x-1/2 items-center justify-between gap-2 border-2 border-[#0F380F] bg-[#9BBC0F] px-2 py-1 font-mono text-[10px] font-bold text-[#0F380F] shadow-[2px_2px_0px_#0F380F]">
@@ -2072,7 +2299,7 @@ const GameApp: React.FC<{ campaignPlaytestLevel: CampaignLevel | null }> = ({ ca
         onRegisterHandler={(h) => { activeHandlerRef.current = h; }}
       />
 
-      {!inLobby && !inOnlineLobby && !replayActive && (
+      {!inLobby && !inOnlineLobby && !replayActive && !activeHitstop && fatalMoveSnakes.length === 0 && (
         <MatchEndModal
           gameState={gameState}
           playMode={playMode}

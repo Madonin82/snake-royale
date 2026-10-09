@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { createInitialState, DEFAULT_SETTINGS, processGameTick } from './engine';
+import { createInitialState, DEFAULT_SETTINGS, getHitstopForTransition, processGameTick } from './engine';
 import { GameState, GameSettings, Position } from '../types/game';
 
 function runDeathTick(
@@ -97,3 +97,50 @@ test('resolves a three-way simultaneous head-on collision as a draw', () => {
   assert.equal(nextState.phase, 'OVER');
   assert.equal(nextState.winner, 'DRAW');
 });
+
+test('getHitstopForTransition returns 100ms for token pickup, 300ms for regular death, and 500ms + flash cell for boss death', () => {
+  const settings = { ...DEFAULT_SETTINGS };
+
+  // Token pickup -> 100ms
+  const tokenState = createInitialState(settings);
+  tokenState.tokens = [{ x: 3, y: 2 }];
+  const p1 = tokenState.snakes.find(s => s.id === 'p1')!;
+  p1.body = [{ x: 2, y: 2 }, { x: 1, y: 2 }];
+  p1.direction = 'RIGHT';
+  const afterToken = processGameTick(tokenState, settings, 0).nextState;
+  const tokenHitstop = getHitstopForTransition(tokenState, afterToken, false);
+  assert.deepEqual(tokenHitstop, {
+    durationMs: 100,
+    kind: 'TOKEN',
+    flashCells: [],
+  });
+
+  // Regular death -> 300ms
+  const deathState = createInitialState(settings);
+  deathState.tokens = [];
+  const p1Death = deathState.snakes.find(s => s.id === 'p1')!;
+  p1Death.body = [{ x: 7, y: 2 }, { x: 6, y: 2 }];
+  p1Death.direction = 'RIGHT';
+  const afterDeath = processGameTick(deathState, settings, 0).nextState;
+  const regularDeathHitstop = getHitstopForTransition(deathState, afterDeath, false);
+  assert.deepEqual(regularDeathHitstop, {
+    durationMs: 300,
+    kind: 'DEATH',
+    flashCells: [{ x: 8, y: 2 }],
+  });
+
+  // Boss death in campaign -> 500ms + white flash on death cell
+  const bossState = createInitialState(settings);
+  bossState.tokens = [];
+  const p2Boss = bossState.snakes.find(s => s.id === 'p2')!;
+  p2Boss.body = [{ x: 0, y: 5 }, { x: 1, y: 5 }];
+  p2Boss.direction = 'LEFT';
+  const afterBossDeath = processGameTick(bossState, settings, 0).nextState;
+  const bossDeathHitstop = getHitstopForTransition(bossState, afterBossDeath, true);
+  assert.deepEqual(bossDeathHitstop, {
+    durationMs: 500,
+    kind: 'BOSS_DEATH',
+    flashCells: [{ x: 0, y: 5 }],
+  });
+});
+
