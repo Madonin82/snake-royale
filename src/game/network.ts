@@ -129,6 +129,9 @@ export class NetworkManager {
         p2Name = this.role === 'p2' && cleanName ? cleanName : null;
 
         createdRoom = true;
+        const settings = hostSettings
+          ? Object.fromEntries(Object.entries(hostSettings).filter(([, value]) => value !== undefined))
+          : null;
         await set(roomRef, {
           createdAt: Date.now(),
           p1Uid: this.role === 'p1' ? uid : null,
@@ -142,7 +145,7 @@ export class NetworkManager {
           hasP1: joinedHasP1,
           hasP2: joinedHasP2,
           status: 'lobby',
-          settings: hostSettings || null,
+          settings,
           matchNumber: 0,
           matchId: null,
           lastActive: Date.now(),
