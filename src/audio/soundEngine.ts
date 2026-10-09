@@ -84,9 +84,39 @@ class SoundEngine {
     }
   }
 
-  // Warning telegraph alarm for shrink phase
-  public playShrinkWarning() {
+  // Dart skill activation — high-pitched bell-like zing
+  public playDart() {
     if (!this.enabled) return;
+    this.initCtx();
+    if (!this.ctx) return;
+
+    try {
+      const now = this.ctx.currentTime;
+      // Ascending bell-like zing: sine with quick attack
+      const notes = [880, 1174.66, 1567.98]; // A5, D6, G6
+      notes.forEach((freq, idx) => {
+        if (!this.ctx) return;
+        const osc = this.ctx.createOscillator();
+        const gain = this.ctx.createGain();
+        osc.type = 'sine';
+        osc.frequency.setValueAtTime(freq, now + idx * 0.03);
+
+        gain.gain.setValueAtTime(0.12, now + idx * 0.03);
+        gain.gain.exponentialRampToValueAtTime(0.001, now + idx * 0.03 + 0.12);
+
+        osc.connect(gain);
+        gain.connect(this.ctx.destination);
+
+        osc.start(now + idx * 0.03);
+        osc.stop(now + idx * 0.03 + 0.15);
+      });
+    } catch {
+      // Ignore
+    }
+  }
+
+  // Warning telegraph alarm for shrink phase
+  public playShrinkWarning() {    if (!this.enabled) return;
     this.initCtx();
     if (!this.ctx) return;
 

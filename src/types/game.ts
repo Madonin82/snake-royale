@@ -96,6 +96,7 @@ export interface GameState {
   totalMatchTime: number;
   readyConfirmed?: Record<string, boolean>;
   skillsAvailable?: SkillsAvailableConfig;
+  dartTrail?: Array<{ snakeId: string; cells: Position[] }>;
 }
 
 export interface CompactSnakeState {

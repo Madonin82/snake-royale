@@ -794,6 +794,20 @@ const GameApp: React.FC<{ campaignPlaytestLevel: CampaignLevel | null }> = ({ ca
     };
 
     const freezeMs = triggerHitstop(prevState, nextState, openNextLockPhase);
+    // Dart resolution effects: zing sound + haptics
+    if (nextState.dartTrail && nextState.dartTrail.length > 0) {
+      soundEngine.playDart();
+      for (const trail of nextState.dartTrail) {
+        const who = trail.snakeId;
+        // Controller rumble for the darting player's gamepad
+        const slot = who === 'p2' ? 2 : 1;
+        gamepadController.rumble(slot);
+        // Phone vibration
+        if (typeof navigator !== 'undefined' && typeof navigator.vibrate === 'function') {
+          navigator.vibrate(50);
+        }
+      }
+    }
     if (freezeMs > 0) {
       // During hitstop between board resolution and next lock phase, release
       // human seat locks so inputs pressed during the freeze buffer cleanly,
@@ -1284,7 +1298,7 @@ const GameApp: React.FC<{ campaignPlaytestLevel: CampaignLevel | null }> = ({ ca
         }
       } else if (button === 'B') {
         handleBufferUndo(targetSlot);
-      } else if (button === 'Y') {
+      } else if (button === 'NORTH') {
         handleSkillButton(targetSlot);
       }
     });

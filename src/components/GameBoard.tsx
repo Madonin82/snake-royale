@@ -183,6 +183,32 @@ export const GameBoard: React.FC<GameBoardProps> = ({
       ctx.restore();
     }
 
+    // 8c. Dart afterimage trail — fading ghost heads on intermediate cells
+    if (hitstop && hitstop.kind === 'DART' && gameState.dartTrail) {
+      ctx.save();
+      for (const trail of gameState.dartTrail) {
+        const snake = gameState.snakes.find(s => s.id === trail.snakeId);
+        const baseColor = snake?.id === 'p1' ? GAMEBOY_COLORS.DARKEST : GAMEBOY_COLORS.DARK;
+        trail.cells.forEach((cell, idx) => {
+          // Fade: first cell (earliest) more transparent, later cells more solid
+          const opacity = 0.25 + (idx / Math.max(1, trail.cells.length)) * 0.35;
+          ctx.globalAlpha = opacity;
+          ctx.fillStyle = baseColor;
+          const cx = Math.max(0, Math.min(gridSize - 1, cell.x));
+          const cy = Math.max(0, Math.min(gridSize - 1, cell.y));
+          // Ghost head: slightly inset square
+          const inset = cellSize * 0.15;
+          ctx.fillRect(
+            cx * cellSize + inset,
+            cy * cellSize + inset,
+            cellSize - inset * 2,
+            cellSize - inset * 2
+          );
+        });
+      }
+      ctx.restore();
+    }
+
     // 9. Outer Frame Border
     ctx.strokeStyle = GAMEBOY_COLORS.DARKEST;
     ctx.lineWidth = 4;

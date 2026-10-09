@@ -5,6 +5,7 @@ export type GamepadButtonName =
   | 'B'
   | 'X'
   | 'Y'
+  | 'NORTH'
   | 'LB'
   | 'RB'
   | 'LT'
@@ -300,12 +301,16 @@ class GamepadController {
     const btnRB = justPressed(5);
     const btnSelect = justPressed(8);
     const btnStart = justPressed(9);
+    // North face button (index 3 on both layouts) — used for skill activation,
+    // bypassing the X/Y label swap between Switch and standard controllers.
+    const btnNorth = justPressed(3);
 
     if (this.buttonCallback) {
       if (btnConfirm) this.buttonCallback(slot, 'A', true);
       if (btnCancel) this.buttonCallback(slot, 'B', true);
       if (btnX) this.buttonCallback(slot, 'X', true);
       if (btnY) this.buttonCallback(slot, 'Y', true);
+      if (btnNorth) this.buttonCallback(slot, 'NORTH', true);
       if (btnLB) this.buttonCallback(slot, 'LB', true);
       if (btnRB) this.buttonCallback(slot, 'RB', true);
       if (btnSelect) this.buttonCallback(slot, 'SELECT', true);

@@ -202,7 +202,7 @@ export function queueSnakeSkill(snake: Snake, skill: PendingSkill | null): boole
 
 export interface HitstopInfo {
   durationMs: number;
-  kind: 'TOKEN' | 'DEATH' | 'BOSS_DEATH';
+  kind: 'TOKEN' | 'DEATH' | 'BOSS_DEATH' | 'DART';
   flashCells: Position[];
 }
 
@@ -245,6 +245,17 @@ export function getHitstopForTransition(
     const prevSnake = prevState.snakes.find(candidate => candidate.id === snake.id);
     return prevSnake && snake.score > prevSnake.score;
   });
+
+  // Dart hitstop: 150ms, between token (100ms) and death (300ms)
+  // Check before token since dart also changes score (deduction)
+  if (nextState.dartTrail && nextState.dartTrail.length > 0) {
+    const flashCells = nextState.dartTrail.flatMap(trail => trail.cells);
+    return {
+      durationMs: 150,
+      kind: 'DART',
+      flashCells,
+    };
+  }
 
   if (tokenEaten) {
     return {
@@ -433,6 +444,8 @@ export function processGameTick(
 
   const totalSteps = activeDarts.size > 0 ? 3 : 1;
   let totalTokensConsumedCount = 0;
+  const dartTrail: Array<{ snakeId: string; cells: Position[] }> = [];
+  const dartTrailMap = new Map<string, Position[]>();
 
   for (let step = 0; step < totalSteps; step++) {
     const movingIndices: number[] = [];
@@ -537,6 +550,12 @@ export function processGameTick(
       if (!ateThisStep) {
         snakes[i].body.pop();
       }
+      // Record dart trail cells (steps 1-2 are the dart portion)
+      if (step > 0 && activeDarts.has(snakes[i].id) && snakes[i].isAlive) {
+        const trail = dartTrailMap.get(snakes[i].id) ?? [];
+        trail.push({ ...nextHeads[i] });
+        dartTrailMap.set(snakes[i].id, trail);
+      }
     }
 
     if (stepConsumedTokenIndices.size > 0) {
@@ -551,6 +570,14 @@ export function processGameTick(
       snake.score = Math.max(0, snake.score - SKILLS.dart.cost);
     }
   }
+
+  // Populate dart trail for rendering (cleared each tick)
+  for (const [snakeId, cells] of dartTrailMap) {
+    if (cells.length > 0) {
+      dartTrail.push({ snakeId, cells });
+    }
+  }
+  state.dartTrail = dartTrail.length > 0 ? dartTrail : undefined;
 
   recordSurviveResults(state);
   recordFirstToResults(state);
