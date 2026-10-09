@@ -457,7 +457,8 @@ export function processGameTick(
     }
     if (movingIndices.length === 0) break;
 
-    if (step === 1) {
+    // Darting snakes move in the dart direction from step 0 (all 3 cells in dart dir)
+    if (step === 0) {
       for (const idx of movingIndices) {
         const dartDir = activeDarts.get(snakes[idx].id);
         if (dartDir) {
