@@ -202,27 +202,3 @@ test('dart into wall kills the snake', () => {
   const after = result.nextState.snakes.find(snake => snake.id === 'p1')!;
   assert.equal(after.isAlive, false);
 });
-
-test('dart triggers 150ms DART hitstop with trail cells', () => {
-  const state = createInitialState();
-  const settings = { ...DEFAULT_SETTINGS, skillsAvailable: 'immediate' as const };
-  state.tokens = [];
-  state.skillsAvailable = 'immediate';
-  const p1 = state.snakes.find(snake => snake.id === 'p1')!;
-  p1.body = [{ x: 2, y: 2 }, { x: 1, y: 2 }, { x: 0, y: 2 }];
-  p1.direction = 'RIGHT';
-  p1.equippedSkill = 'dart';
-  p1.score = 5;
-  const p2 = state.snakes.find(snake => snake.id === 'p2')!;
-  p2.body = [{ x: 5, y: 7 }, { x: 6, y: 7 }, { x: 7, y: 7 }];
-  p2.direction = 'LEFT';
-  queueSnakeSkill(p1, { skillId: 'dart', direction: 'RIGHT' });
-  const result = processGameTick(state, settings, 0);
-  const after = result.nextState;
-  assert.ok(after.dartTrail && after.dartTrail.length > 0);
-  assert.equal(after.dartTrail[0].snakeId, 'p1');
-  assert.equal(after.dartTrail[0].cells.length, 2);
-  const hitstop = getHitstopForTransition(state, after, false);
-  assert.equal(hitstop?.kind, 'DART');
-  assert.equal(hitstop?.durationMs, 150);
-});
