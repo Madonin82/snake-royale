@@ -1,6 +1,47 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { canAcceptState, canAdoptMatch, isCurrentMatch, isNewerSequence, MatchIdentity } from './networkProtocol';
+import {
+  areBothOnlinePlayersReady,
+  canAcceptState,
+  canAdoptMatch,
+  canLockOnlineMatch,
+  isCurrentMatch,
+  isMatchStartAcknowledged,
+  mergeOnlineReadyFlags,
+  isNewerSequence,
+  MatchIdentity,
+} from './networkProtocol';
+
+test('RTDB seat readiness merges into p1 and p2 without replacing other snake state', () => {
+  assert.deepEqual(
+    mergeOnlineReadyFlags(
+      { p1: false, p2: false, p3: true },
+      { p1: true, p2: false },
+    ),
+    { p1: true, p2: false, p3: true },
+  );
+});
+
+test('online readiness follows the p1 and p2 seat keys', () => {
+  assert.equal(areBothOnlinePlayersReady({ p1: true, p2: false }), false);
+  assert.equal(areBothOnlinePlayersReady({ p1: true, p2: true }), true);
+  assert.equal(areBothOnlinePlayersReady({ snake1: true, snake2: true }), false);
+});
+
+test('the authority cannot lock until the joiner acknowledges the current match start', () => {
+  const ready = { p1: true, p2: true };
+  assert.equal(canLockOnlineMatch(ready, true, false), false);
+  assert.equal(canLockOnlineMatch(ready, true, true), true);
+  assert.equal(canLockOnlineMatch({ p1: true, p2: false }, true, true), false);
+  assert.equal(canLockOnlineMatch(ready, false, false), true);
+});
+
+test('only an acknowledgment for the active match releases the start gate', () => {
+  const current = { matchId: 'match-3', matchNumber: 3 };
+  assert.equal(isMatchStartAcknowledged(current, 'match-3'), true);
+  assert.equal(isMatchStartAcknowledged(current, 'match-2'), false);
+  assert.equal(isMatchStartAcknowledged(null, 'match-3'), false);
+});
 
 test('adopts three consecutive matches in order', () => {
   let current: MatchIdentity | null = null;
