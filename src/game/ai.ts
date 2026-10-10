@@ -1,8 +1,62 @@
-import { Direction, GameState, PendingSkill, Position } from '../types/game';
+import { Direction, GameState, PendingSkill, Position, Snake } from '../types/game';
 import { getNextHeadPosition, isCellInArena, isOppositeDirection } from './engine';
 import { canActivateSkill } from './skills';
 
 const ALL_DIRECTIONS: Direction[] = ['UP', 'RIGHT', 'DOWN', 'LEFT'];
+
+const posKey = (p: Position): string => `${p.x},${p.y}`;
+
+/** Standard tiebreak: skill points, then length. Returns the winner, or null on a draw. */
+function tiebreakWinner(a: Snake, b: Snake): Snake | null {
+  const aPts = a.skillPoints ?? 0;
+  const bPts = b.skillPoints ?? 0;
+  if (aPts !== bPts) return aPts > bPts ? a : b;
+  if (a.body.length !== b.body.length) return a.body.length > b.body.length ? a : b;
+  return null;
+}
+
+/** True if `me` would win a mutual-kill tiebreak against `opponent` outright. */
+function winsTiebreak(me: Snake, opponent: Snake): boolean {
+  return tiebreakWinner(me, opponent) === me;
+}
+
+/**
+ * Snipe lethality: strictly ahead on BOTH skill points and length. Same bar
+ * as a player-vs-player snipe — no boss exceptions. (Stricter than the
+ * mutual-kill tiebreak, which is points-then-length.)
+ */
+function snipeIsLethal(me: Snake, opponent: Snake): boolean {
+  const myPts = me.skillPoints ?? 0;
+  const oppPts = opponent.skillPoints ?? 0;
+  return myPts > oppPts && me.body.length > opponent.body.length;
+}
+
+/**
+ * Conservative growth check: if any token sits on a cell the opponent's head
+ * can reach next tick, assume they might eat — in which case their tail does
+ * NOT vacate. (Their queue is hidden, so we can't know for sure.)
+ */
+function opponentMayGrow(opponent: Snake, tokens: Position[]): boolean {
+  const head = opponent.body[0];
+  return ALL_DIRECTIONS.some(dir => {
+    if (isOppositeDirection(opponent.direction, dir)) return false;
+    const c = getNextHeadPosition(head, dir);
+    return tokens.some(t => t.x === c.x && t.y === c.y);
+  });
+}
+
+/**
+ * Cells of an opponent's body that are lethal to enter for an ORDINARY move.
+ * The tail is only safe if it vacates — i.e. the opponent isn't about to grow.
+ */
+function getOpponentBodyThreat(opponent: Snake, tokens: Position[]): Set<string> {
+  const threat = new Set<string>();
+  const body = opponent.isAlive && !opponentMayGrow(opponent, tokens)
+    ? opponent.body.slice(0, -1)
+    : opponent.body;
+  for (const seg of body) threat.add(posKey(seg));
+  return threat;
+}
 
 export interface AIActionResult {
   direction: Direction | null;
@@ -59,10 +113,12 @@ function calculateAvalenaAction(
     // Check if in dart range and dart is unlocked & affordable
     if (canActivateSkill(me, gameState, skillsAvailable)) {
       let inRange = false;
-      const dartCandidates: { dir: Direction; endDist: number; minDist: number; safe: boolean }[] = [];
+      const dartCandidates: { dir: Direction; endDist: number; minDist: number; safe: boolean; snipeHits: number }[] = [];
       // Threat cells are computed once: the dart's later cells land after the
       // opponent's sub-step-0 move, so safety is evaluated against reachability.
-      const threatCells = getOpponentThreatCells(gameState, botRole, gridSize);
+      // Snipe-aware: when we win the tiebreak, the opponent's reachable cells
+      // are kill opportunities (snipeTargets), not threats.
+      const { threat: threatCells, snipeTargets } = getOpponentThreatCells(gameState, botRole, gridSize, me);
 
       for (const dartDir of validDartDirs) {
         // The engine moves all 3 dart cells in the dart direction (it sets the
@@ -88,14 +144,22 @@ function calculateAvalenaAction(
           isDartCellSafe(step2Pos, [step1Pos, ...me.body.slice(0, -1)], gameState, gridSize, threatCells) &&
           isDartCellSafe(step3Pos, [step2Pos, step1Pos, ...me.body.slice(0, -2)], gameState, gridSize, threatCells);
 
-        dartCandidates.push({ dir: dartDir, endDist, minDist, safe });
+        // Snipe chances: path cells overlapping the opponent's reachable set.
+        // When lethal, these are free lottery tickets — safe either way, and a
+        // hit kills the opponent outright.
+        const snipeHits = [step1Pos, step2Pos, step3Pos]
+          .filter(p => snipeTargets.has(posKey(p))).length;
+
+        dartCandidates.push({ dir: dartDir, endDist, minDist, safe, snipeHits });
       }
 
       if (inRange) {
         // Safety first: a dart that kills the darter is never the answer.
-        // Then closest landing to the player's head.
+        // Then snipe chances (lethal when we hold the tiebreak), then closest
+        // landing to the player's head.
         dartCandidates.sort((a, b) => {
           if (a.safe !== b.safe) return a.safe ? -1 : 1;
+          if (a.snipeHits !== b.snipeHits) return b.snipeHits - a.snipeHits;
           if (a.endDist !== b.endDist) return a.endDist - b.endDist;
           if (a.minDist !== b.minDist) return a.minDist - b.minDist;
           return 0;
@@ -137,39 +201,53 @@ function isDartCellSafe(
   if (!isCellInArena(pos, gridSize, state.ringInset)) return false;
   if (state.walls?.some(wall => wall.x === pos.x && wall.y === pos.y)) return false;
   if (ownBody.slice(0, -1).some(seg => seg.x === pos.x && seg.y === pos.y)) return false;
-  // No head-cell exception: under current rules a dart landing on a stationary
-  // head kills the DARTER, so the head (and every cell it can reach) is danger.
+  // No head-cell exception: a dart landing on a stationary head is lethal for
+  // the darter UNLESS the snipe rule applies (darter wins the tiebreak) — the
+  // threat set passed in already accounts for that.
   if (threatCells.has(`${pos.x},${pos.y}`)) return false;
   return true;
 }
 
-// Cells the opponents threaten: their current bodies (minus tail, which
-// vacates on sub-step 0) PLUS every cell their heads can reach on sub-step 0.
-// The dart's cells 2-3 land after the opponent has moved, so the brain must
-// evaluate the dart against where the opponent CAN be, not where they are.
-// (The queue is hidden — reachability is the only honest model.)
+// Cells the opponents threaten for a DART: their current bodies (growth-aware —
+// the tail only vacates if they aren't about to eat) PLUS every cell their
+// heads can reach on sub-step 0. The dart's cells 2-3 land after the opponent
+// has moved, so the brain must evaluate the dart against where the opponent
+// CAN be, not where they are. (The queue is hidden — reachability is the only
+// honest model.)
+//
+// SNIPE: when we win the points-then-length tiebreak against an opponent, the
+// snipe rule makes their reachable cells kill opportunities, not threats —
+// they're returned separately as snipeTargets. Their current head cell stays a
+// threat (it becomes neck on sub-step 0).
 function getOpponentThreatCells(
   gameState: GameState,
   botRole: string,
   gridSize: number,
-): Set<string> {
-  const cells = new Set<string>();
+  me: Snake,
+): { threat: Set<string>; snipeTargets: Set<string> } {
+  const threat = new Set<string>();
+  const snipeTargets = new Set<string>();
   for (const snake of gameState.snakes) {
     if (snake.id === botRole) continue;
-    const body = snake.isAlive ? snake.body.slice(0, -1) : snake.body;
-    for (const seg of body) cells.add(`${seg.x},${seg.y}`);
+    for (const key of getOpponentBodyThreat(snake, gameState.tokens)) {
+      threat.add(key);
+    }
     if (snake.isAlive) {
       const head = snake.body[0];
+      const lethal = snipeIsLethal(me, snake);
       for (const d of ALL_DIRECTIONS) {
         if (isOppositeDirection(snake.direction, d)) continue;
         const next = getNextHeadPosition(head, d);
-        if (isCellInArena(next, gridSize, gameState.ringInset)) {
-          cells.add(`${next.x},${next.y}`);
+        if (!isCellInArena(next, gridSize, gameState.ringInset)) continue;
+        if (lethal) {
+          snipeTargets.add(posKey(next));
+        } else {
+          threat.add(posKey(next));
         }
       }
     }
   }
-  return cells;
+  return { threat, snipeTargets };
 }
 
 function calculateHuntMoveTowardTarget(
@@ -192,9 +270,10 @@ function calculateHuntMoveTowardTarget(
     if (!isCellInArena(nextPos, gridSize, gameState.ringInset)) continue;
     if (gameState.walls?.some(wall => wall.x === nextPos.x && wall.y === nextPos.y)) continue;
     if (me.body.slice(0, -1).some(s => s.x === nextPos.x && s.y === nextPos.y)) continue;
+    // Opponent bodies are checked pre-move by the engine, so the head cell
+    // counts too — and the tail only vacates if they aren't about to grow.
     const hitsOpponentBody = opponents.some(opponent =>
-      (opponent.isAlive ? opponent.body.slice(1, -1) : opponent.body)
-        .some(s => s.x === nextPos.x && s.y === nextPos.y),
+      getOpponentBodyThreat(opponent, gameState.tokens).has(posKey(nextPos)),
     );
     if (hitsOpponentBody) continue;
 
@@ -263,33 +342,43 @@ export function calculateAIMove(
       continue;
     }
 
-    // 3. HARD RULE: Avoid Opponent Body
+    // 3. HARD RULE: Avoid Opponent Body (pre-move bodies; tail only vacates
+    // if they aren't about to grow)
     const hitsOpponentBody = opponents.some(opponent =>
-      (opponent.isAlive ? opponent.body.slice(0, -1) : opponent.body)
-        .some(s => s.x === nextPos.x && s.y === nextPos.y),
+      getOpponentBodyThreat(opponent, gameState.tokens).has(posKey(nextPos)),
     );
     if (hitsOpponentBody) {
       continue;
     }
 
     // 4. Opponent Head Proximity / Head-on hazard
-    const nearestOpponent = livingOpponents.reduce((nearest, opponent) => {
-      const distance = Math.abs(nextPos.x - opponent.body[0].x) + Math.abs(nextPos.y - opponent.body[0].y);
-      return distance < nearest.distance ? { snake: opponent, distance } : nearest;
-    }, { snake: null as (typeof opponents)[number] | null, distance: Infinity });
-    if (nearestOpponent.distance <= 1 && nearestOpponent.snake) {
-      // Possible head collision next tick. Post-split, what matters in a
-      // head-on trade is the POINTS tiebreak (not tokens): ahead on points
-      // means the trade is winning, behind means it's lethal — so the
-      // avoidance follows the wallet, not the race score.
+    // A head-on happens when both heads enter the same cell on the same
+    // sub-step — i.e. my destination is in the opponent's reachable set
+    // (their head's valid next cells; the queue is hidden). If I'd lose the
+    // mutual-kill tiebreak, that move is vetoed, not nudged: no token is
+    // worth a losing trade. (The -10000 keeps the doomed-anyway fallback
+    // working: if every move is vetoed, the least-bad still gets picked.)
+    let headOnPenalty = 0;
+    for (const opponent of livingOpponents) {
+      const oppHead = opponent.body[0];
+      const inReach = ALL_DIRECTIONS
+        .filter(d => !isOppositeDirection(opponent.direction, d))
+        .some(d => {
+          const c = getNextHeadPosition(oppHead, d);
+          return c.x === nextPos.x && c.y === nextPos.y;
+        });
+      if (!inReach) continue;
+      // Post-split, the trade is decided by the POINTS tiebreak (then length).
+      const iWinTrade = winsTiebreak(me, opponent);
       if (difficulty === 'EASY') {
-        score -= 5;
+        headOnPenalty = Math.max(headOnPenalty, 5);
       } else if (difficulty === 'MEDIUM') {
-        score -= 15;
+        headOnPenalty = Math.max(headOnPenalty, 15);
       } else {
-        score -= ((me.skillPoints ?? 0) > (nearestOpponent.snake.skillPoints ?? 0) ? 10 : 50);
+        headOnPenalty = Math.max(headOnPenalty, iWinTrade ? 10 : 10000);
       }
     }
+    score -= headOnPenalty;
 
     // 5. Token Seeking (Manhattan Distance to nearest token)
     if (gameState.tokens.length > 0) {
