@@ -54,6 +54,32 @@ class SoundEngine {
     }
   }
 
+  // Low denied blip for rejected inputs (illegal dart, unaffordable dart)
+  public playDenied() {
+    if (!this.enabled) return;
+    this.initCtx();
+    if (!this.ctx) return;
+
+    try {
+      const osc = this.ctx.createOscillator();
+      const gain = this.ctx.createGain();
+      osc.type = 'square';
+      osc.frequency.setValueAtTime(140, this.ctx.currentTime);
+      osc.frequency.exponentialRampToValueAtTime(90, this.ctx.currentTime + 0.06);
+
+      gain.gain.setValueAtTime(0.05, this.ctx.currentTime);
+      gain.gain.exponentialRampToValueAtTime(0.001, this.ctx.currentTime + 0.06);
+
+      osc.connect(gain);
+      gain.connect(this.ctx.destination);
+
+      osc.start();
+      osc.stop(this.ctx.currentTime + 0.07);
+    } catch {
+      // Ignore audio context error
+    }
+  }
+
   // Token eat arpeggio (Classic Game Boy level-up / pickup chime)
   public playTokenEat() {
     if (!this.enabled) return;

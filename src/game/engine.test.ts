@@ -154,7 +154,7 @@ test('dart moves 3 total cells (1 normal + 2 dart)', () => {
   p1.body = [{ x: 2, y: 5 }, { x: 1, y: 5 }, { x: 0, y: 5 }];
   p1.direction = 'RIGHT';
   p1.equippedSkill = 'dart';
-  p1.score = 5;
+  p1.skillPoints = 5;
   // Move p2 out of the way
   const p2 = state.snakes.find(snake => snake.id === 'p2')!;
   p2.body = [{ x: 7, y: 0 }, { x: 7, y: 1 }, { x: 7, y: 2 }];
@@ -163,7 +163,8 @@ test('dart moves 3 total cells (1 normal + 2 dart)', () => {
   const result = processGameTick(state, settings, 0);
   const after = result.nextState.snakes.find(snake => snake.id === 'p1')!;
   assert.deepEqual(after.body[0], { x: 5, y: 5 });
-  assert.equal(after.score, 3);
+  assert.equal(after.skillPoints, 3);
+  assert.equal(after.score, 0); // token count untouched by dart cost
 });
 
 test('dart applies token pickup before deducting cost', () => {
@@ -175,14 +176,15 @@ test('dart applies token pickup before deducting cost', () => {
   p1.body = [{ x: 2, y: 5 }, { x: 1, y: 5 }, { x: 0, y: 5 }];
   p1.direction = 'RIGHT';
   p1.equippedSkill = 'dart';
-  p1.score = 2;
+  p1.skillPoints = 2;
   const p2 = state.snakes.find(snake => snake.id === 'p2')!;
   p2.body = [{ x: 7, y: 0 }, { x: 7, y: 1 }, { x: 7, y: 2 }];
   p2.direction = 'UP';
   queueSnakeSkill(p1, { skillId: 'dart', direction: 'RIGHT' });
   const result = processGameTick(state, settings, 0);
   const after = result.nextState.snakes.find(snake => snake.id === 'p1')!;
-  // +1 pickup (now 3), -2 dart cost = 1
+  // +1 pickup (now 3 points), -2 dart cost = 1 point; +1 token
+  assert.equal(after.skillPoints, 1);
   assert.equal(after.score, 1);
   assert.equal(after.isAlive, true);
 });
@@ -196,7 +198,7 @@ test('dart into wall kills the snake', () => {
   p1.body = [{ x: 6, y: 5 }, { x: 5, y: 5 }, { x: 4, y: 5 }];
   p1.direction = 'RIGHT';
   p1.equippedSkill = 'dart';
-  p1.score = 5;
+  p1.skillPoints = 5;
   queueSnakeSkill(p1, { skillId: 'dart', direction: 'RIGHT' });
   const result = processGameTick(state, settings, 0);
   const after = result.nextState.snakes.find(snake => snake.id === 'p1')!;
@@ -212,7 +214,7 @@ test('dart triggers 150ms DART hitstop with trail cells', () => {
   p1.body = [{ x: 2, y: 2 }, { x: 1, y: 2 }, { x: 0, y: 2 }];
   p1.direction = 'RIGHT';
   p1.equippedSkill = 'dart';
-  p1.score = 5;
+  p1.skillPoints = 5;
   const p2 = state.snakes.find(snake => snake.id === 'p2')!;
   p2.body = [{ x: 5, y: 7 }, { x: 6, y: 7 }, { x: 7, y: 7 }];
   p2.direction = 'LEFT';
@@ -225,4 +227,86 @@ test('dart triggers 150ms DART hitstop with trail cells', () => {
   const hitstop = getHitstopForTransition(state, after, false);
   assert.equal(hitstop?.kind, 'DART');
   assert.equal(hitstop?.durationMs, 150);
+});
+
+test('token pickup grants +1 score and +1 skillPoint', () => {
+  const state = createInitialState();
+  const settings = { ...DEFAULT_SETTINGS };
+  state.tokens = [{ x: 3, y: 5 }];
+  const p1 = state.snakes.find(snake => snake.id === 'p1')!;
+  p1.body = [{ x: 2, y: 5 }, { x: 1, y: 5 }, { x: 0, y: 5 }];
+  p1.direction = 'RIGHT';
+  const p2 = state.snakes.find(snake => snake.id === 'p2')!;
+  p2.body = [{ x: 7, y: 0 }, { x: 7, y: 1 }, { x: 7, y: 2 }];
+  p2.direction = 'UP';
+  const result = processGameTick(state, settings, 0);
+  const after = result.nextState.snakes.find(snake => snake.id === 'p1')!;
+  assert.equal(after.score, 1);
+  assert.equal(after.skillPoints, 1);
+  assert.equal(after.body.length, 4); // grew by one
+});
+
+test('dart cannot fire on tokens alone — wallet must afford it', () => {
+  const state = createInitialState();
+  const settings = { ...DEFAULT_SETTINGS, skillsAvailable: 'immediate' as const };
+  state.tokens = [];
+  state.skillsAvailable = 'immediate';
+  const p1 = state.snakes.find(snake => snake.id === 'p1')!;
+  p1.body = [{ x: 2, y: 5 }, { x: 1, y: 5 }, { x: 0, y: 5 }];
+  p1.direction = 'RIGHT';
+  p1.equippedSkill = 'dart';
+  p1.score = 10; // rich in tokens...
+  p1.skillPoints = 1; // ...but broke in the wallet
+  const p2 = state.snakes.find(snake => snake.id === 'p2')!;
+  p2.body = [{ x: 7, y: 0 }, { x: 7, y: 1 }, { x: 7, y: 2 }];
+  p2.direction = 'UP';
+  queueSnakeSkill(p1, { skillId: 'dart', direction: 'RIGHT' });
+  const result = processGameTick(state, settings, 0);
+  const after = result.nextState.snakes.find(snake => snake.id === 'p1')!;
+  // Dart fizzled: moved a single cell, no deduction, tokens untouched
+  assert.deepEqual(after.body[0], { x: 3, y: 5 });
+  assert.equal(after.skillPoints, 1);
+  assert.equal(after.score, 10);
+});
+
+test('tiebreak on mutual destruction: higher skillPoints wins', () => {
+  const state = createInitialState();
+  const settings = { ...DEFAULT_SETTINGS };
+  state.tokens = [];
+  const p1 = state.snakes.find(snake => snake.id === 'p1')!;
+  const p2 = state.snakes.find(snake => snake.id === 'p2')!;
+  p1.body = [{ x: 2, y: 3 }];
+  p1.direction = 'RIGHT';
+  p1.score = 6; // fewer tokens...
+  p1.skillPoints = 4; // ...but more points left (spent less)
+  p2.body = [{ x: 4, y: 3 }];
+  p2.direction = 'LEFT';
+  p2.score = 10;
+  p2.skillPoints = 2;
+  const { nextState } = processGameTick(state, settings, 0);
+  assert.equal(nextState.snakes.find(snake => snake.id === 'p1')?.deathReason, 'HEAD_ON');
+  assert.equal(nextState.snakes.find(snake => snake.id === 'p2')?.deathReason, 'HEAD_ON');
+  assert.equal(nextState.winner, 'p1');
+  assert.ok(nextState.winReason.includes('points'));
+});
+
+test('tiebreak on mutual destruction: tied points fall back to length', () => {
+  const state = createInitialState();
+  const settings = { ...DEFAULT_SETTINGS };
+  state.tokens = [];
+  const p1 = state.snakes.find(snake => snake.id === 'p1')!;
+  const p2 = state.snakes.find(snake => snake.id === 'p2')!;
+  // Annie's clarifying case: 10 tokens/3 darts (4 pts) vs 6 tokens/1 dart (4 pts)
+  p1.body = [{ x: 2, y: 3 }, { x: 1, y: 3 }, { x: 0, y: 3 }, { x: 0, y: 4 }, { x: 0, y: 5 }];
+  p1.direction = 'RIGHT';
+  p1.score = 10;
+  p1.skillPoints = 4;
+  p2.body = [{ x: 4, y: 3 }, { x: 5, y: 3 }, { x: 6, y: 3 }];
+  p2.direction = 'LEFT';
+  p2.score = 6;
+  p2.skillPoints = 4;
+  const { nextState } = processGameTick(state, settings, 0);
+  assert.equal(nextState.snakes.find(snake => snake.id === 'p1')?.deathReason, 'HEAD_ON');
+  assert.equal(nextState.snakes.find(snake => snake.id === 'p2')?.deathReason, 'HEAD_ON');
+  assert.equal(nextState.winner, 'p1'); // tied on points → longer body wins
 });

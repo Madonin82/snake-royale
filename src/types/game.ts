@@ -25,7 +25,8 @@ export interface Snake {
   body: Position[]; // index 0 is head
   direction: Direction;
   queuedDirection: Direction | null;
-  score: number;
+  score: number; // tokens collected — immutable race score, never decreases
+  skillPoints: number; // skill wallet — +1 per token, -2 per dart, hidden from opponent
   isAlive: boolean;
   color: string; // Game Boy shade
   equippedSkill: SkillId | null;
@@ -108,6 +109,7 @@ export interface CompactSnakeState {
   body: Position[];
   direction: Direction;
   score: number;
+  skillPoints: number;
   isAlive: boolean;
   equippedSkill: SkillId | null;
   pendingSkill?: PendingSkill | null;

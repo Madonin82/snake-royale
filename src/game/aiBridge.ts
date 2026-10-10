@@ -42,6 +42,7 @@ export function toCompactGameState(
       body: snake.body.map(position => ({ ...position })),
       direction: snake.direction,
       score: snake.score,
+      skillPoints: snake.skillPoints ?? 0,
       isAlive: snake.isAlive,
       equippedSkill: snake.equippedSkill,
       pendingSkill: snake.pendingSkill ? { ...snake.pendingSkill } : null,
