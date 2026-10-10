@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { Direction, GameState, LatencyReport, PlayMode } from '../types/game';
+import { BufferEntry, Direction, GameState, LatencyReport, PlayMode } from '../types/game';
 import { Activity, Gamepad, Wifi } from 'lucide-react';
 import { getCampaignObjectiveProgress, isCampaignObjectiveComplete } from '../game/objectives';
 
@@ -14,7 +14,7 @@ interface HudProps {
   thinkSessions?: Record<string, { startTime: number | null }>;
   thinkTimeRemaining?: Record<string, number | null>;
   viewerSeat?: 'p1' | 'p2' | null;
-  moveBuffers?: Record<string, Direction[]>;
+  moveBuffers?: Record<string, BufferEntry[]>;
   replayActive?: boolean;
   onP2Undo?: () => void;
   onP2Lock?: () => void;
@@ -249,11 +249,13 @@ export const Hud: React.FC<HudProps> = ({
             ) : !canSeeMoves ? (
               <span className="text-[10px] opacity-60 italic">Hidden</span>
             ) : (
-              buffer.map((dir, idx) => {
+              buffer.map((entry, idx) => {
+                const dir = entry.direction;
                 const arrow = dir === 'UP' ? '↑' : dir === 'DOWN' ? '↓' : dir === 'LEFT' ? '←' : '→';
+                const label = entry.type === 'dart' ? `⚡${arrow}` : arrow;
                 return (
                   <span key={idx} className="px-1 py-0.5 bg-[#0F380F] text-[#9BBC0F] text-[10px] leading-tight font-bold border border-[#0F380F] shrink-0">
-                    {arrow}
+                    {label}
                   </span>
                 );
               })
@@ -307,7 +309,11 @@ export const Hud: React.FC<HudProps> = ({
                 <div className="mt-1.5 bg-[#8BAC0F]/40 border border-[#0F380F] px-1.5 h-7 flex items-center justify-between gap-1 text-[9px] font-bold">
                   <span className="shrink-0 tabular-nums">{locked ? '🔒 ' : ''}QUEUE {buffer.length}/{snake.body.length}</span>
                   <span className="min-w-0 flex-1 truncate text-right opacity-80">
-                    {buffer.map(dir => dir === 'UP' ? '↑' : dir === 'DOWN' ? '↓' : dir === 'LEFT' ? '←' : '→').join('')}{snake.pendingSkill ? '⚡' : ''}
+                    {buffer.map(entry => {
+                      const dir = entry.direction;
+                      const arrow = dir === 'UP' ? '↑' : dir === 'DOWN' ? '↓' : dir === 'LEFT' ? '←' : '→';
+                      return entry.type === 'dart' ? `⚡${arrow}` : arrow;
+                    }).join('')}
                   </span>
                   <span className="shrink-0 w-7 text-right text-base leading-none font-black tabular-nums">
                     {!locked && countdown !== null && gameState.phase !== 'OVER' ? `${countdown}s` : ''}

@@ -9,6 +9,11 @@ export interface PendingSkill {
   direction: Direction;
 }
 
+export interface BufferEntry {
+  type: 'move' | 'dart';
+  direction: Direction;
+}
+
 export interface Position {
   x: number;
   y: number;
