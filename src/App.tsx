@@ -13,7 +13,7 @@ import {
   queueSnakeDirection,
   queueSnakeSkill,
 } from './game/engine';
-import { canActivateSkill, isValidDartDirection, SKILLS } from './game/skills';
+import { canActivateSkill, canAffordQueuedDart, isValidDartDirection, SKILLS } from './game/skills';
 import { calculateAIMove } from './game/ai';
 import { cloneGameState, toCompactGameState } from './game/aiBridge';
 import { shouldApplyRtdbBridgeCommand } from './game/aiBridgeRtdb';
@@ -1060,18 +1060,37 @@ const GameApp: React.FC<{ campaignPlaytestLevel: CampaignLevel | null }> = ({ ca
         choosingSkillMapRef.current = updated;
         return updated;
       });
-      if (!isValidDartDirection(currentSnake.direction, dir)) return false;
-
-      soundEngine.playTick();
       // Queue dart as a buffer entry — no auto-lock, player continues planning
       if (settingsRef.current.turnBased) {
         if (locksRef.current[targetKey]) return false;
         const buf = [...moveBuffersRef.current[targetKey]];
         if (buf.length >= currentSnake.body.length) return false;
+        // Item 1: validate against the last queued entry's direction — the same
+        // ruler regular moves use — not the snake's current heading.
+        const lastEntry = buf.length > 0 ? buf[buf.length - 1] : null;
+        const lastDir = lastEntry && typeof lastEntry !== 'string' ? lastEntry.direction : currentSnake.direction;
+        if (!isValidDartDirection(lastDir, dir)) {
+          soundEngine.playDenied();
+          return false;
+        }
+        // Item 3d: escrow — direction first, then affordability. A dart rejected
+        // for illegal direction consumes no escrow. Reserved count is derived
+        // from the buffer, so undo/clear refunds are automatic.
+        const queuedDarts = buf.filter(entry => typeof entry !== 'string' && entry.type === 'dart').length;
+        if (!canAffordQueuedDart(currentSnake.skillPoints, queuedDarts)) {
+          soundEngine.playDenied();
+          return false;
+        }
+        soundEngine.playTick();
         buf.push({ type: 'dart', direction: dir });
         moveBuffersRef.current = { ...moveBuffersRef.current, [targetKey]: buf };
         setMoveBuffers({ ...moveBuffersRef.current });
       } else {
+        if (!isValidDartDirection(currentSnake.direction, dir)) {
+          soundEngine.playDenied();
+          return false;
+        }
+        soundEngine.playTick();
         currentSnake.pendingSkill = { skillId: 'dart' as SkillId, direction: dir };
         const snakeCopy = { ...currentSnake, pendingSkill: { skillId: 'dart' as SkillId, direction: dir } };
         setGameState(prev => ({

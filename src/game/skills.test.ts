@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { isSkillUnlocked, canActivateSkill, isValidDartDirection } from './skills';
+import { isSkillUnlocked, canActivateSkill, canAffordQueuedDart, isValidDartDirection } from './skills';
 import { GameState } from '../types/game';
 
 function makeState(overrides: Partial<GameState> = {}): GameState {
@@ -45,24 +45,38 @@ test('isSkillUnlocked: defaults to after_race when undefined', () => {
   assert.equal(isSkillUnlocked(makeState({ phase: 'SHRINKING' })), true);
 });
 
-test('canActivateSkill: false with fewer than 2 tokens', () => {
+test('canActivateSkill: false with fewer than 2 skill points', () => {
   const state = makeState({ phase: 'SHRINKING' });
-  assert.equal(canActivateSkill(makeSnake({ score: 1 }), state, 'immediate'), false);
-  assert.equal(canActivateSkill(makeSnake({ score: 0 }), state, 'immediate'), false);
+  assert.equal(canActivateSkill(makeSnake({ skillPoints: 1 }), state, 'immediate'), false);
+  assert.equal(canActivateSkill(makeSnake({ skillPoints: 0 }), state, 'immediate'), false);
+  // Tokens alone don't pay for darts anymore — the wallet does.
+  assert.equal(canActivateSkill(makeSnake({ score: 10, skillPoints: 1 }), state, 'immediate'), false);
 });
 
-test('canActivateSkill: true with 2+ tokens and unlocked', () => {
+test('canActivateSkill: true with 2+ skill points and unlocked', () => {
   const state = makeState({ phase: 'SHRINKING' });
-  assert.equal(canActivateSkill(makeSnake({ score: 2 }), state, 'immediate'), true);
-  assert.equal(canActivateSkill(makeSnake({ score: 10 }), state, 'after_race'), true);
+  assert.equal(canActivateSkill(makeSnake({ skillPoints: 2 }), state, 'immediate'), true);
+  assert.equal(canActivateSkill(makeSnake({ skillPoints: 10 }), state, 'after_race'), true);
 });
 
 test('canActivateSkill: false when locked, dead, or no skill', () => {
   const state = makeState({ phase: 'SHRINKING' });
-  assert.equal(canActivateSkill(makeSnake({ score: 5 }), makeState({ phase: 'TOKEN_RACE' }), 'after_race'), false);
-  assert.equal(canActivateSkill(makeSnake({ score: 5, isAlive: false }), state, 'immediate'), false);
-  assert.equal(canActivateSkill(makeSnake({ score: 5, equippedSkill: null }), state, 'immediate'), false);
+  assert.equal(canActivateSkill(makeSnake({ skillPoints: 5 }), makeState({ phase: 'TOKEN_RACE' }), 'after_race'), false);
+  assert.equal(canActivateSkill(makeSnake({ skillPoints: 5, isAlive: false }), state, 'immediate'), false);
+  assert.equal(canActivateSkill(makeSnake({ skillPoints: 5, equippedSkill: null }), state, 'immediate'), false);
   assert.equal(canActivateSkill(undefined, state, 'immediate'), false);
+});
+
+test('canAffordQueuedDart: escrow accounting', () => {
+  // Dart costs 2. Each queued dart reserves 2 points.
+  assert.equal(canAffordQueuedDart(3, 0), true);   // 3 pts → 1st dart ok
+  assert.equal(canAffordQueuedDart(3, 1), false);  // 3 - 2 = 1 < 2 → 2nd dart no
+  assert.equal(canAffordQueuedDart(4, 1), true);   // 4 - 2 = 2 → 2nd dart ok
+  assert.equal(canAffordQueuedDart(4, 2), false);  // 4 - 4 = 0 → 3rd dart no
+  assert.equal(canAffordQueuedDart(2, 0), true);   // exactly enough
+  assert.equal(canAffordQueuedDart(1, 0), false);
+  assert.equal(canAffordQueuedDart(0, 0), false);
+  assert.equal(canAffordQueuedDart(undefined, 0), false); // missing wallet = broke
 });
 
 test('isValidDartDirection: rejects backward, allows forward/left/right', () => {

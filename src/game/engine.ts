@@ -65,6 +65,7 @@ export function createInitialState(
     direction: 'RIGHT',
     queuedDirection: null,
     score: 0,
+    skillPoints: 0,
     isAlive: true,
     color: GAMEBOY_COLORS.DARKEST,
     equippedSkill: null,
@@ -82,6 +83,7 @@ export function createInitialState(
     direction: 'LEFT',
     queuedDirection: null,
     score: 0,
+    skillPoints: 0,
     isAlive: true,
     color: GAMEBOY_COLORS.DARK,
     equippedSkill: null,
@@ -540,6 +542,7 @@ export function processGameTick(
       let ateThisStep = false;
       if (tokenIndex !== -1) {
         snakes[i].score += 1;
+        snakes[i].skillPoints = (snakes[i].skillPoints ?? 0) + 1;
         ateThisStep = true;
         events.tokenEaten[snakes[i].id] = true;
         if (snakes[i].id === 'p1' && state.campaignObjectives) {
@@ -568,7 +571,7 @@ export function processGameTick(
   // Deduct skill costs at turn resolution time AFTER token pickups have been applied
   for (const snake of snakes) {
     if (activeDarts.has(snake.id)) {
-      snake.score = Math.max(0, snake.score - SKILLS.dart.cost);
+      snake.skillPoints = Math.max(0, (snake.skillPoints ?? 0) - SKILLS.dart.cost);
     }
   }
 
@@ -659,14 +662,17 @@ export function processGameTick(
 
 function resolveMatchByTiebreakers(state: GameState, contextReason: string) {
   state.phase = 'OVER';
-  const ranked = [...state.snakes].sort((a, b) => b.score - a.score || b.body.length - a.body.length);
+  // Tiebreak: skill points (wallet) first, then body length. Points reward
+  // collection AND efficient spending — tokens are the visible race score.
+  const pointsOf = (snake: (typeof state.snakes)[number]) => snake.skillPoints ?? 0;
+  const ranked = [...state.snakes].sort((a, b) => pointsOf(b) - pointsOf(a) || b.body.length - a.body.length);
   const winner = ranked[0];
-  const tied = ranked.length > 1 && winner.score === ranked[1].score && winner.body.length === ranked[1].body.length;
+  const tied = ranked.length > 1 && pointsOf(winner) === pointsOf(ranked[1]) && winner.body.length === ranked[1].body.length;
   if (tied) {
     state.winner = 'DRAW';
-    state.winReason = `${contextReason} — Dead heat draw (${winner.score} tokens, ${winner.body.length} length)!`;
+    state.winReason = `${contextReason} — Dead heat draw (${pointsOf(winner)} points, ${winner.body.length} length)!`;
   } else if (winner) {
     state.winner = winner.id;
-    state.winReason = `${contextReason} — ${winner.name} wins on score (${winner.score} tokens, ${winner.body.length} length)!`;
+    state.winReason = `${contextReason} — ${winner.name} wins on points (${pointsOf(winner)} points, ${winner.body.length} length)!`;
   }
 }
