@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { calculateAIAction } from './ai';
+import { canAffordQueuedDart, isValidDartDirection } from './skills';
 import { GameState, Snake } from '../types/game';
 
 function makeSnake(overrides: Partial<Snake>): Snake {
@@ -64,4 +65,21 @@ test('avalena returns to farming after spending: wallet lead lost', () => {
   const action = calculateAIAction(state, 8, 'p2', 'HARD', 'avalena', 'immediate');
   assert.equal(action.skill, null);
   assert.equal(action.direction, 'RIGHT'); // farming again despite token lead
+});
+
+test('uppercase AVALENA style (as stored by the editor) also reaches the avalena brain', () => {
+  const state = makeState({ skillPoints: 1, score: 0 }, { skillPoints: 5, score: 0 });
+  const action = calculateAIAction(state, 8, 'p2', 'HARD', 'AVALENA', 'immediate');
+  assert.equal(action.skill?.skillId, 'dart');
+});
+
+test('avalena dart decision passes the same legality gates as a player dart', () => {
+  // In dart range with a wallet lead: the brain's skill must survive the
+  // buffer legality checks (direction valid vs current heading, affordable).
+  const state = makeState({ skillPoints: 1, score: 0 }, { skillPoints: 5, score: 0 });
+  const action = calculateAIAction(state, 8, 'p2', 'HARD', 'AVALENA', 'immediate');
+  assert.ok(action.skill);
+  const p2 = state.snakes[1];
+  assert.ok(isValidDartDirection(p2.direction, action.skill.direction));
+  assert.ok(canAffordQueuedDart(p2.skillPoints, 0));
 });
