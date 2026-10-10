@@ -260,6 +260,11 @@ export const Hud: React.FC<HudProps> = ({
                 );
               })
             )}
+            {canSeeMoves && snake.pendingSkill && (
+              <span className="px-1 py-0.5 bg-[#0F380F] text-[#9BBC0F] text-[10px] leading-tight font-bold border border-[#0F380F] shrink-0">
+                ⚡
+              </span>
+            )}
           </div>
         </div>
       </div>
