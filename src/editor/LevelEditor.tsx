@@ -78,9 +78,9 @@ const DEFAULT_LEVEL: CampaignLevel = {
   walls: [],
   skillsAvailable: 'after_race',
   spawns: [
-    { enabled: true, position: { x: 1, y: 1 }, direction: 'RIGHT', startLength: 3, startingScore: 0, aiStyle: 'GREEDY', equippedSkill: null },
-    { enabled: true, position: { x: 6, y: 6 }, direction: 'LEFT', startLength: 3, startingScore: 0, aiStyle: 'GREEDY', equippedSkill: null },
-    { enabled: true, position: { x: 1, y: 6 }, direction: 'UP', startLength: 3, startingScore: 0, aiStyle: 'TURTLE', equippedSkill: null },
+    { enabled: true, position: { x: 1, y: 1 }, direction: 'RIGHT', startLength: 3, startingScore: 0, startingSkillPoints: 0, aiStyle: 'GREEDY', equippedSkill: null },
+    { enabled: true, position: { x: 6, y: 6 }, direction: 'LEFT', startLength: 3, startingScore: 0, startingSkillPoints: 0, aiStyle: 'GREEDY', equippedSkill: null },
+    { enabled: true, position: { x: 1, y: 6 }, direction: 'UP', startLength: 3, startingScore: 0, startingSkillPoints: 0, aiStyle: 'TURTLE', equippedSkill: null },
   ],
   tokens: {
     positions: [],
@@ -423,6 +423,7 @@ export const LevelEditor: React.FC = () => {
             ...importedSpawn,
             enabled: importedSpawn.enabled !== false,
             startingScore: importedSpawn.startingScore ?? 0,
+            startingSkillPoints: importedSpawn.startingSkillPoints ?? 0,
             aiStyle: importedSpawn.aiStyle ?? 'GREEDY',
           };
         });
@@ -790,6 +791,12 @@ export const LevelEditor: React.FC = () => {
                     START SCORE
                     <input type="number" min="0" value={spawn.startingScore}
                       onChange={e => updateSpawn(index, { startingScore: Math.max(0, parseInt(e.target.value) || 0) })}
+                      className="w-full bg-[#9BBC0F] border-2 border-[#0F380F] px-2 py-1 font-mono font-bold outline-none" />
+                  </label>
+                  <label className="flex flex-col gap-1 font-bold">
+                    START SKILL PTS
+                    <input type="number" min="0" value={spawn.startingSkillPoints ?? 0}
+                      onChange={e => updateSpawn(index, { startingSkillPoints: Math.max(0, parseInt(e.target.value) || 0) })}
                       className="w-full bg-[#9BBC0F] border-2 border-[#0F380F] px-2 py-1 font-mono font-bold outline-none" />
                   </label>
                   <label className="flex flex-col gap-1 font-bold">

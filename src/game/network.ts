@@ -1014,24 +1014,17 @@ export class NetworkManager {
     const updatedAt = Date.now();
     this.withOrderedSimulation(() => {
       if (connectionGeneration !== this.connectionGeneration) return;
-      // Fog of war: skill points are hidden from the opponent. There is no
-      // per-recipient mechanism — one payload goes to everyone — so sanitize
-      // here. Host mode (primary): strip the broadcaster's own wallet; the
-      // joiner keeps their own. Server mode: strip all (edge case, no leak).
-      // The RTDB fallback persists this same sanitized payload.
-      const sanitizedState = {
-        ...state,
-        snakes: state.snakes.map(snake => {
-          const hide = this.role === 'server' ? true : snake.id === this.role;
-          return hide ? { ...snake, skillPoints: undefined } : snake;
-        }),
-      };
+      // Skill-point banks are visible to both players by design. The wallet
+      // only mutates at execution (pickup +1, dart -2 — never at queue time),
+      // so what the opponent sees is always one turn stale: they can infer
+      // last turn's spending, never the current turn's plan. Queues themselves
+      // stay hidden (buffers are never broadcast, only locks).
       const payload = {
         type: 'STATE_SYNC',
         matchId,
         matchNumber,
         stateRevision,
-        state: sanitizedState,
+        state,
         locks,
         tick: state.tick,
       };
@@ -1045,7 +1038,7 @@ export class NetworkManager {
         matchId,
         matchNumber,
         stateRevision,
-        state: sanitizedState,
+        state,
         locks,
         tick: state.tick,
         updatedAt,

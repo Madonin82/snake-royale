@@ -8,7 +8,8 @@ export interface SpawnConfig {
   position: Position;
   direction: Direction;
   startLength: number;
-  startingScore: number;
+  startingScore: number; // tokens
+  startingSkillPoints?: number; // skill wallet (optional: older level JSON lacks it)
   aiStyle: CampaignAiStyle;
   equippedSkill?: SkillId | null;
   body?: Position[];

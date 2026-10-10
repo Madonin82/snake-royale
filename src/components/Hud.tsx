@@ -207,11 +207,9 @@ export const Hud: React.FC<HudProps> = ({
                 ⚡ {snake.equippedSkill} (2)
               </span>
             )}
-            {canSeeMoves && (
-              <span className="text-[9px] px-1.5 py-0.5 border border-[#0F380F] font-black uppercase" title="Skill points">
-                ⚡{snake.skillPoints ?? 0}
-              </span>
-            )}
+            <span className="text-[9px] px-1.5 py-0.5 border border-[#0F380F] font-black uppercase" title="Skill points">
+              ⚡{snake.skillPoints ?? 0}
+            </span>
             {renderOutcomeBadge(who)}
             <span className="text-xs [@media(max-height:540px)]:text-[10px] font-bold opacity-80 tabular-nums">LEN: {snake.body.length}</span>
           </div>
@@ -300,9 +298,7 @@ export const Hud: React.FC<HudProps> = ({
                 <div className="flex items-baseline gap-1 shrink-0">
                   <span className="text-2xl leading-none font-black">{snake.score}</span>
                   <span className="text-[10px] font-semibold uppercase tracking-tight">PTS</span>
-                  {local && (
-                    <span className="text-[10px] font-bold shrink-0" title="Skill points">⚡{snake.skillPoints ?? 0}</span>
-                  )}
+                  <span className="text-[10px] font-bold shrink-0" title="Skill points">⚡{snake.skillPoints ?? 0}</span>
                 </div>
                 {renderOutcomeBadge(who)}
                 {gameState.turnBased && (
