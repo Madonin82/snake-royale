@@ -14,7 +14,7 @@ import {
   queueSnakeSkill,
 } from './game/engine';
 import { canActivateSkill, canAffordQueuedDart, isValidDartDirection, SKILLS } from './game/skills';
-import { calculateAIMove } from './game/ai';
+import { calculateAIAction, calculateAIMove } from './game/ai';
 import { cloneGameState, toCompactGameState } from './game/aiBridge';
 import { shouldApplyRtdbBridgeCommand } from './game/aiBridgeRtdb';
 import { gamepadController, GamepadMenuAction } from './game/gamepad';
@@ -711,13 +711,31 @@ const GameApp: React.FC<{ campaignPlaytestLevel: CampaignLevel | null }> = ({ ca
           let curDir = aiSnake.direction;
           let simBody = [...aiSnake.body];
           const planLen = Math.min(3, aiSnake.body.length);
+          const botStyle = s.campaignAiStyles?.[aiSnake.id] ?? s.aiStyle;
+          const botDifficulty = s.campaignAiDifficulties?.[aiSnake.id] ?? s.botDifficulty;
           for (let i = 0; i < planLen; i++) {
-            const aiDir = calculateAIMove({
+            const action = calculateAIAction({
               ...current,
               snakes: current.snakes.map(snake => snake.id === aiSnake.id
                 ? { ...snake, body: simBody, direction: curDir }
                 : snake),
-            }, s.gridSize, aiSnake.id, s.campaignAiDifficulties?.[aiSnake.id] ?? s.botDifficulty);
+            }, s.gridSize, aiSnake.id, botDifficulty, botStyle, current.skillsAvailable);
+            // Skill path: the brain may decide to dart. Same legality rules
+            // as the player (direction validated against the last entry,
+            // escrow affordability) before a dart entry goes in the buffer.
+            const skillDir = action.skill?.skillId === 'dart' ? action.skill.direction : null;
+            const queuedDarts = aiBuffer.filter(entry => typeof entry !== 'string' && entry.type === 'dart').length;
+            if (skillDir && isValidDartDirection(curDir, skillDir) &&
+                canAffordQueuedDart(aiSnake.skillPoints, queuedDarts)) {
+              aiBuffer.push({ type: 'dart', direction: skillDir });
+              curDir = skillDir;
+              for (let k = 0; k < 3; k++) {
+                simBody.unshift(getNextHeadPosition(simBody[0], skillDir));
+                simBody.pop();
+              }
+              continue;
+            }
+            const aiDir = action.direction;
             if (aiDir && !isOppositeDirection(curDir, aiDir)) {
               aiBuffer.push({ type: 'move', direction: aiDir });
               curDir = aiDir;
@@ -1908,6 +1926,7 @@ const GameApp: React.FC<{ campaignPlaytestLevel: CampaignLevel | null }> = ({ ca
             settingsRef.current.gridSize,
             bot.id,
             settingsRef.current.campaignAiDifficulties?.[bot.id] ?? settingsRef.current.botDifficulty,
+            settingsRef.current.campaignAiStyles?.[bot.id] ?? settingsRef.current.aiStyle,
           );
           if (aiDir) queueSnakeDirection(bot, aiDir);
         }
