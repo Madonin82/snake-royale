@@ -54,15 +54,21 @@ function calculateAvalenaAction(
   if (inHuntPhase && player) {
     const playerHead = player.body[0];
     const currentFacing = me.direction;
-    const step1Pos = getNextHeadPosition(me.body[0], currentFacing);
     const validDartDirs = ALL_DIRECTIONS.filter(d => !isOppositeDirection(currentFacing, d));
 
     // Check if in dart range and dart is unlocked & affordable
     if (canActivateSkill(me, gameState, skillsAvailable)) {
       let inRange = false;
       const dartCandidates: { dir: Direction; endDist: number; minDist: number; safe: boolean }[] = [];
+      // Threat cells are computed once: the dart's later cells land after the
+      // opponent's sub-step-0 move, so safety is evaluated against reachability.
+      const threatCells = getOpponentThreatCells(gameState, botRole, gridSize);
 
       for (const dartDir of validDartDirs) {
+        // The engine moves all 3 dart cells in the dart direction (it sets the
+        // heading to dartDir at step 0) — evaluate the actual path, not the
+        // first cell in the current facing.
+        const step1Pos = getNextHeadPosition(me.body[0], dartDir);
         const step2Pos = getNextHeadPosition(step1Pos, dartDir);
         const step3Pos = getNextHeadPosition(step2Pos, dartDir);
         const d1 = Math.abs(step1Pos.x - playerHead.x) + Math.abs(step1Pos.y - playerHead.y);
@@ -78,25 +84,28 @@ function calculateAvalenaAction(
         }
 
         const safe =
-          isCellSafeForAvalena(step1Pos, me.body, gameState, gridSize, playerHead) &&
-          isCellSafeForAvalena(step2Pos, [step1Pos, ...me.body.slice(0, -1)], gameState, gridSize, playerHead) &&
-          isCellSafeForAvalena(step3Pos, [step2Pos, step1Pos, ...me.body.slice(0, -2)], gameState, gridSize, playerHead);
+          isDartCellSafe(step1Pos, me.body, gameState, gridSize, threatCells) &&
+          isDartCellSafe(step2Pos, [step1Pos, ...me.body.slice(0, -1)], gameState, gridSize, threatCells) &&
+          isDartCellSafe(step3Pos, [step2Pos, step1Pos, ...me.body.slice(0, -2)], gameState, gridSize, threatCells);
 
         dartCandidates.push({ dir: dartDir, endDist, minDist, safe });
       }
 
       if (inRange) {
-        // Choose the direction (forward/left/right) that lands her head closest to the player's head position
+        // Safety first: a dart that kills the darter is never the answer.
+        // Then closest landing to the player's head.
         dartCandidates.sort((a, b) => {
+          if (a.safe !== b.safe) return a.safe ? -1 : 1;
           if (a.endDist !== b.endDist) return a.endDist - b.endDist;
           if (a.minDist !== b.minDist) return a.minDist - b.minDist;
-          if (a.safe !== b.safe) return a.safe ? -1 : 1;
           return 0;
         });
         const bestDart = dartCandidates[0];
-        if (bestDart) {
+        // Safety gates the shot: no safe dart → no dart. Falls through to
+        // the hunt move below instead of suiciding.
+        if (bestDart && bestDart.safe) {
           return {
-            direction: currentFacing,
+            direction: bestDart.dir,
             skill: {
               skillId: 'dart',
               direction: bestDart.dir,
@@ -118,23 +127,49 @@ function calculateAvalenaAction(
   };
 }
 
-function isCellSafeForAvalena(
+function isDartCellSafe(
   pos: Position,
   ownBody: Position[],
   state: GameState,
   gridSize: number,
-  targetHead: Position,
+  threatCells: Set<string>,
 ): boolean {
   if (!isCellInArena(pos, gridSize, state.ringInset)) return false;
   if (state.walls?.some(wall => wall.x === pos.x && wall.y === pos.y)) return false;
   if (ownBody.slice(0, -1).some(seg => seg.x === pos.x && seg.y === pos.y)) return false;
-  // Allow targeting the player's head cell itself when hunting
-  if (pos.x === targetHead.x && pos.y === targetHead.y) return true;
-  for (const snake of state.snakes) {
-    const bodyToCheck = snake.isAlive ? snake.body.slice(0, -1) : snake.body;
-    if (bodyToCheck.some(seg => seg.x === pos.x && seg.y === pos.y)) return false;
-  }
+  // No head-cell exception: under current rules a dart landing on a stationary
+  // head kills the DARTER, so the head (and every cell it can reach) is danger.
+  if (threatCells.has(`${pos.x},${pos.y}`)) return false;
   return true;
+}
+
+// Cells the opponents threaten: their current bodies (minus tail, which
+// vacates on sub-step 0) PLUS every cell their heads can reach on sub-step 0.
+// The dart's cells 2-3 land after the opponent has moved, so the brain must
+// evaluate the dart against where the opponent CAN be, not where they are.
+// (The queue is hidden — reachability is the only honest model.)
+function getOpponentThreatCells(
+  gameState: GameState,
+  botRole: string,
+  gridSize: number,
+): Set<string> {
+  const cells = new Set<string>();
+  for (const snake of gameState.snakes) {
+    if (snake.id === botRole) continue;
+    const body = snake.isAlive ? snake.body.slice(0, -1) : snake.body;
+    for (const seg of body) cells.add(`${seg.x},${seg.y}`);
+    if (snake.isAlive) {
+      const head = snake.body[0];
+      for (const d of ALL_DIRECTIONS) {
+        if (isOppositeDirection(snake.direction, d)) continue;
+        const next = getNextHeadPosition(head, d);
+        if (isCellInArena(next, gridSize, gameState.ringInset)) {
+          cells.add(`${next.x},${next.y}`);
+        }
+      }
+    }
+  }
+  return cells;
 }
 
 function calculateHuntMoveTowardTarget(
@@ -243,27 +278,35 @@ export function calculateAIMove(
       return distance < nearest.distance ? { snake: opponent, distance } : nearest;
     }, { snake: null as (typeof opponents)[number] | null, distance: Infinity });
     if (nearestOpponent.distance <= 1 && nearestOpponent.snake) {
-      // Possible head collision next tick
+      // Possible head collision next tick. Post-split, what matters in a
+      // head-on trade is the POINTS tiebreak (not tokens): ahead on points
+      // means the trade is winning, behind means it's lethal — so the
+      // avoidance follows the wallet, not the race score.
       if (difficulty === 'EASY') {
         score -= 5;
       } else if (difficulty === 'MEDIUM') {
         score -= 15;
       } else {
-        score -= (me.score > nearestOpponent.snake.score ? 50 : 10);
+        score -= ((me.skillPoints ?? 0) > (nearestOpponent.snake.skillPoints ?? 0) ? 10 : 50);
       }
     }
 
     // 5. Token Seeking (Manhattan Distance to nearest token)
     if (gameState.tokens.length > 0) {
-      let minTokenDist = Infinity;
+      let bestTokenScore = 0;
       for (const token of gameState.tokens) {
         const d = Math.abs(nextPos.x - token.x) + Math.abs(nextPos.y - token.y);
-        if (d < minTokenDist) {
-          minTokenDist = d;
-        }
+        // Don't race for lost tokens: if a living opponent's head is strictly
+        // closer to this token than I am after this move, they'll get there
+        // first — heavily discount it instead of dying for it.
+        const contested = livingOpponents.some(opponent => {
+          const oppDist = Math.abs(opponent.body[0].x - token.x) + Math.abs(opponent.body[0].y - token.y);
+          return oppDist < d;
+        });
+        const tokenScore = (gridSize * 2 - d) * 10 * (contested ? 0.15 : 1);
+        if (tokenScore > bestTokenScore) bestTokenScore = tokenScore;
       }
-      // Closer is better
-      score += (gridSize * 2 - minTokenDist) * 10;
+      score += bestTokenScore;
     } else {
       // In shrink phase with no tokens, seek center of arena
       const center = (gridSize - 1) / 2;
