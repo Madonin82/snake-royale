@@ -44,8 +44,12 @@ function calculateAvalenaAction(
     gameState.snakes.find(snake => snake.id !== botRole && snake.isAlive) ??
     gameState.snakes.find(snake => snake.id !== botRole);
 
-  const playerScore = player?.score ?? 0;
-  const inHuntPhase = Boolean(player && player.isAlive && me.score >= playerScore + 3);
+  // Hunt trigger reads the skill wallet, not tokens: her design is farm → hunt →
+  // farm, and the return trip only happens if darting drops her back under the
+  // +3 threshold. (Tokens are immutable, so a token-based trigger would hunt
+  // forever once ahead.)
+  const playerPoints = player?.skillPoints ?? 0;
+  const inHuntPhase = Boolean(player && player.isAlive && (me.skillPoints ?? 0) >= playerPoints + 3);
 
   if (inHuntPhase && player) {
     const playerHead = player.body[0];

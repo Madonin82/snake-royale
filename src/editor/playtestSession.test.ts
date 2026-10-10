@@ -85,6 +85,7 @@ test('campaign playtest builds P3 with its own AI style, painted body, and start
   assert.equal(settings.campaignAiDifficulties?.p3, 'HARD');
   assert.deepEqual(getSnake(state, 'p3').body, level.spawns[2].body);
   assert.equal(getSnake(state, 'p3').score, 17);
+  assert.equal(getSnake(state, 'p3').skillPoints, 17); // starting score fills both counters
 });
 
 test('disabled spawn is excluded from exported JSON and playtest runs with 2 snakes', () => {

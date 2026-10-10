@@ -164,6 +164,9 @@ export function createCampaignPlaytestState(
       body,
       direction: spawn.direction,
       score: spawn.startingScore ?? (avalena ? 3 : 0),
+      // Starting score fills both counters: "starts at 3" used to mean "can
+      // dart immediately" (3 >= 2 cost), and tokens alone don't buy darts anymore.
+      skillPoints: spawn.startingScore ?? (avalena ? 3 : 0),
       equippedSkill: avalena ? 'dart' : (spawn.equippedSkill ?? null),
       pendingSkill: null,
     };
