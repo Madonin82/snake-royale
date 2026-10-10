@@ -320,7 +320,7 @@ test('snipe: darting head meets stationary head, darter wins tiebreak → oppone
   const p2 = state.snakes.find(snake => snake.id === 'p2')!;
   // p1 darts RIGHT from (2,4): (3,4), (4,4), (5,4).
   // p2 moves DOWN (4,3)→(4,4) on step 0; on step 1 p1 lands on p2's head.
-  p1.body = [{ x: 2, y: 4 }, { x: 1, y: 4 }, { x: 0, y: 4 }];
+  p1.body = [{ x: 2, y: 4 }, { x: 1, y: 4 }, { x: 0, y: 4 }, { x: 0, y: 5 }];
   p1.direction = 'RIGHT';
   p1.equippedSkill = 'dart';
   p1.skillPoints = 5;
@@ -367,7 +367,7 @@ test('snipe on step 0: simultaneous head meeting, darter wins tiebreak → oppon
   const p1 = state.snakes.find(snake => snake.id === 'p1')!;
   const p2 = state.snakes.find(snake => snake.id === 'p2')!;
   // p1 darts RIGHT from (2,4), p2 moves LEFT from (4,4): both enter (3,4) on step 0.
-  p1.body = [{ x: 2, y: 4 }, { x: 1, y: 4 }];
+  p1.body = [{ x: 2, y: 4 }, { x: 1, y: 4 }, { x: 1, y: 5 }];
   p1.direction = 'RIGHT';
   p1.equippedSkill = 'dart';
   p1.skillPoints = 5;

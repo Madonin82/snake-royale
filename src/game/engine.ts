@@ -449,14 +449,13 @@ export function processGameTick(
   const dartTrail: Array<{ snakeId: string; cells: Position[] }> = [];
   const dartTrailMap = new Map<string, Position[]>();
 
-  // SNIPE RULE helpers: a darting head that meets an opponent's head resolves
-  // by the standard tiebreak (skill points, then length). The darter must win
-  // outright — ties favor the defender.
-  const darterWinsTiebreak = (darter: Snake, opponent: Snake): boolean => {
-    if (darter.skillPoints !== opponent.skillPoints) {
-      return darter.skillPoints > opponent.skillPoints;
-    }
-    return darter.body.length > opponent.body.length;
+  // SNIPE RULE helpers: a darting head that meets an opponent's head is lethal
+  // only when the darter is strictly ahead on BOTH skill points and length —
+  // no boss exceptions, same bar as a player-vs-player snipe. Ties (or a split
+  // advantage) favor the defender.
+  const snipeIsLethal = (darter: Snake, opponent: Snake): boolean => {
+    return darter.skillPoints > opponent.skillPoints &&
+      darter.body.length > opponent.body.length;
   };
   const snipeKill = (snakes: Snake[], victimIdx: number, events: { deathOccurred: boolean }) => {
     const victim = snakes[victimIdx];
@@ -531,7 +530,7 @@ export function processGameTick(
           if (iDarting !== jDarting) {
             const darterIdx = iDarting ? i : j;
             const victimIdx = iDarting ? j : i;
-            if (darterWinsTiebreak(snakes[darterIdx], snakes[victimIdx])) {
+            if (snipeIsLethal(snakes[darterIdx], snakes[victimIdx])) {
               snipeKill(snakes, victimIdx, events);
               continue;
             }
@@ -552,7 +551,7 @@ export function processGameTick(
         for (let j = 0; j < snakes.length; j++) {
           if (i === j || !snakes[j].isAlive || movingIndices.includes(j)) continue;
           if (nextHeads[i].x === snakes[j].body[0].x && nextHeads[i].y === snakes[j].body[0].y) {
-            if (activeDarts.has(snakes[i].id) && darterWinsTiebreak(snakes[i], snakes[j])) {
+            if (activeDarts.has(snakes[i].id) && snipeIsLethal(snakes[i], snakes[j])) {
               snipeKill(snakes, j, events);
               deaths[i].body = false;
             } else {

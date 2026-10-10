@@ -94,7 +94,7 @@ test('avalena takes the dart when the snipe is lethal (wins the tiebreak)', () =
   // The dart must fire.
   const state = makeState(
     { body: [{ x: 1, y: 4 }, { x: 1, y: 3 }, { x: 1, y: 2 }], direction: 'DOWN', skillPoints: 0 },
-    { body: [{ x: 2, y: 6 }, { x: 3, y: 6 }, { x: 4, y: 6 }], direction: 'LEFT', skillPoints: 3 },
+    { body: [{ x: 2, y: 6 }, { x: 3, y: 6 }, { x: 4, y: 6 }, { x: 4, y: 7 }], direction: 'LEFT', skillPoints: 3 },
   );
   const action = calculateAIAction(state, 8, 'p2', 'HARD', 'AVALENA', 'immediate');
   assert.equal(action.skill?.skillId, 'dart');

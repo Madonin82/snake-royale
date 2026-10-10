@@ -21,6 +21,17 @@ function winsTiebreak(me: Snake, opponent: Snake): boolean {
 }
 
 /**
+ * Snipe lethality: strictly ahead on BOTH skill points and length. Same bar
+ * as a player-vs-player snipe — no boss exceptions. (Stricter than the
+ * mutual-kill tiebreak, which is points-then-length.)
+ */
+function snipeIsLethal(me: Snake, opponent: Snake): boolean {
+  const myPts = me.skillPoints ?? 0;
+  const oppPts = opponent.skillPoints ?? 0;
+  return myPts > oppPts && me.body.length > opponent.body.length;
+}
+
+/**
  * Conservative growth check: if any token sits on a cell the opponent's head
  * can reach next tick, assume they might eat — in which case their tail does
  * NOT vacate. (Their queue is hidden, so we can't know for sure.)
@@ -223,7 +234,7 @@ function getOpponentThreatCells(
     }
     if (snake.isAlive) {
       const head = snake.body[0];
-      const lethal = winsTiebreak(me, snake);
+      const lethal = snipeIsLethal(me, snake);
       for (const d of ALL_DIRECTIONS) {
         if (isOppositeDirection(snake.direction, d)) continue;
         const next = getNextHeadPosition(head, d);
