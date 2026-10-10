@@ -809,6 +809,7 @@ export const LevelEditor: React.FC = () => {
                         <option value="CUTOFF">CUTOFF</option>
                         <option value="HEADHUNTER">HEADHUNTER</option>
                         <option value="PATROL">PATROL</option>
+                        <option value="AVALENA">AVALENA</option>
                       </select>
                     </label>
                   )}
