@@ -8,6 +8,7 @@ import {
   getHitstopForTransition,
   getNextHeadPosition,
   HitstopInfo,
+  isCellInArena,
   isOppositeDirection,
   processGameTick,
   queueSnakeDirection,
@@ -715,11 +716,12 @@ const GameApp: React.FC<{ campaignPlaytestLevel: CampaignLevel | null }> = ({ ca
     );
     if (isBuiltInAiActive()) {
       for (const aiSnake of aiSnakes) {
-        // Replan from the live board EVERY tick. A committed multi-tick plan
-        // goes stale the moment the opponent moves or eats — the 3-ply
-        // lookahead is kept for dead-end avoidance, but only step 0 executes
-        // before the next replan.
-        const aiBuffer: NonNullable<(typeof moveBuffersRef.current)[string]> = [];
+        // Replan from the live board EVERY tick into a HIDDEN plan (her brain).
+        // The visible queue only ever shows LOCKED moves — the plan is never
+        // displayed mid-thought. Lock length is dynamic by confidence: 1 careful
+        // move when tight, up to 3 when wide open. Like a person: think, then
+        // buffer, then lock.
+        const hiddenPlan: NonNullable<(typeof moveBuffersRef.current)[string]> = [];
         let curDir = aiSnake.direction;
         let simBody = [...aiSnake.body];
         const planLen = Math.min(3, aiSnake.body.length);
@@ -734,12 +736,12 @@ const GameApp: React.FC<{ campaignPlaytestLevel: CampaignLevel | null }> = ({ ca
           }, s.gridSize, aiSnake.id, botDifficulty, botStyle, current.skillsAvailable);
           // Skill path: the brain may decide to dart. Same legality rules
           // as the player (direction validated against the last entry,
-          // escrow affordability) before a dart entry goes in the buffer.
+          // escrow affordability) before a dart entry goes in the plan.
           const skillDir = action.skill?.skillId === 'dart' ? action.skill.direction : null;
-          const queuedDarts = aiBuffer.filter(entry => typeof entry !== 'string' && entry.type === 'dart').length;
+          const queuedDarts = hiddenPlan.filter(entry => typeof entry !== 'string' && entry.type === 'dart').length;
           if (skillDir && isValidDartDirection(curDir, skillDir) &&
               canAffordQueuedDart(aiSnake.skillPoints, queuedDarts)) {
-            aiBuffer.push({ type: 'dart', direction: skillDir });
+            hiddenPlan.push({ type: 'dart', direction: skillDir });
             curDir = skillDir;
             for (let k = 0; k < 3; k++) {
               simBody.unshift(getNextHeadPosition(simBody[0], skillDir));
@@ -749,7 +751,7 @@ const GameApp: React.FC<{ campaignPlaytestLevel: CampaignLevel | null }> = ({ ca
           }
           const aiDir = action.direction;
           if (aiDir && !isOppositeDirection(curDir, aiDir)) {
-            aiBuffer.push({ type: 'move', direction: aiDir });
+            hiddenPlan.push({ type: 'move', direction: aiDir });
             curDir = aiDir;
             const nextHead = getNextHeadPosition(simBody[0], aiDir);
             simBody.unshift(nextHead);
@@ -758,10 +760,40 @@ const GameApp: React.FC<{ campaignPlaytestLevel: CampaignLevel | null }> = ({ ca
             break;
           }
         }
-        if (aiBuffer.length === 0) {
+        if (hiddenPlan.length === 0) {
           const fallback = ['UP', 'DOWN', 'LEFT', 'RIGHT'].find(d => !isOppositeDirection(curDir, d as Direction)) as Direction || 'LEFT';
-          aiBuffer.push({ type: 'move', direction: fallback });
+          hiddenPlan.push({ type: 'move', direction: fallback });
         }
+        // Dynamic lock: how many of the hidden plan to commit visibly.
+        // If the destination after move 0 is tight (<=1 safe escape), lock just
+        // 1 and reassess next tick. In open space, lock the full plan.
+        // A dart always locks as a single committed entry (its 3 cells are atomic).
+        let lockCount = hiddenPlan.length;
+        const firstEntry = hiddenPlan[0];
+        const firstIsDart = typeof firstEntry !== 'string' && firstEntry.type === 'dart';
+        if (!firstIsDart && hiddenPlan.length > 1) {
+          // Simulate the board after move 0 to count escape routes.
+          const afterMove0 = [...aiSnake.body];
+          const firstDir = (firstEntry as { direction: Direction }).direction;
+          const dest = getNextHeadPosition(afterMove0[0], firstDir);
+          afterMove0.unshift(dest);
+          afterMove0.pop();
+          const allBodies = new Set<string>();
+          for (const snake of current.snakes) {
+            const body = snake.id === aiSnake.id ? afterMove0 : snake.body;
+            for (const seg of body) allBodies.add(`${seg.x},${seg.y}`);
+          }
+          let safeEscapes = 0;
+          for (const d of ['UP', 'DOWN', 'LEFT', 'RIGHT'] as Direction[]) {
+            if (isOppositeDirection(firstDir, d)) continue;
+            const n = getNextHeadPosition(dest, d);
+            if (isCellInArena(n, s.gridSize, current.ringInset) && !allBodies.has(`${n.x},${n.y}`)) {
+              safeEscapes++;
+            }
+          }
+          if (safeEscapes <= 1) lockCount = 1;
+        }
+        const aiBuffer = hiddenPlan.slice(0, lockCount);
         moveBuffersRef.current = { ...moveBuffersRef.current, [aiSnake.id]: aiBuffer };
         agentDrivenRef.current[aiSnake.id] = true;
         commitLocks({ ...locksRef.current, [aiSnake.id]: true });

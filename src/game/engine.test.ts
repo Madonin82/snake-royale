@@ -311,7 +311,7 @@ test('tiebreak on mutual destruction: tied points fall back to length', () => {
   assert.equal(nextState.winner, 'p1'); // tied on points → longer body wins
 });
 
-test('snipe: darting head meets stationary head, darter wins tiebreak → opponent sniped', () => {
+test('dart into head (step 1-2): mutual head-on, both die — tiebreak decides the match', () => {
   const state = createInitialState();
   const settings = { ...DEFAULT_SETTINGS, skillsAvailable: 'immediate' as const };
   state.skillsAvailable = 'immediate';
@@ -320,6 +320,7 @@ test('snipe: darting head meets stationary head, darter wins tiebreak → oppone
   const p2 = state.snakes.find(snake => snake.id === 'p2')!;
   // p1 darts RIGHT from (2,4): (3,4), (4,4), (5,4).
   // p2 moves DOWN (4,3)→(4,4) on step 0; on step 1 p1 lands on p2's head.
+  // Dart-into-head is a mutual head-on: both die, tiebreak (5 > 0 pts) picks p1.
   p1.body = [{ x: 2, y: 4 }, { x: 1, y: 4 }, { x: 0, y: 4 }, { x: 0, y: 5 }];
   p1.direction = 'RIGHT';
   p1.equippedSkill = 'dart';
@@ -332,12 +333,43 @@ test('snipe: darting head meets stationary head, darter wins tiebreak → oppone
   const afterP1 = nextState.snakes.find(snake => snake.id === 'p1')!;
   const afterP2 = nextState.snakes.find(snake => snake.id === 'p2')!;
   assert.equal(afterP2.isAlive, false);
-  assert.equal(afterP2.deathReason, 'OPPONENT'); // sniped by the darter
-  assert.equal(afterP1.isAlive, true);
-  assert.deepEqual(afterP1.body[0], { x: 5, y: 4 }); // dart completed
+  assert.equal(afterP2.deathReason, 'HEAD_ON');
+  assert.equal(afterP1.isAlive, false);
+  assert.equal(afterP1.deathReason, 'HEAD_ON');
+  assert.equal(nextState.winner, 'p1'); // tiebreak: 5 pts > 0 pts
 });
 
-test('snipe fails: darter loses tiebreak → darter dies on the head', () => {
+test('dart speed priority: darter claims token on steps 1-2 path, adjacent non-darter does not', () => {
+  const state = createInitialState();
+  const settings = { ...DEFAULT_SETTINGS, skillsAvailable: 'immediate' as const };
+  state.skillsAvailable = 'immediate';
+  // Token at (5,4). p1 darts RIGHT from (2,4): (3,4), (4,4), (5,4) — arrives step 2.
+  // p2 at (5,3) moves DOWN to (5,4) on step 0 (adjacent). Dart has priority:
+  // p2 does NOT eat it; p1 collects it on step 2.
+  state.tokens = [{ x: 5, y: 4 }];
+  const p1 = state.snakes.find(snake => snake.id === 'p1')!;
+  const p2 = state.snakes.find(snake => snake.id === 'p2')!;
+  p1.body = [{ x: 2, y: 4 }, { x: 1, y: 4 }, { x: 0, y: 4 }];
+  p1.direction = 'RIGHT';
+  p1.equippedSkill = 'dart';
+  p1.skillPoints = 5;
+  const p1ScoreBefore = p1.score;
+  p2.body = [{ x: 5, y: 3 }, { x: 5, y: 2 }, { x: 5, y: 1 }];
+  p2.direction = 'DOWN';
+  p2.skillPoints = 0;
+  const p2ScoreBefore = p2.score;
+  queueSnakeSkill(p1, { skillId: 'dart', direction: 'RIGHT' });
+  // p2's direction is already DOWN; it moves onto the token cell on step 0.
+  const { nextState } = processGameTick(state, settings, 0);
+  const afterP1 = nextState.snakes.find(snake => snake.id === 'p1')!;
+  const afterP2 = nextState.snakes.find(snake => snake.id === 'p2')!;
+  // p1's dart lands on p2's head at (5,4) on step 2 → mutual head-on.
+  // But p1 got the token (dart priority), not p2.
+  assert.equal(afterP1.score, p1ScoreBefore + 1);
+  assert.equal(afterP2.score, p2ScoreBefore); // p2 did not eat it
+});
+
+test('dart into head (step 1-2): darter loses tiebreak → both die, opponent wins', () => {
   const state = createInitialState();
   const settings = { ...DEFAULT_SETTINGS, skillsAvailable: 'immediate' as const };
   state.skillsAvailable = 'immediate';
@@ -355,11 +387,14 @@ test('snipe fails: darter loses tiebreak → darter dies on the head', () => {
   const { nextState } = processGameTick(state, settings, 0);
   const afterP1 = nextState.snakes.find(snake => snake.id === 'p1')!;
   const afterP2 = nextState.snakes.find(snake => snake.id === 'p2')!;
-  assert.equal(afterP1.isAlive, false); // darter dies, snipe not lethal
-  assert.equal(afterP2.isAlive, true);
+  assert.equal(afterP1.isAlive, false);
+  assert.equal(afterP1.deathReason, 'HEAD_ON');
+  assert.equal(afterP2.isAlive, false);
+  assert.equal(afterP2.deathReason, 'HEAD_ON');
+  assert.equal(nextState.winner, 'p2'); // tiebreak: 5 pts > 2 pts
 });
 
-test('snipe on step 0: simultaneous head meeting, darter wins tiebreak → opponent sniped', () => {
+test('dart on step 0: simultaneous head meeting → mutual head-on, tiebreak decides', () => {
   const state = createInitialState();
   const settings = { ...DEFAULT_SETTINGS, skillsAvailable: 'immediate' as const };
   state.skillsAvailable = 'immediate';
@@ -379,6 +414,8 @@ test('snipe on step 0: simultaneous head meeting, darter wins tiebreak → oppon
   const afterP1 = nextState.snakes.find(snake => snake.id === 'p1')!;
   const afterP2 = nextState.snakes.find(snake => snake.id === 'p2')!;
   assert.equal(afterP2.isAlive, false);
-  assert.equal(afterP2.deathReason, 'OPPONENT');
-  assert.equal(afterP1.isAlive, true);
+  assert.equal(afterP2.deathReason, 'HEAD_ON');
+  assert.equal(afterP1.isAlive, false);
+  assert.equal(afterP1.deathReason, 'HEAD_ON');
+  assert.equal(nextState.winner, 'p1'); // tiebreak: 5 pts > 0 pts
 });

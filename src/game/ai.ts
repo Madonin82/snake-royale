@@ -21,10 +21,12 @@ function winsTiebreak(me: Snake, opponent: Snake): boolean {
 }
 
 /**
- * Snipe lethality: strictly ahead on BOTH skill points and length. Same bar
- * as a player-vs-player snipe — no boss exceptions. (Stricter than the
- * mutual-kill tiebreak, which is points-then-length.)
+ * PARKED for future multiplayer/stocks: snipe lethality (strictly ahead on
+ * BOTH skill points and length) — the darter survives while the victim dies.
+ * In current 1v1 single-stock, dart-into-head is a mutual head-on (tiebreak
+ * decides), so the brain uses winsTiebreak instead.
  */
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
 function snipeIsLethal(me: Snake, opponent: Snake): boolean {
   const myPts = me.skillPoints ?? 0;
   const oppPts = opponent.skillPoints ?? 0;
@@ -219,6 +221,8 @@ function isDartCellSafe(
 // snipe rule makes their reachable cells kill opportunities, not threats —
 // they're returned separately as snipeTargets. Their current head cell stays a
 // threat (it becomes neck on sub-step 0).
+// Dart-into-head is a mutual head-on: if we win the tiebreak, the opponent's
+// reachable cells are winning trade opportunities (snipeTargets), not threats.
 function getOpponentThreatCells(
   gameState: GameState,
   botRole: string,
@@ -234,12 +238,13 @@ function getOpponentThreatCells(
     }
     if (snake.isAlive) {
       const head = snake.body[0];
-      const lethal = snipeIsLethal(me, snake);
+      // Dart = head-on: we "win" the dart if we'd win the mutual-kill tiebreak.
+      const winningTrade = winsTiebreak(me, snake);
       for (const d of ALL_DIRECTIONS) {
         if (isOppositeDirection(snake.direction, d)) continue;
         const next = getNextHeadPosition(head, d);
         if (!isCellInArena(next, gridSize, gameState.ringInset)) continue;
-        if (lethal) {
+        if (winningTrade) {
           snipeTargets.add(posKey(next));
         } else {
           threat.add(posKey(next));

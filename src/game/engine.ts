@@ -449,14 +449,35 @@ export function processGameTick(
   const dartTrail: Array<{ snakeId: string; cells: Position[] }> = [];
   const dartTrailMap = new Map<string, Position[]>();
 
-  // SNIPE RULE helpers: a darting head that meets an opponent's head is lethal
-  // only when the darter is strictly ahead on BOTH skill points and length —
-  // no boss exceptions, same bar as a player-vs-player snipe. Ties (or a split
-  // advantage) favor the defender.
+  // DART SPEED PRIORITY: the dart is a strike, not a dash — it outruns ordinary
+  // movement. Tokens on a darter's steps 1-2 path are claimed by the dart: a
+  // non-darter moving onto one on step 0 does not consume it. The darter
+  // collects it on arrival (gaining the SP/length before any head meeting).
+  const dartPriorityTokenIndices = new Set<number>();
+  for (const [snakeId, dartDir] of activeDarts) {
+    const darter = snakes.find(s => s.id === snakeId);
+    if (!darter || !darter.isAlive) continue;
+    // The dart's 3 cells: step 0, 1, 2. Priority applies to steps 1-2
+    // (step 0 uses normal simultaneous rules).
+    let pos = getNextHeadPosition(darter.body[0], dartDir); // step 0 cell
+    for (let s = 1; s <= 2; s++) {
+      pos = getNextHeadPosition(pos, dartDir); // steps 1, 2
+      const tokenIdx = state.tokens.findIndex(t => t.x === pos.x && t.y === pos.y);
+      if (tokenIdx !== -1) dartPriorityTokenIndices.add(tokenIdx);
+    }
+  }
+
+  // PARKED for future multiplayer/stocks: a darting head that meets an opponent's
+  // head kills the opponent outright while the darter survives — lethal only
+  // when the darter is strictly ahead on BOTH skill points and length. In
+  // current 1v1 single-stock, dart-into-head resolves as a mutual head-on
+  // instead (tiebreak decides the match winner), so these helpers are unused.
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
   const snipeIsLethal = (darter: Snake, opponent: Snake): boolean => {
     return darter.skillPoints > opponent.skillPoints &&
       darter.body.length > opponent.body.length;
   };
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
   const snipeKill = (snakes: Snake[], victimIdx: number, events: { deathOccurred: boolean }) => {
     const victim = snakes[victimIdx];
     victim.isAlive = false;
@@ -521,20 +542,10 @@ export function processGameTick(
         const crossed = nextHeads[i].x === snakes[j].body[0].x && nextHeads[i].y === snakes[j].body[0].y &&
           nextHeads[j].x === snakes[i].body[0].x && nextHeads[j].y === snakes[i].body[0].y;
         if (sameCell || crossed) {
-          // SNIPE RULE: if exactly one of the two is darting and the darter
-          // wins the points-then-length tiebreak outright, the opponent is
-          // sniped (dies) and the darter survives. Otherwise the mutual
-          // head-on stands.
-          const iDarting = activeDarts.has(snakes[i].id);
-          const jDarting = activeDarts.has(snakes[j].id);
-          if (iDarting !== jDarting) {
-            const darterIdx = iDarting ? i : j;
-            const victimIdx = iDarting ? j : i;
-            if (snipeIsLethal(snakes[darterIdx], snakes[victimIdx])) {
-              snipeKill(snakes, victimIdx, events);
-              continue;
-            }
-          }
+          // Dart-into-head resolves as a mutual head-on: both die, and the
+          // points-then-length tiebreak decides the match winner. The dart's
+          // advantage is range (forcing the tiebreak from three cells away
+          // by predicting the head), not survival.
           deaths[i].headOn = true;
           deaths[j].headOn = true;
         }
@@ -542,17 +553,20 @@ export function processGameTick(
     }
 
     // Also check if a darting snake in step > 0 lands on a non-moving living snake's head.
-    // SNIPE RULE: if the darter wins the points-then-length tiebreak outright,
-    // the stationary snake is sniped instead of the darter dying. (The snipe
-    // clears the body-collision flag set above — a head meeting resolved by
-    // the snipe is not a body crash. Bodies never overlap, so this is safe.)
+    // Dart-into-head resolves as a mutual head-on: both die, tiebreak decides.
+    // (The stationary snake is killed here directly since it isn't in movingIndices.)
     if (step > 0) {
       for (const i of movingIndices) {
         for (let j = 0; j < snakes.length; j++) {
           if (i === j || !snakes[j].isAlive || movingIndices.includes(j)) continue;
           if (nextHeads[i].x === snakes[j].body[0].x && nextHeads[i].y === snakes[j].body[0].y) {
-            if (activeDarts.has(snakes[i].id) && snipeIsLethal(snakes[i], snakes[j])) {
-              snipeKill(snakes, j, events);
+            if (activeDarts.has(snakes[i].id)) {
+              deaths[i].headOn = true;
+              // Kill the stationary snake as the other half of the head-on.
+              snakes[j].isAlive = false;
+              snakes[j].deathPosition = { ...snakes[j].body[0] };
+              snakes[j].deathReason = 'HEAD_ON';
+              events.deathOccurred = true;
               deaths[i].body = false;
             } else {
               deaths[i].body = true;
@@ -578,10 +592,15 @@ export function processGameTick(
 
     const stepConsumedTokenIndices = new Set<number>();
     for (const i of movingIndices) {
-      if (!snakes[i].isAlive) continue;
+      // Token on entry: a snake that entered the cell gets the token even if
+      // it died on this step (e.g. dart-into-head). movingIndices guarantees
+      // it was alive at step start.
       const tokenIndex = state.tokens.findIndex(token => token.x === nextHeads[i].x && token.y === nextHeads[i].y);
       let ateThisStep = false;
-      if (tokenIndex !== -1) {
+      // Dart priority: on step 0, a non-darter does not consume a token
+      // claimed by a darter's steps 1-2 path. The dart gets it on arrival.
+      const isDarter = activeDarts.has(snakes[i].id);
+      if (tokenIndex !== -1 && !(step === 0 && !isDarter && dartPriorityTokenIndices.has(tokenIndex))) {
         snakes[i].score += 1;
         snakes[i].skillPoints = (snakes[i].skillPoints ?? 0) + 1;
         ateThisStep = true;
@@ -591,9 +610,13 @@ export function processGameTick(
         }
         stepConsumedTokenIndices.add(tokenIndex);
       }
-      snakes[i].body.unshift(nextHeads[i]);
-      if (!ateThisStep) {
-        snakes[i].body.pop();
+      // Body only advances if the snake survived the step — a dead snake's
+      // corpse stays where it was (deathPosition records the fatal cell).
+      if (snakes[i].isAlive) {
+        snakes[i].body.unshift(nextHeads[i]);
+        if (!ateThisStep) {
+          snakes[i].body.pop();
+        }
       }
       // Record dart trail cells (steps 1-2 are the dart portion)
       if (step > 0 && activeDarts.has(snakes[i].id) && snakes[i].isAlive) {
