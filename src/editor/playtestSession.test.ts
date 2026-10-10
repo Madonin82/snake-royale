@@ -85,7 +85,28 @@ test('campaign playtest builds P3 with its own AI style, painted body, and start
   assert.equal(settings.campaignAiDifficulties?.p3, 'HARD');
   assert.deepEqual(getSnake(state, 'p3').body, level.spawns[2].body);
   assert.equal(getSnake(state, 'p3').score, 17);
-  assert.equal(getSnake(state, 'p3').skillPoints, 17); // starting score fills both counters
+  assert.equal(getSnake(state, 'p3').skillPoints, 0); // starting score is tokens only
+});
+
+test('starting skill points are separate from starting score; avalena defaults to 0 tokens + 3 points', () => {
+  const level = createLevel();
+  level.spawns[1].startingScore = 5;
+  level.spawns[1].startingSkillPoints = 4;
+  level.spawns[1].aiStyle = 'AVALENA';
+  const settings = getCampaignPlaytestSettings(level);
+  const state = createCampaignPlaytestState(level, settings);
+  const avalena = getSnake(state, 'p2');
+  assert.equal(avalena.score, 5);
+  assert.equal(avalena.skillPoints, 4);
+  assert.equal(avalena.equippedSkill, 'dart');
+
+  // Avalena default with no explicit values: 0 tokens, 3 skill points
+  const level2 = createLevel();
+  level2.spawns[1].aiStyle = 'AVALENA';
+  const state2 = createCampaignPlaytestState(level2, getCampaignPlaytestSettings(level2));
+  const avalena2 = getSnake(state2, 'p2');
+  assert.equal(avalena2.score, 0);
+  assert.equal(avalena2.skillPoints, 3);
 });
 
 test('disabled spawn is excluded from exported JSON and playtest runs with 2 snakes', () => {

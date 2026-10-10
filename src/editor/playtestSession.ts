@@ -163,10 +163,10 @@ export function createCampaignPlaytestState(
       color: colors[index] ?? template.color,
       body,
       direction: spawn.direction,
-      score: spawn.startingScore ?? (avalena ? 3 : 0),
-      // Starting score fills both counters: "starts at 3" used to mean "can
-      // dart immediately" (3 >= 2 cost), and tokens alone don't buy darts anymore.
-      skillPoints: spawn.startingScore ?? (avalena ? 3 : 0),
+      // START SCORE is tokens only. Skill points are a separate starting field —
+      // Avalena defaults to 0 tokens + 3 points (armed, not ahead).
+      score: spawn.startingScore ?? 0,
+      skillPoints: spawn.startingSkillPoints ?? (avalena ? 3 : 0),
       equippedSkill: avalena ? 'dart' : (spawn.equippedSkill ?? null),
       pendingSkill: null,
     };
@@ -242,7 +242,8 @@ export function parseCampaignLevelJson(jsonText: string): CampaignLevel {
     spawns: parsed.spawns.map(spawn => ({
       ...spawn,
       enabled: spawn.enabled !== false,
-      startingScore: spawn.startingScore ?? (isAvalenaStyle(spawn.aiStyle) ? 3 : 0),
+      startingScore: spawn.startingScore ?? 0,
+      startingSkillPoints: spawn.startingSkillPoints ?? (isAvalenaStyle(spawn.aiStyle) ? 3 : 0),
       aiStyle: spawn.aiStyle ?? 'GREEDY',
       equippedSkill: isAvalenaStyle(spawn.aiStyle) ? 'dart' : (spawn.equippedSkill ?? null),
     })),
@@ -310,6 +311,7 @@ export function createMultiplayerCustomLevelState(
       direction: spawn.direction,
       queuedDirection: null,
       score: spawn.startingScore ?? 0,
+      skillPoints: spawn.startingSkillPoints ?? 0,
       isAlive: true,
       equippedSkill: isAvalenaStyle(spawn.aiStyle) ? 'dart' : (spawn.equippedSkill ?? null),
       pendingSkill: null,
