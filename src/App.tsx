@@ -702,10 +702,14 @@ const GameApp: React.FC<{ campaignPlaytestLevel: CampaignLevel | null }> = ({ ca
     // Force the AI to replan every tick: clear its queued buffer and lock so
     // the planning below always runs from the live board. (The human player's
     // lock persists — their queued moves are their own commitment.)
-    for (const snake of current.snakes) {
-      if (snake.isAlive && snake.id !== 'p1') {
-        moveBuffersRef.current[snake.id] = [];
-        locksRef.current[snake.id] = false;
+    // Only for actual AI snakes: in LOCAL_2P, P2 is human and their buffer
+    // must persist like P1's.
+    if (isBuiltInAiActive()) {
+      for (const snake of current.snakes) {
+        if (snake.isAlive && snake.id !== 'p1') {
+          moveBuffersRef.current[snake.id] = [];
+          locksRef.current[snake.id] = false;
+        }
       }
     }
     const aiSnakes = current.snakes.filter(snake =>
