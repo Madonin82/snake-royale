@@ -706,50 +706,52 @@ const GameApp: React.FC<{ campaignPlaytestLevel: CampaignLevel | null }> = ({ ca
     );
     if (isBuiltInAiActive()) {
       for (const aiSnake of aiSnakes) {
-        const aiBuffer = [...(moveBuffersRef.current[aiSnake.id] ?? [])];
-        if (aiBuffer.length === 0) {
-          let curDir = aiSnake.direction;
-          let simBody = [...aiSnake.body];
-          const planLen = Math.min(3, aiSnake.body.length);
-          const botStyle = s.campaignAiStyles?.[aiSnake.id] ?? s.aiStyle;
-          const botDifficulty = s.campaignAiDifficulties?.[aiSnake.id] ?? s.botDifficulty;
-          for (let i = 0; i < planLen; i++) {
-            const action = calculateAIAction({
-              ...current,
-              snakes: current.snakes.map(snake => snake.id === aiSnake.id
-                ? { ...snake, body: simBody, direction: curDir }
-                : snake),
-            }, s.gridSize, aiSnake.id, botDifficulty, botStyle, current.skillsAvailable);
-            // Skill path: the brain may decide to dart. Same legality rules
-            // as the player (direction validated against the last entry,
-            // escrow affordability) before a dart entry goes in the buffer.
-            const skillDir = action.skill?.skillId === 'dart' ? action.skill.direction : null;
-            const queuedDarts = aiBuffer.filter(entry => typeof entry !== 'string' && entry.type === 'dart').length;
-            if (skillDir && isValidDartDirection(curDir, skillDir) &&
-                canAffordQueuedDart(aiSnake.skillPoints, queuedDarts)) {
-              aiBuffer.push({ type: 'dart', direction: skillDir });
-              curDir = skillDir;
-              for (let k = 0; k < 3; k++) {
-                simBody.unshift(getNextHeadPosition(simBody[0], skillDir));
-                simBody.pop();
-              }
-              continue;
-            }
-            const aiDir = action.direction;
-            if (aiDir && !isOppositeDirection(curDir, aiDir)) {
-              aiBuffer.push({ type: 'move', direction: aiDir });
-              curDir = aiDir;
-              const nextHead = getNextHeadPosition(simBody[0], aiDir);
-              simBody.unshift(nextHead);
+        // Replan from the live board EVERY tick. A committed multi-tick plan
+        // goes stale the moment the opponent moves or eats — the 3-ply
+        // lookahead is kept for dead-end avoidance, but only step 0 executes
+        // before the next replan.
+        const aiBuffer: NonNullable<(typeof moveBuffersRef.current)[string]> = [];
+        let curDir = aiSnake.direction;
+        let simBody = [...aiSnake.body];
+        const planLen = Math.min(3, aiSnake.body.length);
+        const botStyle = s.campaignAiStyles?.[aiSnake.id] ?? s.aiStyle;
+        const botDifficulty = s.campaignAiDifficulties?.[aiSnake.id] ?? s.botDifficulty;
+        for (let i = 0; i < planLen; i++) {
+          const action = calculateAIAction({
+            ...current,
+            snakes: current.snakes.map(snake => snake.id === aiSnake.id
+              ? { ...snake, body: simBody, direction: curDir }
+              : snake),
+          }, s.gridSize, aiSnake.id, botDifficulty, botStyle, current.skillsAvailable);
+          // Skill path: the brain may decide to dart. Same legality rules
+          // as the player (direction validated against the last entry,
+          // escrow affordability) before a dart entry goes in the buffer.
+          const skillDir = action.skill?.skillId === 'dart' ? action.skill.direction : null;
+          const queuedDarts = aiBuffer.filter(entry => typeof entry !== 'string' && entry.type === 'dart').length;
+          if (skillDir && isValidDartDirection(curDir, skillDir) &&
+              canAffordQueuedDart(aiSnake.skillPoints, queuedDarts)) {
+            aiBuffer.push({ type: 'dart', direction: skillDir });
+            curDir = skillDir;
+            for (let k = 0; k < 3; k++) {
+              simBody.unshift(getNextHeadPosition(simBody[0], skillDir));
               simBody.pop();
-            } else {
-              break;
             }
+            continue;
           }
-          if (aiBuffer.length === 0) {
-            const fallback = ['UP', 'DOWN', 'LEFT', 'RIGHT'].find(d => !isOppositeDirection(curDir, d as Direction)) as Direction || 'LEFT';
-            aiBuffer.push({ type: 'move', direction: fallback });
+          const aiDir = action.direction;
+          if (aiDir && !isOppositeDirection(curDir, aiDir)) {
+            aiBuffer.push({ type: 'move', direction: aiDir });
+            curDir = aiDir;
+            const nextHead = getNextHeadPosition(simBody[0], aiDir);
+            simBody.unshift(nextHead);
+            simBody.pop();
+          } else {
+            break;
           }
+        }
+        if (aiBuffer.length === 0) {
+          const fallback = ['UP', 'DOWN', 'LEFT', 'RIGHT'].find(d => !isOppositeDirection(curDir, d as Direction)) as Direction || 'LEFT';
+          aiBuffer.push({ type: 'move', direction: fallback });
         }
         moveBuffersRef.current = { ...moveBuffersRef.current, [aiSnake.id]: aiBuffer };
         agentDrivenRef.current[aiSnake.id] = true;

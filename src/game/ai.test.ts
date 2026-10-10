@@ -87,14 +87,34 @@ test('avalena dart decision passes the same legality gates as a player dart', ()
   assert.ok(canAffordQueuedDart(p2.skillPoints, 0));
 });
 
-test('avalena refuses a dart when the path crosses the opponent reachable set', () => {
-  // Oddity #3: p2 plans LEFT then DART UP from (2,6). At decision time the
-  // column looks empty, but p1 at (1,4) can reach (2,4) on sub-step 0 — before
-  // the dart's cell 2 lands. The dart must not fire.
+test('avalena takes the dart when the snipe is lethal (wins the tiebreak)', () => {
+  // Oddity #3 revisited with the snipe rule: p2 plans DART UP from (2,6).
+  // p1 at (1,4) can reach (2,4) on sub-step 0 — but p2 holds the tiebreak
+  // (3 pts > 0), so the reachable set is a kill opportunity, not a threat.
+  // The dart must fire.
   const state = makeState(
     { body: [{ x: 1, y: 4 }, { x: 1, y: 3 }, { x: 1, y: 2 }], direction: 'DOWN', skillPoints: 0 },
     { body: [{ x: 2, y: 6 }, { x: 3, y: 6 }, { x: 4, y: 6 }], direction: 'LEFT', skillPoints: 3 },
   );
+  const action = calculateAIAction(state, 8, 'p2', 'HARD', 'AVALENA', 'immediate');
+  assert.equal(action.skill?.skillId, 'dart');
+  assert.equal(action.skill?.direction, 'UP');
+});
+
+test('avalena refuses a dart crossing a non-lethal opponent\'s reachable set', () => {
+  // Three snakes: p2 hunts p1 (3 pts > 0, snipe lethal vs p1), but p3 holds
+  // the tiebreak over p2 (5 pts > 3). The UP dart path crosses p3's reachable
+  // set at (2,4) — p3 is not snipable, so that path stays a threat and no
+  // safe dart exists.
+  const state = makeState(
+    { body: [{ x: 1, y: 4 }, { x: 1, y: 3 }, { x: 1, y: 2 }], direction: 'DOWN', skillPoints: 0 },
+    { body: [{ x: 2, y: 6 }, { x: 3, y: 6 }, { x: 4, y: 6 }], direction: 'LEFT', skillPoints: 3 },
+  );
+  state.snakes.push(makeSnake({
+    id: 'p3', name: 'P3',
+    body: [{ x: 3, y: 4 }, { x: 3, y: 3 }, { x: 3, y: 2 }], direction: 'LEFT',
+    skillPoints: 5,
+  }));
   const action = calculateAIAction(state, 8, 'p2', 'HARD', 'AVALENA', 'immediate');
   assert.equal(action.skill, null); // no safe dart → falls back to hunt move
   assert.ok(action.direction);
@@ -136,4 +156,24 @@ test('head-on avoidance follows the points tiebreak, not tokens', () => {
   );
   state.tokens = [{ x: 5, y: 4 }, { x: 4, y: 7 }];
   assert.equal(calculateAIMove(state, 8, 'p2', 'HARD', 'GREEDY'), 'LEFT');
+});
+
+test('greedy vetos a losing head-on even when the token sits on the collision cell', () => {
+  // Replay 20261010-1519, tick 15: p2 at (6,5) facing DOWN, p1 at (5,6) facing
+  // LEFT, token at (5,5). LEFT grabs the token but walks into p1's reachable
+  // set — and p2 loses the tiebreak 1 < 4. The -50 nudge wasn't enough against
+  // a 160-point token; the losing trade must be vetoed.
+  const state = makeState(
+    {
+      body: [{ x: 5, y: 6 }, { x: 6, y: 6 }, { x: 6, y: 7 }, { x: 5, y: 7 }, { x: 4, y: 7 }, { x: 4, y: 6 }, { x: 4, y: 5 }],
+      direction: 'LEFT', skillPoints: 4, score: 4,
+    },
+    {
+      body: [{ x: 6, y: 5 }, { x: 6, y: 4 }, { x: 6, y: 3 }],
+      direction: 'DOWN', skillPoints: 1, score: 0,
+    },
+  );
+  state.tokens = [{ x: 5, y: 5 }, { x: 0, y: 0 }];
+  // DOWN is p1's neck (hard skip), LEFT is the vetoed losing trade → RIGHT.
+  assert.equal(calculateAIMove(state, 8, 'p2', 'HARD', 'GREEDY'), 'RIGHT');
 });

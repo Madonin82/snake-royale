@@ -449,6 +449,25 @@ export function processGameTick(
   const dartTrail: Array<{ snakeId: string; cells: Position[] }> = [];
   const dartTrailMap = new Map<string, Position[]>();
 
+  // SNIPE RULE helpers: a darting head that meets an opponent's head resolves
+  // by the standard tiebreak (skill points, then length). The darter must win
+  // outright — ties favor the defender.
+  const darterWinsTiebreak = (darter: Snake, opponent: Snake): boolean => {
+    if (darter.skillPoints !== opponent.skillPoints) {
+      return darter.skillPoints > opponent.skillPoints;
+    }
+    return darter.body.length > opponent.body.length;
+  };
+  const snipeKill = (snakes: Snake[], victimIdx: number, events: { deathOccurred: boolean }) => {
+    const victim = snakes[victimIdx];
+    victim.isAlive = false;
+    victim.deathPosition = { ...victim.body[0] };
+    victim.deathReason = 'OPPONENT';
+    // Vaporized by the dart: the corpse must not block the darter's remaining
+    // sub-steps (or the snipe would suicide whenever the path crosses the body).
+    victim.body = [];
+    events.deathOccurred = true;
+  };
   for (let step = 0; step < totalSteps; step++) {
     const movingIndices: number[] = [];
     for (let i = 0; i < snakes.length; i++) {
@@ -503,19 +522,42 @@ export function processGameTick(
         const crossed = nextHeads[i].x === snakes[j].body[0].x && nextHeads[i].y === snakes[j].body[0].y &&
           nextHeads[j].x === snakes[i].body[0].x && nextHeads[j].y === snakes[i].body[0].y;
         if (sameCell || crossed) {
+          // SNIPE RULE: if exactly one of the two is darting and the darter
+          // wins the points-then-length tiebreak outright, the opponent is
+          // sniped (dies) and the darter survives. Otherwise the mutual
+          // head-on stands.
+          const iDarting = activeDarts.has(snakes[i].id);
+          const jDarting = activeDarts.has(snakes[j].id);
+          if (iDarting !== jDarting) {
+            const darterIdx = iDarting ? i : j;
+            const victimIdx = iDarting ? j : i;
+            if (darterWinsTiebreak(snakes[darterIdx], snakes[victimIdx])) {
+              snipeKill(snakes, victimIdx, events);
+              continue;
+            }
+          }
           deaths[i].headOn = true;
           deaths[j].headOn = true;
         }
       }
     }
 
-    // Also check if a darting snake in step > 0 lands on a non-moving living snake's head
+    // Also check if a darting snake in step > 0 lands on a non-moving living snake's head.
+    // SNIPE RULE: if the darter wins the points-then-length tiebreak outright,
+    // the stationary snake is sniped instead of the darter dying. (The snipe
+    // clears the body-collision flag set above — a head meeting resolved by
+    // the snipe is not a body crash. Bodies never overlap, so this is safe.)
     if (step > 0) {
       for (const i of movingIndices) {
         for (let j = 0; j < snakes.length; j++) {
           if (i === j || !snakes[j].isAlive || movingIndices.includes(j)) continue;
           if (nextHeads[i].x === snakes[j].body[0].x && nextHeads[i].y === snakes[j].body[0].y) {
-            deaths[i].body = true;
+            if (activeDarts.has(snakes[i].id) && darterWinsTiebreak(snakes[i], snakes[j])) {
+              snipeKill(snakes, j, events);
+              deaths[i].body = false;
+            } else {
+              deaths[i].body = true;
+            }
           }
         }
       }
