@@ -680,6 +680,21 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
               )}
             </div>
           )}
+
+          {/* Level Editor link (admin only) */}
+          {signedInUser && ADMIN_UIDS.includes(signedInUser.uid) && (
+            <div className="flex flex-col gap-2 p-2 border bg-[#8BAC0F] border-[#0F380F]">
+              <button
+                onClick={() => {
+                  onClose();
+                  window.location.hash = '#/level-editor';
+                }}
+                className="bg-[#0F380F] hover:bg-[#306230] text-[#9BBC0F] px-3 py-2 border border-[#0F380F] font-black text-[11px] uppercase tracking-wider cursor-pointer"
+              >
+                🛠️ Open Level Editor
+              </button>
+            </div>
+          )}
         </div>
 
         {/* Footer Save & Close */}
