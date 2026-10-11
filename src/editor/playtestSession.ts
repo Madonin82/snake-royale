@@ -164,9 +164,9 @@ export function createCampaignPlaytestState(
       body,
       direction: spawn.direction,
       // START SCORE is tokens only. Skill points are a separate starting field —
-      // Avalena defaults to 0 tokens + 3 points (armed, not ahead).
+      // no hardcoded default; the level editor's startingSkillPoints controls it.
       score: spawn.startingScore ?? 0,
-      skillPoints: spawn.startingSkillPoints ?? (avalena ? 3 : 0),
+      skillPoints: spawn.startingSkillPoints ?? 0,
       equippedSkill: avalena ? 'dart' : (spawn.equippedSkill ?? null),
       pendingSkill: null,
     };
