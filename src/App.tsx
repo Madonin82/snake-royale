@@ -226,6 +226,11 @@ const GameApp: React.FC<{ campaignPlaytestLevel: CampaignLevel | null }> = ({ ca
   // visible pause duration before rendering. If a newer step arrives during
   // the hold, the old one is dropped (replace, don't queue).
   const guestBeatTimerRef = useRef<NodeJS.Timeout | null>(null);
+  // Guest shadow snapshot: at lock time, store the computed committed path
+  // for the guest's own seat. During execute playback, the live buffer is
+  // drained as the host acknowledges moves, which would make the shadow
+  // "chase" the snake. The snapshot freezes the original plan.
+  const guestShadowSnapshotRef = useRef<Record<string, Position[] | undefined>>({});
   const [fatalMoveSnakes, setFatalMoveSnakes] = useState<string[]>([]);
   const fatalMoveSnakesRef = useRef<string[]>([]);
   fatalMoveSnakesRef.current = fatalMoveSnakes;
@@ -390,15 +395,30 @@ const GameApp: React.FC<{ campaignPlaytestLevel: CampaignLevel | null }> = ({ ca
     const showP1 = playMode === 'LOCAL_2P' || viewerSeat === 'p1';
     const showP2 = playMode === 'LOCAL_2P' || viewerSeat === 'p2';
 
-    return {
-      p1: showP1 && locks.p1 && moveBuffers.p1.length > 0
-        ? computeCommittedPath(gameState.snakes.find(snake => snake.id === 'p1')!, moveBuffers.p1)
-        : undefined,
-      p2: showP2 && locks.p2 && moveBuffers.p2.length > 0
-        ? computeCommittedPath(gameState.snakes.find(snake => snake.id === 'p2')!, moveBuffers.p2)
-        : undefined,
+    // Guest shadow snapshot: in ONLINE_JOIN, the guest's live buffer drains
+    // as the host acknowledges moves during execute. Use the frozen path
+    // from lock time for the guest's own seat so the shadow doesn't chase.
+    const isGuest = playMode === 'ONLINE_JOIN';
+    const guestSeat = onlineRole === 'p1' ? 'p1' : onlineRole === 'p2' ? 'p2' : null;
+
+    const getPath = (seatId: 'p1' | 'p2', show: boolean): Position[] | undefined => {
+      if (!show || !locks[seatId]) return undefined;
+      if (isGuest && guestSeat === seatId) {
+        const snap = guestShadowSnapshotRef.current[seatId];
+        if (snap && snap.length > 0) return snap;
+      }
+      const buf = moveBuffers[seatId];
+      if (!buf || buf.length === 0) return undefined;
+      const snake = gameState.snakes.find(s => s.id === seatId);
+      if (!snake) return undefined;
+      return computeCommittedPath(snake, buf);
     };
-  }, [settings.turnBased, replayActive, locks, moveBuffers, gameState, playMode, viewerSeat]);
+
+    return {
+      p1: getPath('p1', showP1),
+      p2: getPath('p2', showP2),
+    };
+  }, [settings.turnBased, replayActive, locks, moveBuffers, gameState, playMode, viewerSeat, onlineRole]);
 
   const bridgeSeatRef = useRef<'p1' | 'p2'>('p1');
   const soloAiP2OverriddenRef = useRef(false);
@@ -544,6 +564,19 @@ const GameApp: React.FC<{ campaignPlaytestLevel: CampaignLevel | null }> = ({ ca
     notifiedPlanningWindowRef.current = { ...notifiedPlanningWindowRef.current, [who]: false };
     setThinkTimeRemaining(prev => ({ ...prev, [who]: null }));
     commitLocks({ ...locksRef.current, [who]: true });
+    // Guest shadow snapshot: freeze the committed path at lock time so the
+    // own-player shadow doesn't chase the snake during execute playback
+    // (the live buffer drains as the host acknowledges moves).
+    if (mode === 'ONLINE_JOIN') {
+      const myRole = onlineRoleRef.current;
+      if (myRole === 'p1' || myRole === 'p2') {
+        const snake = stateRef.current.snakes.find(s => s.id === myRole);
+        const buf = moveBuffersRef.current[myRole] ?? [];
+        if (snake && buf.length > 0) {
+          guestShadowSnapshotRef.current[myRole] = computeCommittedPath(snake, buf);
+        }
+      }
+    }
     if (playModeRef.current === 'ONLINE_HOST' || playModeRef.current === 'ONLINE_SERVER') {
       networkManager.broadcastState(stateRef.current, locksRef.current);
     }
@@ -566,6 +599,9 @@ const GameApp: React.FC<{ campaignPlaytestLevel: CampaignLevel | null }> = ({ ca
     setThinkTimeRemaining(thinkTimeRemainingRef.current);
     locksRef.current = Object.fromEntries(playerIds.map(id => [id, false]));
     setLocks(locksRef.current);
+    // Clear guest shadow snapshot when planning reopens — the frozen plan
+    // is no longer relevant.
+    guestShadowSnapshotRef.current = {};
     applyThinkTransition({ type: 'RESET' });
     clearMoveBuffers();
   }, [applyThinkTransition, clearMoveBuffers]);

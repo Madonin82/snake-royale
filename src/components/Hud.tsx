@@ -429,11 +429,16 @@ export const Hud: React.FC<HudProps> = ({
           <div className="flex min-w-0 min-h-9 [@media(max-height:540px)]:min-h-7 flex-1 flex-wrap items-center gap-1 border-2 border-dashed border-[#0F380F] bg-[#8BAC0F] px-2 py-1 text-[10px] font-bold text-[#0F380F] tabular-nums">
             <span className="shrink-0">P2 QUEUE {moveBuffers?.p2?.length ?? 0}/{gameState.snakes.find(snake => snake.id === 'p2')?.body.length ?? 0}</span>
             <span className="flex min-w-0 flex-wrap items-center gap-0.5">
-              {(moveBuffers?.p2 ?? []).map((direction, index) => (
-                <span key={`${direction}-${index}`} className="shrink-0 bg-[#0F380F] px-1 py-0.5 leading-none text-[#9BBC0F]">
-                  {direction === 'UP' ? '↑' : direction === 'DOWN' ? '↓' : direction === 'LEFT' ? '←' : '→'}
-                </span>
-              ))}
+              {(moveBuffers?.p2 ?? []).map((entry, index) => {
+                const dir = entry.direction;
+                const arrow = dir === 'UP' ? '↑' : dir === 'DOWN' ? '↓' : dir === 'LEFT' ? '←' : '→';
+                const label = entry.type === 'dart' ? `⚡${arrow}` : arrow;
+                return (
+                  <span key={`${dir}-${index}`} className="shrink-0 bg-[#0F380F] px-1 py-0.5 leading-none text-[#9BBC0F]">
+                    {label}
+                  </span>
+                );
+              })}
               {(moveBuffers?.p2?.length ?? 0) === 0 && <span className="opacity-75 truncate">SWIPE / TAP TOP</span>}
             </span>
             {isLocked('p2') && <span className="shrink-0 bg-[#0F380F] text-[#9BBC0F] px-1 py-0.5 text-[9px] leading-none">LOCKED</span>}
