@@ -38,6 +38,12 @@ export const Hud: React.FC<HudProps> = ({
   // Who is "you" on this screen, per seat — drives the (YOU) tags.
   const seatTag = (seat: string): string => {
     const seatNumber = Number(seat.slice(1));
+    // 4P mode: names are distinct (ROOK, VIPER, etc.), no tag needed
+    if (gameState.snakes.length > 2) {
+      if (playMode === 'SOLO_AI' && seat === 'p1') return '(YOU)';
+      if (playMode === 'LOCAL_2P') return `(P${seatNumber})`;
+      return '';
+    }
     if (playMode === 'ONLINE_SERVER' || playMode === 'ONLINE_SPECTATOR') return `(P${seatNumber})`;
     if (playMode === 'SOLO_AI') return seat === 'p1' ? '(YOU)' : `(BOT ${seatNumber})`;
     if (playMode === 'LOCAL_2P') return `(P${seatNumber})`;
@@ -186,13 +192,23 @@ export const Hud: React.FC<HudProps> = ({
     const totalThink = gameState.totalThinkTime?.[who] ?? 0;
     const buffer = moveBuffers?.[who] ?? [];
     const countdown = thinkTimeRemaining?.[who] ?? null;
+    // Active = currently planning (not locked, game in progress, turn-based)
+    const isActive = gameState.turnBased && gameState.phase !== 'OVER' && !locked && !replayActive;
 
     return (
-      <div className="bg-[#9BBC0F] p-3 [@media(max-height:540px)]:p-2 border-2 border-[#0F380F] flex flex-col h-full min-h-0 overflow-hidden shadow-[2px_2px_0px_#0F380F] w-full font-mono text-[#0F380F]">
+      <div
+        className={`bg-[#9BBC0F] p-3 [@media(max-height:540px)]:p-2 border-2 flex flex-col h-full min-h-0 overflow-hidden shadow-[2px_2px_0px_#0F380F] w-full font-mono text-[#0F380F] transition-opacity ${
+          locked ? 'opacity-60 border-dashed' : isActive ? 'border-[#0F380F] ring-2 ring-[#0F380F]' : 'border-[#0F380F]'
+        }`}
+        style={{ borderColor: locked ? undefined : snake.color, boxShadow: isActive ? `0 0 8px ${snake.color}` : undefined }}
+      >
         <div className="shrink-0">
           <div className="flex items-center justify-between text-xs [@media(max-height:540px)]:text-[11px] font-bold mb-2 [@media(max-height:540px)]:mb-1 h-4">
             <span className="flex items-center gap-1.5 min-w-0">
-              <span className={`w-3 h-3 [@media(max-height:540px)]:w-2.5 [@media(max-height:540px)]:h-2.5 shrink-0 ${who === 'p1' ? 'bg-[#0F380F]' : 'bg-[#306230]'} inline-block border border-[#0F380F]`} />
+              <span
+                className="w-3 h-3 [@media(max-height:540px)]:w-2.5 [@media(max-height:540px)]:h-2.5 shrink-0 inline-block border border-[#0F380F]"
+                style={{ backgroundColor: snake.color }}
+              />
               <span className="truncate">{snake.name} {seatTag(who)}</span>
             </span>
           </div>
@@ -289,7 +305,10 @@ export const Hud: React.FC<HudProps> = ({
             <div className="shrink-0">
               <div className="flex items-center justify-between text-[11px] font-bold h-4">
                 <span className="flex items-center gap-1 min-w-0">
-                  <span className={`w-2.5 h-2.5 shrink-0 ${who === 'p1' ? 'bg-[#0F380F]' : 'bg-[#306230]'} inline-block border border-[#0F380F]`} />
+                  <span
+                    className="w-2.5 h-2.5 shrink-0 inline-block border border-[#0F380F]"
+                    style={{ backgroundColor: snake.color }}
+                  />
                   <span className="truncate">{snake.name} {seatTag(who)}</span>
                 </span>
                 <span className="text-[10px] opacity-80 shrink-0 tabular-nums">LEN: {snake.body.length}</span>
@@ -394,7 +413,10 @@ export const Hud: React.FC<HudProps> = ({
           const who = snake.id;
           return (
             <div key={who} className="flex min-w-0 flex-1 items-center gap-1">
-              <span className={`h-2 w-2 shrink-0 border border-[#0F380F] ${who === 'p1' ? 'bg-[#0F380F]' : 'bg-[#306230]'}`} />
+              <span
+                className="h-2 w-2 shrink-0 border border-[#0F380F]"
+                style={{ backgroundColor: snake.color }}
+              />
               <span className="min-w-0 flex-1 truncate">{snake.name}</span>
               <span className="shrink-0">{snake.score}</span>
               <span className="shrink-0 opacity-80">L{snake.body.length}</span>
@@ -405,11 +427,13 @@ export const Hud: React.FC<HudProps> = ({
       </div>
 
       <div className="desktop-panel-left">
-        {gameState.snakes[0] && renderDesktopPlayerPanel(gameState.snakes[0].id)}
+        {gameState.snakes.slice(0, 2).map(snake => (
+          <React.Fragment key={snake.id}>{renderDesktopPlayerPanel(snake.id)}</React.Fragment>
+        ))}
       </div>
 
       <div className="desktop-panel-right">
-        {gameState.snakes.slice(1).map(snake => (
+        {gameState.snakes.slice(2).map(snake => (
           <React.Fragment key={snake.id}>{renderDesktopPlayerPanel(snake.id)}</React.Fragment>
         ))}
       </div>

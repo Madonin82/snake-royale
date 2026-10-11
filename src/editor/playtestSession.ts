@@ -14,6 +14,9 @@ const OPPOSITE_DIRECTION: Record<Direction, Direction> = {
 
 const DIRECTIONS: Direction[] = ['UP', 'RIGHT', 'DOWN', 'LEFT'];
 
+// Bot names for 4-player playtest — no more "BOT 3", "BOT 4"
+const BOT_NAMES = ['ROOK', 'VIPER', 'COBRA', 'PYTHON', 'MAMBA', 'ADDER'];
+
 export function isSpawnEnabled(spawn: SpawnConfig): boolean {
   return spawn.enabled !== false;
 }
@@ -159,7 +162,7 @@ export function createCampaignPlaytestState(
     return {
       ...template,
       id: `p${index + 1}`,
-      name: index === 0 ? template.name : avalena ? 'AVALENA' : `BOT ${index + 1}`,
+      name: index === 0 ? template.name : avalena ? 'AVALENA' : (BOT_NAMES[index - 1] ?? `BOT ${index + 1}`),
       color: colors[index] ?? template.color,
       body,
       direction: spawn.direction,

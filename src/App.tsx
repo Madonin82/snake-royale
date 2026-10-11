@@ -51,6 +51,8 @@ import { OnlineRoomLobby } from './components/OnlineRoomLobby';
 import { LatencyHarnessModal } from './components/LatencyHarnessModal';
 import { SettingsModal } from './components/SettingsModal';
 import { MatchEndModal } from './components/MatchEndModal';
+import { IntermissionOverlay } from './components/IntermissionOverlay';
+import { ToastFeed, Toast } from './components/ToastFeed';
 import { ControlsOverlay } from './components/ControlsOverlay';
 import { ReplayControls } from './components/ReplayControls';
 import { LevelEditor } from './editor/LevelEditor';
@@ -261,6 +263,60 @@ const GameApp: React.FC<{ campaignPlaytestLevel: CampaignLevel | null }> = ({ ca
   const realTimeInputBufferRef = useRef<Record<string, Direction[]>>({});
   const [latencyModalOpen, setLatencyModalOpen] = useState<boolean>(false);
   const [settingsModalOpen, setSettingsModalOpen] = useState<boolean>(false);
+  const [showIntermission, setShowIntermission] = useState<boolean>(false);
+  const prevPhaseRef = useRef<string | null>(null);
+  const [toasts, setToasts] = useState<Toast[]>([]);
+  const toastIdRef = useRef(0);
+
+  const pushToast = (message: string, color?: string) => {
+    const id = ++toastIdRef.current;
+    setToasts(prev => [...prev.slice(-4), { id, message, color }]); // Keep max 5
+  };
+
+  const dismissToast = (id: number) => {
+    setToasts(prev => prev.filter(t => t.id !== id));
+  };
+
+  // Detect RACING → SHRINKING transition for intermission overlay
+  useEffect(() => {
+    const currentPhase = gameState.phase;
+    const prevPhase = prevPhaseRef.current;
+    if (prevPhase === 'RACING' && currentPhase === 'SHRINKING' && !replayActive) {
+      setShowIntermission(true);
+      pushToast('🏁 TOKEN RACE OVER — SHRINK PHASE');
+    } else if (prevPhase && prevPhase !== currentPhase && !replayActive) {
+      if (currentPhase === 'OVER') {
+        pushToast('🏆 MATCH OVER');
+      }
+    }
+    prevPhaseRef.current = currentPhase;
+  }, [gameState.phase, replayActive]);
+
+  // Toast on player locks
+  const prevLocksRef = useRef<Record<string, boolean>>({});
+  useEffect(() => {
+    if (replayActive) return;
+    for (const [seat, locked] of Object.entries(locks)) {
+      if (locked && !prevLocksRef.current[seat]) {
+        const snake = gameState.snakes.find(s => s.id === seat);
+        if (snake) pushToast(`🔒 ${snake.name} locked`, snake.color);
+      }
+    }
+    prevLocksRef.current = { ...locks };
+  }, [locks, replayActive, gameState.snakes]);
+
+  // Toast on deaths
+  const prevAliveRef = useRef<Record<string, boolean>>({});
+  useEffect(() => {
+    if (replayActive) return;
+    for (const snake of gameState.snakes) {
+      const wasAlive = prevAliveRef.current[snake.id] ?? true;
+      if (wasAlive && !snake.isAlive) {
+        pushToast(`💀 ${snake.name} eliminated`, snake.color);
+      }
+      prevAliveRef.current[snake.id] = snake.isAlive;
+    }
+  }, [gameState.snakes, replayActive]);
   const [latencyReport, setLatencyReport] = useState<LatencyReport>(() => networkManager.getLatencyReport());
   const [gamepadCount, setGamepadCount] = useState<number>(0);
   const [isNintendoController, setIsNintendoController] = useState<boolean>(false);
@@ -2681,6 +2737,13 @@ const GameApp: React.FC<{ campaignPlaytestLevel: CampaignLevel | null }> = ({ ca
                   hitstop={activeHitstop}
                   fatalMoveAnimating={fatalMoveSnakes}
                 />
+                {showIntermission && !replayActive && (
+                  <IntermissionOverlay
+                    gameState={displayState}
+                    onDismiss={() => setShowIntermission(false)}
+                  />
+                )}
+                <ToastFeed toasts={toasts} onDismiss={dismissToast} />
                 {!replayActive &&
                   (playMode === 'ONLINE_HOST' || playMode === 'ONLINE_SERVER') &&
                   !joinerAcknowledgedMatchStart && (
