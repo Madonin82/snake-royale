@@ -8,6 +8,7 @@ import {
   getHitstopForTransition,
   getNextHeadPosition,
   HitstopInfo,
+  isCellInArena,
   isOppositeDirection,
   processGameTick,
   queueSnakeDirection,
