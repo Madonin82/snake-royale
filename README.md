@@ -1,6 +1,8 @@
-# Snake Royale — 2-Player Token Race
+# Snake Royale — Multiplayer Token Race
 
-A tiny competitive Snake game for two players: race for tokens on a small board, then survive as the arena shrinks. Game Boy 4-shade looks, chess-pace turn-based multiplayer by default, and a built-in latency harness because this started life as a networking testbed that turned into a real game.
+A competitive Snake game: race for tokens on a small board, then survive as the arena shrinks. Turn-based by default (chess pace), with a built-in latency harness because this started life as a networking testbed that turned into a real game.
+
+Supports 2-4 players, solo vs AI, teams, and a level editor for custom scenarios.
 
 **Play it:** https://madonin82.github.io/snake-royale/
 
@@ -15,17 +17,23 @@ A tiny competitive Snake game for two players: race for tokens on a small board,
 - **Move privacy:** your queued move arrows are visible only to you — opponents see "Hidden" (desktop HUD and mobile cards).
 - **Snake visuals:** directional eyes on the head, tapered tail. Same Game Boy palette.
 - **Match replay:** every match is recorded turn by turn. After a match, WATCH REPLAY scrubs through it at 2×/5×/10× (thinking pauses edited out). Replays include think-time data.
-- **Solo vs AI and local 2P** for same-screen or bot-sparring play.
+- **Solo vs AI and local multiplayer** for same-screen or bot-sparring play. Up to 4 snakes.
+- **Teams:** assign snakes to teams in the level editor. Friendly fire toggle controls whether teammates can kill each other.
+- **Skills:** each snake equips one skill per match.
+  - **Dart** (2 SP): dash 3 cells in a direction. Mobility, repositioning, interceptions.
+  - **Rattle** (2 SP): detach your tail tip as a permanent wall. Costs 1 length. Area denial.
+- **Bosses:** Avalena (bird-like, Dart specialist) is the first. More coming, each with their own stage theme.
+- **Level editor:** custom grid sizes (4x4 to 16x16), wall placement, token config, spawn positions, AI styles, skill loadouts, team assignments. Playtest right in the editor.
 - **Latency harness:** a NET readout in the HUD with ping/pong probes (median + p95), plus input-to-render tick lag. Note: the ping number measures time-until-the-peer-acks, so on a slow-thinking opponent it reads huge — that's the harness being honest about a different thing than wire latency.
 
 ## How a match works
 
-- Two snakes start at opposite ends facing each other, length 3.
+- Snakes start at opposite ends facing each other, length 3. Up to 4 players.
 - **Round 1** spawns 1 token. Whoever eats it grows +1 segment and scores +1 point; the round advances and spawns that many tokens (round 2 = 2, round 3 = 3, …).
 - **Phase 1 (Token Race)** runs for a configurable number of turns (60/90/120). Then **Phase 2 (Shrink):** no new tokens, and every few turns the outer ring of the arena becomes wall (with a telegraphed warning ring first).
-- Hit a wall, your own body, or the other snake and you die. Head-on in the same step kills both.
-- **Win:** be the last snake alive. If both die together or the match expires: most tokens wins, then longest snake, then draw.
-- Arena: 8×8, 12×12, or 16×16 (Settings). Palette is strictly the four Game Boy greens: `#0F380F`, `#306230`, `#8BAC0F`, `#9BBC0F`.
+- Hit a wall, your own body, or another snake and you die. Head-on in the same step kills both (tiebreak by skill points, then length).
+- **Win:** be the last snake (or team) alive. If everyone dies together or the match expires: most tokens wins, then longest snake, then draw.
+- Arena: 4×4 to 16×16 (level editor). Currently Game Boy palette; GBA-quality art in progress.
 
 ## Controls
 
