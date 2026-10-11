@@ -222,6 +222,10 @@ const GameApp: React.FC<{ campaignPlaytestLevel: CampaignLevel | null }> = ({ ca
   activeHitstopRef.current = activeHitstop;
   const hitstopUntilRef = useRef<number>(0);
   const hitstopTimerRef = useRef<NodeJS.Timeout | null>(null);
+  // Guest-side online playback beat: holds a broadcast turn-step for the
+  // visible pause duration before rendering. If a newer step arrives during
+  // the hold, the old one is dropped (replace, don't queue).
+  const guestBeatTimerRef = useRef<NodeJS.Timeout | null>(null);
   const [fatalMoveSnakes, setFatalMoveSnakes] = useState<string[]>([]);
   const fatalMoveSnakesRef = useRef<string[]>([]);
   fatalMoveSnakesRef.current = fatalMoveSnakes;
@@ -676,6 +680,10 @@ const GameApp: React.FC<{ campaignPlaytestLevel: CampaignLevel | null }> = ({ ca
         clearTimeout(fatalMoveTimerRef.current);
         fatalMoveTimerRef.current = null;
       }
+      if (guestBeatTimerRef.current) {
+        clearTimeout(guestBeatTimerRef.current);
+        guestBeatTimerRef.current = null;
+      }
     };
   }, []);
 
@@ -857,7 +865,31 @@ const GameApp: React.FC<{ campaignPlaytestLevel: CampaignLevel | null }> = ({ ca
       }
     };
 
-    const freezeMs = triggerHitstop(prevState, nextState, openNextLockPhase);
+    const freezeMs = (() => {
+      // In online mode, every turn resolution gets the visible playback beat,
+      // not just multi-move buffer drains or hitstop events. Without this,
+      // single-move turns teleport with no pause (canProgress is false when
+      // buffers are empty after a single move).
+      const isOnlineMode = playModeRef.current === 'ONLINE_HOST' ||
+                           playModeRef.current === 'ONLINE_JOIN' ||
+                           playModeRef.current === 'ONLINE_SERVER';
+      let hitstopMs = 0;
+      const openNextLockPhaseWithBeat = () => {
+        // Only add the beat if triggerHitstop didn't already pause.
+        // Note: triggerHitstop invokes this callback synchronously when
+        // there's no hitstop, at which point hitstopMs is still 0
+        // (assignment below hasn't run yet) — which is exactly when we
+        // want the beat. When there IS a hitstop, the callback fires later
+        // via timer, hitstopMs > 0, and we skip the extra beat.
+        if (isOnlineMode && hitstopMs === 0) {
+          setTimeout(openNextLockPhase, 550);
+        } else {
+          openNextLockPhase();
+        }
+      };
+      hitstopMs = triggerHitstop(prevState, nextState, openNextLockPhaseWithBeat);
+      return hitstopMs;
+    })();
     // Dart resolution effects: zing sound + haptics
     if (nextState.dartTrail && nextState.dartTrail.length > 0) {
       soundEngine.playDart();
@@ -1676,9 +1708,27 @@ const GameApp: React.FC<{ campaignPlaytestLevel: CampaignLevel | null }> = ({ ca
             const snapshot = adoptThinkTimeSnapshot(thinkRef.current, safeState);
             thinkRef.current = snapshot.model;
             stateRef.current = snapshot.state;
-            setGameState(snapshot.state);
+            // Guest-side playback beat: on a new tick, hold the visual update
+            // for the beat duration so both screens show the move-pause rhythm.
+            // Logic (stateRef, locks, buffers) updates immediately above; only
+            // the render is delayed. If a newer tick arrives during the hold,
+            // drop the pending one and start the beat on the latest (replace,
+            // don't queue) — the guest never falls more than one beat behind.
             if (isNewTick) {
-              triggerHitstop(prevState, snapshot.state);
+              if (guestBeatTimerRef.current) {
+                clearTimeout(guestBeatTimerRef.current);
+                guestBeatTimerRef.current = null;
+              }
+              const stateToRender = snapshot.state;
+              const prevForHitstop = prevState;
+              guestBeatTimerRef.current = setTimeout(() => {
+                guestBeatTimerRef.current = null;
+                setGameState(stateToRender);
+                triggerHitstop(prevForHitstop, stateToRender);
+              }, 550);
+            } else {
+              // Not a new tick (e.g., lock update) — apply immediately.
+              setGameState(snapshot.state);
             }
             setMatchHistory(prev => {
               if (prev.length === 0 || snapshot.state.tick > prev[prev.length - 1].tick) {
