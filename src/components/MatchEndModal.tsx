@@ -146,6 +146,13 @@ export const MatchEndModal: React.FC<MatchEndModalProps> = ({
   
   const [expandedP1, setExpandedP1] = useState(true);
   const [expandedP2, setExpandedP2] = useState(true);
+  // For 4P: track expanded state per snake id
+  const [expandedMap, setExpandedMap] = useState<Record<string, boolean>>({});
+  const isExpanded4P = (id: string) => expandedMap[id] ?? true;
+  const toggleExpanded4P = (id: string) => setExpandedMap(prev => ({ ...prev, [id]: !(prev[id] ?? true) }));
+
+  // Sort snakes by score for final standings (1st–4th)
+  const standings = [...gameState.snakes].sort((a, b) => b.score - a.score);
 
   const history = matchHistory.length > 0 ? matchHistory : [gameState];
   const matchStats = computeMatchStats(history, turnDecisions);
@@ -289,38 +296,49 @@ export const MatchEndModal: React.FC<MatchEndModalProps> = ({
         )}
 
         {/* Final Stats Breakdown — Independent Expandable Player Cards */}
-        <div className="flex flex-col sm:grid sm:grid-cols-2 gap-2 bg-[#8BAC0F] p-2.5 [@media(max-height:520px)]:p-1.5 border-2 border-[#0F380F] shrink-0">
-          {(['p1', 'p2'] as const).map((who) => {
-            const snake = who === 'p1' ? p1 : p2;
-            const stats = who === 'p1' ? matchStats.p1Stats : matchStats.p2Stats;
-            const isExpanded = who === 'p1' ? expandedP1 : expandedP2;
+        <div className={`flex flex-col gap-2 bg-[#8BAC0F] p-2.5 [@media(max-height:520px)]:p-1.5 border-2 border-[#0F380F] shrink-0 ${gameState.snakes.length > 2 ? 'sm:grid sm:grid-cols-2' : 'sm:grid sm:grid-cols-2'}`}>
+          {standings.map((snake, idx) => {
+            const who = snake.id;
+            // Use generic playerStats for 4P, fall back to p1/p2 for 2P compat
+            const stats = matchStats.playerStats[who] ?? (who === 'p1' ? matchStats.p1Stats : matchStats.p2Stats);
+            const expanded = gameState.snakes.length > 2 ? isExpanded4P(who) : (who === 'p1' ? expandedP1 : expandedP2);
             const isWinner = gameState.winner === who;
+            const rankLabel = idx === 0 ? '🥇 1ST' : idx === 1 ? '🥈 2ND' : idx === 2 ? '🥉 3RD' : `${idx + 1}TH`;
 
             return (
               <div
                 key={who}
-                className={`p-2 [@media(max-height:520px)]:p-1.5 border-2 border-[#0F380F] flex flex-col items-center transition-all ${
+                className={`p-2 [@media(max-height:520px)]:p-1.5 border-2 flex flex-col items-center transition-all ${
                   isWinner ? 'bg-[#9BBC0F]' : 'bg-[#8BAC0F]/85'
                 }`}
+                style={{ borderColor: snake.color, borderLeftWidth: '6px' }}
               >
                 <div
                   onClick={() => {
                     soundEngine.playMenuSelect();
-                    if (who === 'p1') setExpandedP1(prev => !prev);
+                    if (gameState.snakes.length > 2) toggleExpanded4P(who);
+                    else if (who === 'p1') setExpandedP1(prev => !prev);
                     else setExpandedP2(prev => !prev);
                   }}
                   className="flex items-center justify-between w-full text-[11px] font-bold cursor-pointer hover:opacity-80"
                   title="Tap to toggle panel"
                 >
-                  <span className="truncate">{snake.name}</span>
-                  <span className="text-[9px] opacity-80">{isExpanded ? '▴ HIDE STATS' : '▾ SHOW STATS'}</span>
+                  <span className="flex items-center gap-1.5 truncate">
+                    <span className="text-[10px] font-black">{rankLabel}</span>
+                    <span
+                      className="w-2.5 h-2.5 inline-block border border-[#0F380F] shrink-0"
+                      style={{ backgroundColor: snake.color }}
+                    />
+                    <span className="truncate">{snake.name}</span>
+                  </span>
+                  <span className="text-[9px] opacity-80">{expanded ? '▴ HIDE STATS' : '▾ SHOW STATS'}</span>
                 </div>
                 <div className="flex items-baseline gap-1 mt-1 [@media(max-height:520px)]:mt-0.5">
                   <span className="text-3xl [@media(max-height:520px)]:text-xl font-black leading-none">{snake.score}</span>
                   <span className="text-[10px] font-bold opacity-80 uppercase">TOKENS</span>
                 </div>
 
-                {isExpanded && (
+                {expanded && stats && (
                   <div className="mt-2 pt-2 border-t border-[#0F380F] w-full text-left text-[10px] font-bold space-y-1 bg-[#8BAC0F]/50 p-1.5">
                     <div className="flex justify-between"><span>Avg Lock:</span><span className="tabular-nums">{stats.avgLockTime}</span></div>
                     <div className="flex justify-between"><span>Fast / Slow:</span><span className="tabular-nums">{stats.fastestLock} / {stats.slowestLock}</span></div>
