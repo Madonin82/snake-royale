@@ -622,7 +622,7 @@ export function processGameTick(
       dartTrail.push({ snakeId, cells });
     }
   }
-  state.dartTrail = dartTrail.length > 0 ? dartTrail : undefined;
+  state.dartTrail = dartTrail;
 
   recordSurviveResults(state);
   recordFirstToResults(state);
