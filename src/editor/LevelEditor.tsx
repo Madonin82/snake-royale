@@ -81,6 +81,7 @@ const DEFAULT_LEVEL: CampaignLevel = {
     { enabled: true, position: { x: 1, y: 1 }, direction: 'RIGHT', startLength: 3, startingScore: 0, startingSkillPoints: 0, aiStyle: 'GREEDY', equippedSkill: null },
     { enabled: true, position: { x: 6, y: 6 }, direction: 'LEFT', startLength: 3, startingScore: 0, startingSkillPoints: 0, aiStyle: 'GREEDY', equippedSkill: null },
     { enabled: true, position: { x: 1, y: 6 }, direction: 'UP', startLength: 3, startingScore: 0, startingSkillPoints: 0, aiStyle: 'TURTLE', equippedSkill: null },
+    { enabled: false, position: { x: 6, y: 1 }, direction: 'DOWN', startLength: 3, startingScore: 0, startingSkillPoints: 0, aiStyle: 'TURTLE', equippedSkill: null },
   ],
   tokens: {
     positions: [],
@@ -540,7 +541,7 @@ export const LevelEditor: React.FC = () => {
               >
                 ◆ TOKEN
               </button>
-              {level.spawns.slice(0, 3).map((spawn, index) => (
+              {level.spawns.slice(0, 4).map((spawn, index) => (
                 <React.Fragment key={index}>
                   <button
                     type="button"
@@ -548,7 +549,7 @@ export const LevelEditor: React.FC = () => {
                     onClick={() => setActiveTool(`SPAWN_${index}`)}
                     className={`py-2 px-1 text-[10px] font-black border-4 border-[#0F380F] transition-colors disabled:opacity-40 disabled:cursor-not-allowed ${
                       activeTool === `SPAWN_${index}`
-                        ? index === 2 ? 'bg-[#8B1E0F] text-white' : 'bg-[#306230] text-[#9BBC0F]'
+                        ? index === 2 ? 'bg-[#8B1E0F] text-white' : index === 3 ? 'bg-[#5B2C83] text-white' : 'bg-[#306230] text-[#9BBC0F]'
                         : 'bg-[#8BAC0F] hover:bg-[#9BBC0F] text-[#0F380F]'
                     }`}
                   >
@@ -560,7 +561,7 @@ export const LevelEditor: React.FC = () => {
                     onClick={() => setActiveTool(`PAINT_${index}`)}
                     className={`py-2 px-1 text-[10px] font-black border-4 border-[#0F380F] transition-colors disabled:opacity-40 disabled:cursor-not-allowed ${
                       activeTool === `PAINT_${index}`
-                        ? index === 2 ? 'bg-[#8B1E0F] text-white' : 'bg-[#306230] text-[#9BBC0F]'
+                        ? index === 2 ? 'bg-[#8B1E0F] text-white' : index === 3 ? 'bg-[#5B2C83] text-white' : 'bg-[#306230] text-[#9BBC0F]'
                         : 'bg-[#8BAC0F] hover:bg-[#9BBC0F] text-[#0F380F]'
                     }`}
                   >
@@ -581,7 +582,7 @@ export const LevelEditor: React.FC = () => {
               </button>
             </div>
             <div className="flex gap-2 mt-2">
-              {level.spawns.slice(0, 3).map((spawn, index) => (
+              {level.spawns.slice(0, 4).map((spawn, index) => (
                 <button
                   key={index}
                   type="button"
@@ -630,9 +631,13 @@ export const LevelEditor: React.FC = () => {
                       cellBg = 'bg-[#0F380F]';
                     } else if (spawnIndex >= 0) {
                       const spawn = level.spawns[spawnIndex];
-                      const p1 = spawnIndex === 0;
-                      const p3 = spawnIndex === 2;
-                      cellBg = p1 ? 'bg-[#306230]' : p3 ? 'bg-[#8B1E0F]' : 'bg-[#0F380F]';
+                      cellBg = spawnIndex === 0
+                        ? 'bg-[#306230]'
+                        : spawnIndex === 1
+                        ? 'bg-[#0F380F]'
+                        : spawnIndex === 2
+                        ? 'bg-[#8B1E0F]'
+                        : 'bg-[#5B2C83]';
                       cellContent = (
                         <div className="text-[#9BBC0F] font-black text-xs leading-none flex flex-col items-center justify-center">
                           <span>{snakeSegmentIndex === 0 ? `P${spawnIndex + 1}` : snakeSegmentIndex}</span>
@@ -765,7 +770,7 @@ export const LevelEditor: React.FC = () => {
 
             {/* Spawn configuration */}
             <div className="space-y-2 pt-1 border-t-2 border-[#0F380F]">
-              {level.spawns.slice(0, 3).map((spawn, index) => {
+              {level.spawns.slice(0, 4).map((spawn, index) => {
                 const enabled = isSpawnEnabled(spawn);
                 return (
                 <div key={index} className={`grid grid-cols-2 gap-2 border border-[#0F380F] p-2 ${enabled ? '' : 'opacity-60'}`}>

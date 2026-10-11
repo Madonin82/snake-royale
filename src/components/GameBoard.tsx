@@ -142,9 +142,9 @@ export const GameBoard: React.FC<GameBoardProps> = ({
       const renderAsAlive = snake.isAlive || isDuringDeathHitstop || isAnimatingFatalMove;
       const bodyColor = !renderAsAlive
         ? GAMEBOY_COLORS.DARKEST
-        : isFirst
+        : (snake.color || (isFirst
           ? GAMEBOY_COLORS.DARKEST
-          : GAMEBOY_COLORS.DARK;
+          : GAMEBOY_COLORS.DARK));
       const accentColor = !renderAsAlive
         ? GAMEBOY_COLORS.DARKEST
         : isFirst
