@@ -53,6 +53,7 @@ export function normalizeGameState(state: GameState): GameState {
     ...state,
     tokens: asPositionArray((state as GameState).tokens),
     ...(state.walls === undefined ? {} : { walls: asPositionArray(state.walls) }),
+    ...(state.rattleWalls === undefined ? {} : { rattleWalls: asPositionArray(state.rattleWalls) }),
     snakes: snakes.map((snake, index) => ({
       ...snake,
       id: snake.id || `p${index + 1}`,

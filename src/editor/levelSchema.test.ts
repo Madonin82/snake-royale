@@ -1,8 +1,12 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert';
-import { CampaignLevel } from './levelSchema';
+import { CampaignLevel, SKILL_IDS } from './levelSchema';
 
 describe('CampaignLevel Schema', () => {
+  it('lists dart and rattle as equippable skills', () => {
+    assert.deepEqual(SKILL_IDS, ['dart', 'rattle']);
+  });
+
   it('validates a complete level data structure', () => {
     const level: CampaignLevel = {
       id: 'maze-snake-01',

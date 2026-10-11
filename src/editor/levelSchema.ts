@@ -1,5 +1,7 @@
 import { Position, Direction, SkillId, SkillsAvailableConfig } from '../types/game';
 
+export const SKILL_IDS: readonly SkillId[] = ['dart', 'rattle'] as const;
+
 export type CampaignTokenMode = 'ESCALATING' | 'FIXED' | 'FIXED_SET';
 export type CampaignAiStyle = 'GREEDY' | 'TURTLE' | 'CUTOFF' | 'HEADHUNTER' | 'PATROL' | 'AVALENA' | 'avalena';
 

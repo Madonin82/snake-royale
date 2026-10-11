@@ -92,11 +92,20 @@ export const GameBoard: React.FC<GameBoardProps> = ({
     }
 
     // Campaign playtest walls are permanent cells within the arena.
+    const rattleWallSet = new Set(
+      (gameState.rattleWalls ?? []).map(w => `${w.x},${w.y}`),
+    );
     for (const wall of gameState.walls ?? []) {
+      if (rattleWallSet.has(`${wall.x},${wall.y}`)) continue;
       ctx.fillStyle = GAMEBOY_COLORS.DARKEST;
       ctx.fillRect(wall.x * cellSize, wall.y * cellSize, cellSize, cellSize);
       ctx.fillStyle = GAMEBOY_COLORS.DARK;
       ctx.fillRect(wall.x * cellSize + 4, wall.y * cellSize + 4, cellSize - 8, cellSize - 8);
+    }
+
+    // Rattle walls: tail-sized solid black square (distinct from full-cell walls and hollow attached tail tips)
+    for (const wall of gameState.rattleWalls ?? []) {
+      renderRattleWall(ctx, wall.x * cellSize, wall.y * cellSize, cellSize);
     }
 
     // 5. Render Tokens (Escalating Round Tokens)
@@ -493,6 +502,13 @@ function renderShrunkWallCell(ctx: CanvasRenderingContext2D, x: number, y: numbe
   ctx.fillRect(x + 4, y + 4, cellSize - 8, cellSize - 8);
   ctx.fillStyle = GAMEBOY_COLORS.LIGHTEST;
   ctx.fillRect(x + 12, y + 12, cellSize - 24, cellSize - 24);
+}
+
+function renderRattleWall(ctx: CanvasRenderingContext2D, x: number, y: number, cellSize: number) {
+  const tSize = cellSize * 0.55;
+  const tOff = (cellSize - tSize) / 2;
+  ctx.fillStyle = GAMEBOY_COLORS.DARKEST;
+  ctx.fillRect(x + tOff, y + tOff, tSize, tSize);
 }
 
 function renderTelegraphCell(ctx: CanvasRenderingContext2D, x: number, y: number, cellSize: number) {

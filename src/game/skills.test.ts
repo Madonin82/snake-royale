@@ -1,6 +1,15 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { isSkillUnlocked, canActivateSkill, canAffordQueuedDart, isValidDartDirection } from './skills';
+import {
+  isSkillUnlocked,
+  canActivateSkill,
+  canAffordQueuedDart,
+  canAffordQueuedRattle,
+  canQueueRattleWithLength,
+  isValidDartDirection,
+  isValidRattleDirection,
+  SKILLS,
+} from './skills';
 import { GameState } from '../types/game';
 
 function makeState(overrides: Partial<GameState> = {}): GameState {
@@ -86,3 +95,36 @@ test('isValidDartDirection: rejects backward, allows forward/left/right', () => 
   assert.equal(isValidDartDirection('RIGHT', 'DOWN'), true);
   assert.equal(isValidDartDirection('UP', 'DOWN'), false);
 });
+
+test('rattle skill definition: costs 2 SP and requires length >= 3', () => {
+  assert.equal(SKILLS.rattle.id, 'rattle');
+  assert.equal(SKILLS.rattle.cost, 2);
+  assert.equal(SKILLS.rattle.minLength, 3);
+});
+
+test('canActivateSkill for rattle: requires 2+ SP and body length >= 3', () => {
+  const state = makeState({ phase: 'SHRINKING' });
+  const len3Body = [{ x: 2, y: 2 }, { x: 1, y: 2 }, { x: 0, y: 2 }];
+  const len2Body = [{ x: 2, y: 2 }, { x: 1, y: 2 }];
+
+  assert.equal(
+    canActivateSkill(makeSnake({ equippedSkill: 'rattle', skillPoints: 2, body: len3Body }) as any, state, 'immediate'),
+    true,
+  );
+  assert.equal(
+    canActivateSkill(makeSnake({ equippedSkill: 'rattle', skillPoints: 1, body: len3Body }) as any, state, 'immediate'),
+    false,
+  );
+  assert.equal(
+    canActivateSkill(makeSnake({ equippedSkill: 'rattle', skillPoints: 5, body: len2Body }) as any, state, 'immediate'),
+    false,
+  );
+  assert.equal(canAffordQueuedRattle(2, 0), true);
+  assert.equal(canAffordQueuedRattle(2, 1), false);
+  assert.equal(canQueueRattleWithLength(3, 0), true);
+  assert.equal(canQueueRattleWithLength(3, 1), false);
+  assert.equal(canQueueRattleWithLength(2, 0), false);
+  assert.equal(isValidRattleDirection('RIGHT', 'UP'), true);
+  assert.equal(isValidRattleDirection('RIGHT', 'LEFT'), false);
+});
+

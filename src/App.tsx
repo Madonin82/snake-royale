@@ -14,7 +14,7 @@ import {
   queueSnakeDirection,
   queueSnakeSkill,
 } from './game/engine';
-import { canActivateSkill, canAffordQueuedDart, isValidDartDirection, SKILLS } from './game/skills';
+import { canActivateSkill, canAffordQueuedDart, canAffordQueuedRattle, canQueueRattleWithLength, isValidDartDirection, SKILLS } from './game/skills';
 import { calculateAIAction, calculateAIMove } from './game/ai';
 import { cloneGameState, toCompactGameState } from './game/aiBridge';
 import { shouldApplyRtdbBridgeCommand } from './game/aiBridgeRtdb';
@@ -64,9 +64,13 @@ import {
 } from './editor/playtestSession';
 import { ArrowLeft, Volume2, VolumeX } from 'lucide-react';
 
-function computePreviewSnake(snake: any, buffer: BufferEntry[]): Position[] {
-  if (buffer.length === 0) return snake.body;
-  let body = [...snake.body.map((seg: any) => ({ ...seg }))];
+function computePreviewPlan(
+  snake: any,
+  buffer: BufferEntry[],
+): { body: Position[]; rattleWalls: Position[] } {
+  if (buffer.length === 0) return { body: snake.body, rattleWalls: [] };
+  const body: Position[] = [...snake.body.map((seg: any) => ({ ...seg }))];
+  const rattleWalls: Position[] = [];
   for (const entry of buffer) {
     if (entry.type === 'dart') {
       // Dart: 1 normal cell + 2 dart cells in the chosen direction
@@ -75,13 +79,23 @@ function computePreviewSnake(snake: any, buffer: BufferEntry[]): Position[] {
         body.unshift(nextHead);
         body.pop();
       }
+    } else if (entry.type === 'rattle') {
+      if (body.length >= 3) {
+        const detachedTail = body.pop();
+        if (detachedTail) {
+          rattleWalls.push({ x: detachedTail.x, y: detachedTail.y });
+        }
+      }
+      const nextHead = getNextHeadPosition(body[0], entry.direction);
+      body.unshift(nextHead);
+      body.pop();
     } else {
       const nextHead = getNextHeadPosition(body[0], entry.direction);
       body.unshift(nextHead);
       body.pop();
     }
   }
-  return body;
+  return { body, rattleWalls };
 }
 
 function computeCommittedPath(snake: any, buffer: BufferEntry[]): Position[] {
@@ -97,6 +111,14 @@ function computeCommittedPath(snake: any, buffer: BufferEntry[]): Position[] {
         body.unshift(nextHead);
         body.pop();
       }
+    } else if (entry.type === 'rattle') {
+      if (body.length >= 3) {
+        body.pop();
+      }
+      const nextHead = getNextHeadPosition(body[0], entry.direction);
+      path.push(nextHead);
+      body.unshift(nextHead);
+      body.pop();
     } else {
       const nextHead = getNextHeadPosition(body[0], entry.direction);
       path.push(nextHead);
@@ -373,18 +395,33 @@ const GameApp: React.FC<{ campaignPlaytestLevel: CampaignLevel | null }> = ({ ca
     const stateCopy: GameState = {
       ...baseState,
       snakes: baseState.snakes.map(snake => ({ ...snake, body: [...snake.body] })),
+      ...(baseState.walls ? { walls: [...baseState.walls] } : {}),
+      ...(baseState.rattleWalls ? { rattleWalls: [...baseState.rattleWalls] } : {}),
     };
     if (settings.turnBased && !replayActive) {
       const showP1 = playMode === 'LOCAL_2P' || viewerSeat === 'p1';
       const showP2 = playMode === 'LOCAL_2P' || viewerSeat === 'p2';
+      const previewRattleWalls: Position[] = [];
 
       if (showP1 && !locks.p1 && moveBuffers.p1.length > 0) {
         const snake = stateCopy.snakes.find(candidate => candidate.id === 'p1');
-        if (snake) snake.body = computePreviewSnake(snake, moveBuffers.p1);
+        if (snake) {
+          const preview = computePreviewPlan(snake, moveBuffers.p1);
+          snake.body = preview.body;
+          previewRattleWalls.push(...preview.rattleWalls);
+        }
       }
       if (showP2 && !locks.p2 && moveBuffers.p2.length > 0) {
         const snake = stateCopy.snakes.find(candidate => candidate.id === 'p2');
-        if (snake) snake.body = computePreviewSnake(snake, moveBuffers.p2);
+        if (snake) {
+          const preview = computePreviewPlan(snake, moveBuffers.p2);
+          snake.body = preview.body;
+          previewRattleWalls.push(...preview.rattleWalls);
+        }
+      }
+      if (previewRattleWalls.length > 0) {
+        stateCopy.walls = [...(stateCopy.walls ?? []), ...previewRattleWalls];
+        stateCopy.rattleWalls = [...(stateCopy.rattleWalls ?? []), ...previewRattleWalls];
       }
     }
     return stateCopy;
@@ -532,11 +569,43 @@ const GameApp: React.FC<{ campaignPlaytestLevel: CampaignLevel | null }> = ({ ca
     const current = stateRef.current;
     if (current.phase === 'OVER' || inLobby || inOnlineLobby) return;
     const targetKey = getTargetKey(playerSlot);
+    if (choosingSkillMapRef.current[targetKey]) {
+      soundEngine.playTick();
+      setChoosingSkillMap(prev => {
+        const updated = { ...prev, [targetKey]: false };
+        choosingSkillMapRef.current = updated;
+        return updated;
+      });
+      return;
+    }
     const snake = current.snakes.find(s => s.id === targetKey);
     if (!snake || !snake.isAlive) return;
 
     const skillsAvail = current.skillsAvailable ?? settingsRef.current.skillsAvailable;
-    if (!canActivateSkill(snake, current, skillsAvail)) return;
+    if (!canActivateSkill(snake, current, skillsAvail)) {
+      soundEngine.playDenied();
+      return;
+    }
+    if (settingsRef.current.turnBased) {
+      if (locksRef.current[targetKey]) return;
+      const buf = moveBuffersRef.current[targetKey] ?? [];
+      if (buf.length >= snake.body.length) {
+        soundEngine.playDenied();
+        return;
+      }
+      const queuedSkills = buf.filter(entry => typeof entry !== 'string' && (entry.type === 'dart' || entry.type === 'rattle')).length;
+      if (!canAffordQueuedDart(snake.skillPoints, queuedSkills)) {
+        soundEngine.playDenied();
+        return;
+      }
+      if (snake.equippedSkill === 'rattle') {
+        const queuedRattles = buf.filter(entry => typeof entry !== 'string' && entry.type === 'rattle').length;
+        if (!canQueueRattleWithLength(snake.body.length, queuedRattles)) {
+          soundEngine.playDenied();
+          return;
+        }
+      }
+    }
 
     soundEngine.playTick();
     setChoosingSkillMap(prev => {
@@ -883,7 +952,17 @@ const GameApp: React.FC<{ campaignPlaytestLevel: CampaignLevel | null }> = ({ ca
         if (typeof entry === 'string') {
           queueSnakeDirection(snake, entry as Direction);
         } else if (entry.type === 'dart') {
-          queueSnakeSkill(snake, { skillId: 'dart', direction: entry.direction });
+          if (entry.direction) {
+            queueSnakeSkill(snake, { skillId: 'dart', direction: entry.direction });
+          } else {
+            queueSnakeDirection(snake, snake.direction);
+          }
+        } else if (entry.type === 'rattle') {
+          if (entry.direction) {
+            queueSnakeSkill(snake, { skillId: 'rattle', direction: entry.direction });
+          } else {
+            queueSnakeDirection(snake, snake.direction);
+          }
         } else {
           queueSnakeDirection(snake, entry.direction);
         }
@@ -1156,6 +1235,13 @@ const GameApp: React.FC<{ campaignPlaytestLevel: CampaignLevel | null }> = ({ ca
     const targetKey = getTargetKey(playerSlot);
     if (locksRef.current[targetKey]) return;
 
+    if (choosingSkillMapRef.current[targetKey]) {
+      setChoosingSkillMap(prev => {
+        const updated = { ...prev, [targetKey]: false };
+        choosingSkillMapRef.current = updated;
+        return updated;
+      });
+    }
     moveBuffersRef.current = { ...moveBuffersRef.current, [targetKey]: [] };
     setMoveBuffers({ ...moveBuffersRef.current });
     soundEngine.playTick();
@@ -1168,6 +1254,14 @@ const GameApp: React.FC<{ campaignPlaytestLevel: CampaignLevel | null }> = ({ ca
     const current = stateRef.current;
     if (current.phase === 'OVER' || inLobby || inOnlineLobby || !settingsRef.current.turnBased) return;
     const targetKey = getTargetKey(playerSlot, bridgeSeat);
+    // If [RATTLE] or [DART] was pressed without a following direction, fizzle cleanly
+    if (choosingSkillMapRef.current[targetKey]) {
+      setChoosingSkillMap(prev => {
+        const updated = { ...prev, [targetKey]: false };
+        choosingSkillMapRef.current = updated;
+        return updated;
+      });
+    }
     const buf = moveBuffersRef.current[targetKey];
     if (buf.length === 0 || locksRef.current[targetKey]) return;
 
@@ -1206,7 +1300,13 @@ const GameApp: React.FC<{ campaignPlaytestLevel: CampaignLevel | null }> = ({ ca
         choosingSkillMapRef.current = updated;
         return updated;
       });
-      // Queue dart as a buffer entry — no auto-lock, player continues planning
+      const skillId = currentSnake.equippedSkill;
+      const skillsAvail = current.skillsAvailable ?? settingsRef.current.skillsAvailable;
+      if (!skillId || !canActivateSkill(currentSnake, current, skillsAvail)) {
+        soundEngine.playDenied();
+        return false;
+      }
+      // Queue skill (dart or rattle) as a buffer entry — no auto-lock, player continues planning
       if (settingsRef.current.turnBased) {
         if (locksRef.current[targetKey]) return false;
         const buf = [...moveBuffersRef.current[targetKey]];
@@ -1219,16 +1319,26 @@ const GameApp: React.FC<{ campaignPlaytestLevel: CampaignLevel | null }> = ({ ca
           soundEngine.playDenied();
           return false;
         }
-        // Item 3d: escrow — direction first, then affordability. A dart rejected
+        // Item 3d: escrow — direction first, then affordability. A skill rejected
         // for illegal direction consumes no escrow. Reserved count is derived
         // from the buffer, so undo/clear refunds are automatic.
-        const queuedDarts = buf.filter(entry => typeof entry !== 'string' && entry.type === 'dart').length;
-        if (!canAffordQueuedDart(currentSnake.skillPoints, queuedDarts)) {
+        const queuedSkills = buf.filter(entry => typeof entry !== 'string' && (entry.type === 'dart' || entry.type === 'rattle')).length;
+        const canAfford = skillId === 'rattle'
+          ? canAffordQueuedRattle(currentSnake.skillPoints, queuedSkills)
+          : canAffordQueuedDart(currentSnake.skillPoints, queuedSkills);
+        if (!canAfford) {
           soundEngine.playDenied();
           return false;
         }
+        if (skillId === 'rattle') {
+          const queuedRattles = buf.filter(entry => typeof entry !== 'string' && entry.type === 'rattle').length;
+          if (!canQueueRattleWithLength(currentSnake.body.length, queuedRattles)) {
+            soundEngine.playDenied();
+            return false;
+          }
+        }
         soundEngine.playTick();
-        buf.push({ type: 'dart', direction: dir });
+        buf.push({ type: skillId, direction: dir });
         moveBuffersRef.current = { ...moveBuffersRef.current, [targetKey]: buf };
         setMoveBuffers({ ...moveBuffersRef.current });
       } else {
@@ -1236,9 +1346,13 @@ const GameApp: React.FC<{ campaignPlaytestLevel: CampaignLevel | null }> = ({ ca
           soundEngine.playDenied();
           return false;
         }
+        if (skillId === 'rattle' && currentSnake.body.length < 3) {
+          soundEngine.playDenied();
+          return false;
+        }
         soundEngine.playTick();
-        currentSnake.pendingSkill = { skillId: 'dart' as SkillId, direction: dir };
-        const snakeCopy = { ...currentSnake, pendingSkill: { skillId: 'dart' as SkillId, direction: dir } };
+        currentSnake.pendingSkill = { skillId, direction: dir };
+        const snakeCopy = { ...currentSnake, pendingSkill: { skillId, direction: dir } };
         setGameState(prev => ({
           ...prev,
           snakes: prev.snakes.map(s => s.id === targetKey ? snakeCopy : s),
@@ -2648,11 +2762,29 @@ const GameApp: React.FC<{ campaignPlaytestLevel: CampaignLevel | null }> = ({ ca
                     onClear={() => handleBufferClear(1)}
                     onSkill={() => handleSkillButton(1)}
                     choosingSkill={Boolean(choosingSkillMap[getTargetKey(1)])}
-                    canUseSkill={canActivateSkill(gameState.snakes.find(s => s.id === getTargetKey(1)), gameState, gameState.skillsAvailable ?? settings.skillsAvailable)}
+                    equippedSkill={controlsSnake?.equippedSkill ?? null}
+                    canUseSkill={(() => {
+                      const seat = getTargetKey(1);
+                      const snake = gameState.snakes.find(s => s.id === seat);
+                      if (!canActivateSkill(snake, gameState, gameState.skillsAvailable ?? settings.skillsAvailable)) {
+                        return false;
+                      }
+                      if (settings.turnBased && snake) {
+                        const buf = moveBuffers[seat] ?? [];
+                        const queuedSkills = buf.filter(e => e.type === 'dart' || e.type === 'rattle').length;
+                        if (!canAffordQueuedDart(snake.skillPoints, queuedSkills)) return false;
+                        if (snake.equippedSkill === 'rattle') {
+                          const queuedRattles = buf.filter(e => e.type === 'rattle').length;
+                          if (!canQueueRattleWithLength(snake.body.length, queuedRattles)) return false;
+                        }
+                      }
+                      return true;
+                    })()}
                     queue={settings.turnBased
                       ? moveBuffers[getTargetKey(1)]
                       : [controlsSnake.queuedDirection]
-                        .filter((direction): direction is Direction => direction !== null)}
+                        .filter((direction): direction is Direction => direction !== null)
+                        .map((direction): BufferEntry => ({ type: 'move', direction }))}
                     queueLimit={controlsSnake.body.length}
                     locked={locks[getTargetKey(1)]}
                     turnBased={settings.turnBased}

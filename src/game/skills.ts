@@ -1,10 +1,13 @@
 import { Direction, GameState, Snake, SkillId } from '../types/game';
 import { isOppositeDirection } from './engine';
 
+export const MIN_RATTLE_LENGTH = 3;
+
 export interface SkillDefinition {
   id: SkillId;
   name: string;
   cost: number;
+  minLength?: number;
 }
 
 export const SKILLS: Record<SkillId, SkillDefinition> = {
@@ -12,6 +15,12 @@ export const SKILLS: Record<SkillId, SkillDefinition> = {
     id: 'dart',
     name: 'DART',
     cost: 2,
+  },
+  rattle: {
+    id: 'rattle',
+    name: 'RATTLE',
+    cost: 2,
+    minLength: MIN_RATTLE_LENGTH,
   },
 };
 
@@ -46,6 +55,10 @@ export function canActivateSkill(
   if (!isSkillUnlocked(state, skillsAvailable)) return false;
   const def = SKILLS[snake.equippedSkill];
   if (!def) return false;
+  if (def.minLength !== undefined) {
+    const length = Array.isArray(snake.body) ? snake.body.length : 0;
+    if (length < def.minLength) return false;
+  }
   // Affordability reads the skill wallet, not the token count.
   return (snake.skillPoints ?? 0) >= def.cost;
 }
@@ -60,6 +73,20 @@ export function canAffordQueuedDart(skillPoints: number | undefined, queuedDarts
   return points - SKILLS.dart.cost * queuedDarts >= SKILLS.dart.cost;
 }
 
+export function canAffordQueuedRattle(skillPoints: number | undefined, queuedSkills: number): boolean {
+  const points = skillPoints ?? 0;
+  return points - SKILLS.rattle.cost * queuedSkills >= SKILLS.rattle.cost;
+}
+
+export function canQueueRattleWithLength(bodyLength: number | undefined, queuedRattles: number = 0): boolean {
+  const len = bodyLength ?? 0;
+  return len - queuedRattles >= MIN_RATTLE_LENGTH;
+}
+
 export function isValidDartDirection(facing: Direction, chosenDir: Direction): boolean {
+  return !isOppositeDirection(facing, chosenDir);
+}
+
+export function isValidRattleDirection(facing: Direction, chosenDir: Direction): boolean {
   return !isOppositeDirection(facing, chosenDir);
 }

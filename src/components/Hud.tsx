@@ -255,7 +255,7 @@ export const Hud: React.FC<HudProps> = ({
               buffer.map((entry, idx) => {
                 const dir = entry.direction;
                 const arrow = dir === 'UP' ? '↑' : dir === 'DOWN' ? '↓' : dir === 'LEFT' ? '←' : '→';
-                const label = entry.type === 'dart' ? `⚡${arrow}` : arrow;
+                const label = entry.type === 'dart' || entry.type === 'rattle' ? `⚡${arrow}` : arrow;
                 return (
                   <span key={idx} className="px-1 py-0.5 bg-[#0F380F] text-[#9BBC0F] text-[10px] leading-tight font-bold border border-[#0F380F] shrink-0">
                     {label}
@@ -316,7 +316,7 @@ export const Hud: React.FC<HudProps> = ({
                     {buffer.map(entry => {
                       const dir = entry.direction;
                       const arrow = dir === 'UP' ? '↑' : dir === 'DOWN' ? '↓' : dir === 'LEFT' ? '←' : '→';
-                      return entry.type === 'dart' ? `⚡${arrow}` : arrow;
+                      return entry.type === 'dart' || entry.type === 'rattle' ? `⚡${arrow}` : arrow;
                     }).join('')}
                   </span>
                   <span className="shrink-0 w-7 text-right text-base leading-none font-black tabular-nums">
@@ -432,7 +432,7 @@ export const Hud: React.FC<HudProps> = ({
               {(moveBuffers?.p2 ?? []).map((entry, index) => {
                 const dir = entry.direction;
                 const arrow = dir === 'UP' ? '↑' : dir === 'DOWN' ? '↓' : dir === 'LEFT' ? '←' : '→';
-                const label = entry.type === 'dart' ? `⚡${arrow}` : arrow;
+                const label = entry.type === 'dart' || entry.type === 'rattle' ? `⚡${arrow}` : arrow;
                 return (
                   <span key={`${dir}-${index}`} className="shrink-0 bg-[#0F380F] px-1 py-0.5 leading-none text-[#9BBC0F]">
                     {label}

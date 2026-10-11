@@ -28,7 +28,7 @@ export function getExportableCampaignLevel(level: CampaignLevel): CampaignLevel 
     skillsAvailable: level.skillsAvailable ?? 'after_race',
     spawns: getEnabledSpawns(level).map(({ enabled: _enabled, ...spawn }) => ({
       ...spawn,
-      equippedSkill: isAvalenaStyle(spawn.aiStyle) ? 'dart' : (spawn.equippedSkill ?? null),
+      equippedSkill: spawn.equippedSkill ?? (isAvalenaStyle(spawn.aiStyle) ? 'dart' : null),
     })),
   };
 }
@@ -167,7 +167,7 @@ export function createCampaignPlaytestState(
       // no hardcoded default; the level editor's startingSkillPoints controls it.
       score: spawn.startingScore ?? 0,
       skillPoints: spawn.startingSkillPoints ?? 0,
-      equippedSkill: avalena ? 'dart' : (spawn.equippedSkill ?? null),
+      equippedSkill: spawn.equippedSkill ?? (avalena ? 'dart' : null),
       pendingSkill: null,
     };
   });
@@ -245,7 +245,7 @@ export function parseCampaignLevelJson(jsonText: string): CampaignLevel {
       startingScore: spawn.startingScore ?? 0,
       startingSkillPoints: spawn.startingSkillPoints ?? (isAvalenaStyle(spawn.aiStyle) ? 3 : 0),
       aiStyle: spawn.aiStyle ?? 'GREEDY',
-      equippedSkill: isAvalenaStyle(spawn.aiStyle) ? 'dart' : (spawn.equippedSkill ?? null),
+      equippedSkill: spawn.equippedSkill ?? (isAvalenaStyle(spawn.aiStyle) ? 'dart' : null),
     })),
     tokens: {
       ...parsed.tokens,
@@ -313,7 +313,7 @@ export function createMultiplayerCustomLevelState(
       score: spawn.startingScore ?? 0,
       skillPoints: spawn.startingSkillPoints ?? 0,
       isAlive: true,
-      equippedSkill: isAvalenaStyle(spawn.aiStyle) ? 'dart' : (spawn.equippedSkill ?? null),
+      equippedSkill: spawn.equippedSkill ?? (isAvalenaStyle(spawn.aiStyle) ? 'dart' : null),
       pendingSkill: null,
     };
   });

@@ -9,6 +9,7 @@ export function cloneGameState(state: GameState, gridSize?: number): GameState {
     totalThinkTime: { ...state.totalThinkTime },
     tokens: state.tokens.map(token => ({ ...token })),
     walls: (state.walls ?? []).map(wall => ({ ...wall })),
+    ...(state.rattleWalls ? { rattleWalls: state.rattleWalls.map(wall => ({ ...wall })) } : {}),
     snakes: state.snakes.map(snake => ({
       ...snake,
       body: snake.body.map(position => ({ ...position })),

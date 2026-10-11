@@ -826,6 +826,7 @@ export const LevelEditor: React.FC = () => {
                       className="w-full bg-[#9BBC0F] border-2 border-[#0F380F] px-2 py-1 font-mono font-bold outline-none">
                       <option value="">NONE</option>
                       <option value="dart">DART</option>
+                      <option value="rattle">RATTLE</option>
                     </select>
                   </label>
                   <div className="col-span-2 text-[9px] font-bold opacity-80">

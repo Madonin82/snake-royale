@@ -382,3 +382,152 @@ test('snipe on step 0: simultaneous head meeting, darter wins tiebreak → oppon
   assert.equal(afterP2.deathReason, 'OPPONENT');
   assert.equal(afterP1.isAlive, true);
 });
+
+test('rattle detaches tail tip into permanent wall, moves 1 cell in chosen direction, reduces length by 1, and costs 2 SP', () => {
+  const state = createInitialState();
+  const settings = { ...DEFAULT_SETTINGS, skillsAvailable: 'immediate' as const };
+  state.tokens = [];
+  state.skillsAvailable = 'immediate';
+  const p1 = state.snakes.find(snake => snake.id === 'p1')!;
+  p1.body = [{ x: 2, y: 4 }, { x: 1, y: 4 }, { x: 0, y: 4 }];
+  p1.direction = 'RIGHT';
+  p1.equippedSkill = 'rattle';
+  p1.skillPoints = 4;
+  const p2 = state.snakes.find(snake => snake.id === 'p2')!;
+  p2.body = [{ x: 7, y: 7 }, { x: 7, y: 6 }, { x: 7, y: 5 }];
+  p2.direction = 'UP';
+
+  assert.equal(queueSnakeSkill(p1, { skillId: 'rattle', direction: 'UP' }), true);
+  const { nextState } = processGameTick(state, settings, 0);
+  const afterP1 = nextState.snakes.find(snake => snake.id === 'p1')!;
+
+  // Moved UP to (2,3), length reduced from 3 to 2, tail (0,4) became wall
+  assert.deepEqual(afterP1.body, [{ x: 2, y: 3 }, { x: 2, y: 4 }]);
+  assert.equal(afterP1.body.length, 2);
+  assert.equal(afterP1.skillPoints, 2);
+  assert.deepEqual(nextState.rattleWalls, [{ x: 0, y: 4 }]);
+  assert.ok(nextState.walls?.some(w => w.x === 0 && w.y === 4));
+
+  // Wall persists on subsequent ticks
+  const { nextState: tick2 } = processGameTick(nextState, settings, 0);
+  assert.deepEqual(tick2.rattleWalls, [{ x: 0, y: 4 }]);
+  assert.ok(tick2.walls?.some(w => w.x === 0 && w.y === 4));
+});
+
+test('hitting a rattle wall kills both opponents and the placer', () => {
+  const state = createInitialState();
+  const settings = { ...DEFAULT_SETTINGS, skillsAvailable: 'immediate' as const };
+  state.tokens = [];
+  state.skillsAvailable = 'immediate';
+  const p1 = state.snakes.find(snake => snake.id === 'p1')!;
+  const p2 = state.snakes.find(snake => snake.id === 'p2')!;
+
+  // P1 places rattle wall at (2,4) while moving UP from (4,4)
+  p1.body = [{ x: 4, y: 4 }, { x: 3, y: 4 }, { x: 2, y: 4 }];
+  p1.direction = 'RIGHT';
+  p1.equippedSkill = 'rattle';
+  p1.skillPoints = 2;
+
+  // P2 moves RIGHT into (2,4) on the same turn
+  p2.body = [{ x: 1, y: 4 }, { x: 0, y: 4 }, { x: 0, y: 5 }];
+  p2.direction = 'RIGHT';
+
+  queueSnakeSkill(p1, { skillId: 'rattle', direction: 'UP' });
+  const { nextState } = processGameTick(state, settings, 0);
+  const afterP2 = nextState.snakes.find(snake => snake.id === 'p2')!;
+  assert.equal(afterP2.isAlive, false);
+  assert.equal(afterP2.deathReason, 'WALL');
+  assert.deepEqual(afterP2.deathPosition, { x: 2, y: 4 });
+});
+
+test('placer hitting their own rattle wall dies with WALL reason', () => {
+  const state = createInitialState();
+  const settings = { ...DEFAULT_SETTINGS, skillsAvailable: 'immediate' as const };
+  state.tokens = [];
+  state.skillsAvailable = 'immediate';
+  const p1 = state.snakes.find(snake => snake.id === 'p1')!;
+  const p2 = state.snakes.find(snake => snake.id === 'p2')!;
+  p2.body = [{ x: 7, y: 7 }, { x: 7, y: 6 }, { x: 7, y: 5 }];
+  p2.direction = 'UP';
+
+  // P1 in a 2x2 loop where tail tip is at (1,2) and head is at (2,2) facing UP
+  p1.body = [{ x: 2, y: 2 }, { x: 2, y: 3 }, { x: 1, y: 3 }, { x: 1, y: 2 }];
+  p1.direction = 'UP';
+  p1.equippedSkill = 'rattle';
+  p1.skillPoints = 2;
+
+  // Rattle LEFT moves head into (1,2), where tail tip just detached into a wall
+  queueSnakeSkill(p1, { skillId: 'rattle', direction: 'LEFT' });
+  const { nextState } = processGameTick(state, settings, 0);
+  const afterP1 = nextState.snakes.find(snake => snake.id === 'p1')!;
+  assert.equal(afterP1.isAlive, false);
+  assert.equal(afterP1.deathReason, 'WALL');
+  assert.deepEqual(afterP1.deathPosition, { x: 1, y: 2 });
+});
+
+test('darting through a rattle wall cell kills the darter', () => {
+  const state = createInitialState();
+  const settings = { ...DEFAULT_SETTINGS, skillsAvailable: 'immediate' as const };
+  state.tokens = [];
+  state.skillsAvailable = 'immediate';
+  state.walls = [{ x: 3, y: 4 }];
+  state.rattleWalls = [{ x: 3, y: 4 }];
+
+  const p1 = state.snakes.find(snake => snake.id === 'p1')!;
+  p1.body = [{ x: 1, y: 4 }, { x: 0, y: 4 }, { x: 0, y: 5 }];
+  p1.direction = 'RIGHT';
+  p1.equippedSkill = 'dart';
+  p1.skillPoints = 4;
+
+  queueSnakeSkill(p1, { skillId: 'dart', direction: 'RIGHT' });
+  const { nextState } = processGameTick(state, settings, 0);
+  const afterP1 = nextState.snakes.find(snake => snake.id === 'p1')!;
+  assert.equal(afterP1.isAlive, false);
+  assert.equal(afterP1.deathReason, 'WALL');
+  assert.deepEqual(afterP1.deathPosition, { x: 3, y: 4 });
+});
+
+test('rattle cannot activate below length 3 or with fewer than 2 SP, and fizzles without direction', () => {
+  const state = createInitialState();
+  const settings = { ...DEFAULT_SETTINGS, skillsAvailable: 'immediate' as const };
+  state.tokens = [];
+  state.skillsAvailable = 'immediate';
+  const p1 = state.snakes.find(snake => snake.id === 'p1')!;
+  p1.body = [{ x: 2, y: 4 }, { x: 1, y: 4 }]; // length 2 (< 3)
+  p1.direction = 'RIGHT';
+  p1.equippedSkill = 'rattle';
+  p1.skillPoints = 4;
+  const p2 = state.snakes.find(snake => snake.id === 'p2')!;
+  p2.body = [{ x: 7, y: 7 }, { x: 7, y: 6 }, { x: 7, y: 5 }];
+  p2.direction = 'UP';
+
+  // Rejected at queue time when length < 3
+  assert.equal(queueSnakeSkill(p1, { skillId: 'rattle', direction: 'UP' }), false);
+  // Even if forced onto pendingSkill, fizzles on tick
+  p1.pendingSkill = { skillId: 'rattle', direction: 'UP' };
+  const resLen2 = processGameTick(state, settings, 0).nextState;
+  const afterLen2 = resLen2.snakes.find(s => s.id === 'p1')!;
+  assert.equal(afterLen2.body.length, 2);
+  assert.equal(afterLen2.skillPoints, 4);
+  assert.equal(resLen2.rattleWalls ?? undefined, undefined);
+
+  // Rattle without direction fizzles cleanly (no SP spent, no wall placed)
+  p1.body = [{ x: 2, y: 4 }, { x: 1, y: 4 }, { x: 0, y: 4 }];
+  assert.equal(queueSnakeSkill(p1, { skillId: 'rattle' } as any), false);
+  p1.pendingSkill = { skillId: 'rattle' } as any;
+  const resNoDir = processGameTick(state, settings, 0).nextState;
+  const afterNoDir = resNoDir.snakes.find(s => s.id === 'p1')!;
+  assert.equal(afterNoDir.body.length, 3);
+  assert.equal(afterNoDir.skillPoints, 4);
+  assert.equal(resNoDir.rattleWalls ?? undefined, undefined);
+
+  // Rattle with < 2 SP fizzles cleanly
+  p1.skillPoints = 1;
+  queueSnakeSkill(p1, { skillId: 'rattle', direction: 'UP' });
+  const resLowSp = processGameTick(state, settings, 0).nextState;
+  const afterLowSp = resLowSp.snakes.find(s => s.id === 'p1')!;
+  assert.equal(afterLowSp.body.length, 3);
+  assert.equal(afterLowSp.skillPoints, 1);
+  assert.equal(resLowSp.rattleWalls ?? undefined, undefined);
+});
+

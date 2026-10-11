@@ -194,8 +194,18 @@ export function queueSnakeSkill(snake: Snake, skill: PendingSkill | null): boole
     snake.pendingSkill = null;
     return true;
   }
+  if (!skill.direction) {
+    snake.pendingSkill = null;
+    return false;
+  }
+  if (snake.equippedSkill && snake.equippedSkill !== skill.skillId) {
+    return false;
+  }
   const effectiveFacing = snake.queuedDirection || snake.direction;
   if (!isValidDartDirection(effectiveFacing, skill.direction)) {
+    return false;
+  }
+  if (skill.skillId === 'rattle' && (!Array.isArray(snake.body) || snake.body.length < 3)) {
     return false;
   }
   snake.pendingSkill = { ...skill };
@@ -306,6 +316,8 @@ export function processGameTick(
     phaseTimeRemaining: Math.max(0, currentState.phaseTimeRemaining - deltaMs),
     snakes: currentState.snakes.map(snake => ({ ...snake, body: [...snake.body] })),
     tokens: [...currentState.tokens],
+    ...(currentState.walls ? { walls: currentState.walls.map(w => ({ ...w })) } : {}),
+    ...(currentState.rattleWalls ? { rattleWalls: currentState.rattleWalls.map(w => ({ ...w })) } : {}),
     ...(currentState.campaignTokenRules
       ? { campaignTokenRules: { ...currentState.campaignTokenRules } }
       : {}),
@@ -422,9 +434,10 @@ export function processGameTick(
   const snakes = state.snakes;
   const effectiveSkillsAvailable = state.skillsAvailable ?? settings.skillsAvailable ?? 'after_race';
 
-  // Determine which snakes are executing Dart this tick (evaluated before phase transition or after? Wait: if after_race unlocks when shrink phase starts, state.phase is already updated in step 1 or already SHRINKING at start of turn)
+  // Determine which snakes are executing Dart or Rattle this tick (evaluated before phase transition or after? Wait: if after_race unlocks when shrink phase starts, state.phase is already updated in step 1 or already SHRINKING at start of turn)
   // Check both currentState (at planning time) and state (at resolution time) so if unlocked at planning time or resolution time it works cleanly.
   const activeDarts = new Map<string, Direction>();
+  const activeRattles = new Map<string, Direction>();
   for (const snake of snakes) {
     if (snake.queuedDirection) {
       snake.direction = snake.queuedDirection;
@@ -435,14 +448,36 @@ export function processGameTick(
       snake.pendingSkill = null;
       const unlockedNow = canActivateSkill(snake, currentState, effectiveSkillsAvailable) ||
         canActivateSkill(snake, state, effectiveSkillsAvailable);
-      if (unlockedNow && isValidDartDirection(snake.direction, dartDir)) {
+      if (
+        snake.equippedSkill === 'dart' &&
+        dartDir &&
+        unlockedNow &&
+        isValidDartDirection(snake.direction, dartDir)
+      ) {
         activeDarts.set(snake.id, dartDir);
       }
+    } else if (snake.pendingSkill && snake.pendingSkill.skillId === 'rattle') {
+      const rattleDir = snake.pendingSkill.direction;
+      snake.pendingSkill = null;
+      const unlockedNow = canActivateSkill(snake, currentState, effectiveSkillsAvailable) ||
+        canActivateSkill(snake, state, effectiveSkillsAvailable);
+      if (
+        snake.equippedSkill === 'rattle' &&
+        rattleDir &&
+        snake.body.length >= 3 &&
+        unlockedNow &&
+        isValidDartDirection(snake.direction, rattleDir)
+      ) {
+        activeRattles.set(snake.id, rattleDir);
+      }
+    } else if (snake.pendingSkill) {
+      snake.pendingSkill = null;
     }
   }
 
   const isPermanentWall = (position: Position) =>
-    state.walls?.some(wall => wall.x === position.x && wall.y === position.y) ?? false;
+    (state.walls?.some(wall => wall.x === position.x && wall.y === position.y) ?? false) ||
+    (state.rattleWalls?.some(wall => wall.x === position.x && wall.y === position.y) ?? false);
 
   const totalSteps = activeDarts.size > 0 ? 3 : 1;
   let totalTokensConsumedCount = 0;
@@ -478,11 +513,22 @@ export function processGameTick(
     if (movingIndices.length === 0) break;
 
     // Darting snakes move in the dart direction from step 0 (all 3 cells in dart dir)
+    // Rattling snakes detach their tail tip as a permanent wall and move in the rattle direction
     if (step === 0) {
       for (const idx of movingIndices) {
         const dartDir = activeDarts.get(snakes[idx].id);
         if (dartDir) {
           snakes[idx].direction = dartDir;
+        }
+        const rattleDir = activeRattles.get(snakes[idx].id);
+        if (rattleDir) {
+          snakes[idx].direction = rattleDir;
+          const detachedTail = snakes[idx].body.pop();
+          if (detachedTail) {
+            const wallCell = { x: detachedTail.x, y: detachedTail.y };
+            state.walls = [...(state.walls ?? []), wallCell];
+            state.rattleWalls = [...(state.rattleWalls ?? []), wallCell];
+          }
         }
       }
     }
@@ -613,6 +659,9 @@ export function processGameTick(
   for (const snake of snakes) {
     if (activeDarts.has(snake.id)) {
       snake.skillPoints = Math.max(0, (snake.skillPoints ?? 0) - SKILLS.dart.cost);
+    }
+    if (activeRattles.has(snake.id)) {
+      snake.skillPoints = Math.max(0, (snake.skillPoints ?? 0) - SKILLS.rattle.cost);
     }
   }
 

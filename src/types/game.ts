@@ -1,6 +1,6 @@
 export type Direction = 'UP' | 'DOWN' | 'LEFT' | 'RIGHT';
 
-export type SkillId = 'dart';
+export type SkillId = 'dart' | 'rattle';
 
 export type SkillsAvailableConfig = 'immediate' | 'after_race' | `after_turns:${number}`;
 
@@ -10,7 +10,7 @@ export interface PendingSkill {
 }
 
 export interface BufferEntry {
-  type: 'move' | 'dart';
+  type: 'move' | 'dart' | 'rattle';
   direction: Direction;
 }
 
@@ -93,6 +93,7 @@ export interface GameState {
     surviveResults: boolean[];
   };
   walls?: Position[];
+  rattleWalls?: Position[];
   snakes: Snake[];
   ringInset: number; // 0 for full 8x8, 1 for 6x6, 2 for 4x4, 3 for 2x2
   isTelegraphingShrink: boolean;

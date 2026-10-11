@@ -78,7 +78,15 @@ export function computeTurnLedger(
         lockTimeMs = Math.round(currentState.lastTurnTimes[seat] * 1000);
       }
 
-      const arrows = decision ? decision.queue.map(d => d === 'UP' ? '↑' : d === 'DOWN' ? '↓' : d === 'LEFT' ? '←' : '→') : [];
+      const arrows = decision
+        ? decision.queue.map(entry => {
+            const d = typeof entry === 'string' ? entry : entry.direction;
+            const arrow = d === 'UP' ? '↑' : d === 'DOWN' ? '↓' : d === 'LEFT' ? '←' : '→';
+            return typeof entry !== 'string' && (entry.type === 'dart' || entry.type === 'rattle')
+              ? `⚡${arrow}`
+              : arrow;
+          })
+        : [];
 
       if (decision || arrows.length > 0 || scoreDelta !== 0 || terminalResult) {
         ledger.push({

@@ -162,7 +162,7 @@ export function parseAndValidateReplayData(rawText: string): {
         if (typeof entry === 'string') return validDirections.includes(entry as Direction);
         if (typeof entry === 'object' && entry !== null) {
           const e = entry as { type?: unknown; direction?: unknown };
-          return (e.type === 'move' || e.type === 'dart') && validDirections.includes(e.direction as Direction);
+          return (e.type === 'move' || e.type === 'dart' || e.type === 'rattle') && validDirections.includes(e.direction as Direction);
         }
         return false;
       }) &&

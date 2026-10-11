@@ -1,5 +1,5 @@
 import React from 'react';
-import { BufferEntry, Direction } from '../types/game';
+import { BufferEntry, Direction, SkillId } from '../types/game';
 import { ArrowUp, ArrowDown, ArrowLeft, ArrowRight } from 'lucide-react';
 
 interface ControlsOverlayProps {
@@ -10,6 +10,7 @@ interface ControlsOverlayProps {
   onSkill?: () => void;
   choosingSkill?: boolean;
   canUseSkill?: boolean;
+  equippedSkill?: SkillId | null;
   queue: BufferEntry[];
   queueLimit: number;
   locked: boolean;
@@ -18,9 +19,10 @@ interface ControlsOverlayProps {
 }
 
 export const ControlsOverlay: React.FC<ControlsOverlayProps> = ({
-  onDirection, onLock, onUndo, onClear, onSkill, choosingSkill = false, canUseSkill = false, queue, queueLimit, locked, turnBased,
+  onDirection, onLock, onUndo, onClear, onSkill, choosingSkill = false, canUseSkill = false, equippedSkill = null, queue, queueLimit, locked, turnBased,
   localTwoPlayer = false,
 }) => {
+  const skillLabel = equippedSkill === 'rattle' ? 'RATTLE' : 'DART';
   return (
     <>
     <div className="legacy-mobile-controls w-full max-w-[340px] sm:hidden flex flex-col items-center py-2 select-none">
@@ -74,14 +76,15 @@ export const ControlsOverlay: React.FC<ControlsOverlayProps> = ({
             <button
               type="button"
               onClick={onSkill}
-              className={`absolute top-1 left-1/2 -translate-x-1/2 w-10 h-10 rounded-full border-2 border-[#0F380F] flex items-center justify-center font-black text-[10px] cursor-pointer shadow-[2px_2px_0px_#0F380F] ${
+              disabled={!canUseSkill && !choosingSkill}
+              className={`absolute top-1 left-1/2 -translate-x-1/2 w-10 h-10 rounded-full border-2 border-[#0F380F] flex items-center justify-center font-black text-[10px] cursor-pointer disabled:cursor-not-allowed shadow-[2px_2px_0px_#0F380F] ${
                 choosingSkill
                   ? 'bg-[#E53935] text-white animate-pulse'
                   : canUseSkill
                   ? 'bg-[#0F380F] text-[#9BBC0F]'
                   : 'bg-[#306230]/50 text-[#9BBC0F]/60'
               }`}
-              title="Dart Skill (Costs 2 tokens)"
+              title={`${skillLabel} Skill (Costs 2 SP)`}
             >
               ⚡
             </button>
@@ -115,7 +118,7 @@ export const ControlsOverlay: React.FC<ControlsOverlayProps> = ({
         </div>
       </div>
       <div className="text-[9px] font-mono font-bold text-center mt-1.5 opacity-90 tracking-tight">
-        {choosingSkill ? '🎯 CHOOSE DART DIRECTION (Fwd/L/R) • B/E to cancel' : localTwoPlayer ? 'Plan: D-pad P1 • B undo • Y clear • E skill • P1 LOCK' : 'Plan: D-pad queue • B undo • Y clear • E skill • A lock'}
+        {choosingSkill ? `🎯 CHOOSE ${skillLabel} DIRECTION (Fwd/L/R) • B/E to cancel` : localTwoPlayer ? 'Plan: D-pad P1 • B undo • Y clear • E skill • P1 LOCK' : 'Plan: D-pad queue • B undo • Y clear • E skill • A lock'}
       </div>
     </div>
     <div className="portrait-controls-row hidden w-full min-h-9 [@media(max-height:540px)]:min-h-7 items-center gap-1.5 font-mono select-none shrink-0">
@@ -131,12 +134,13 @@ export const ControlsOverlay: React.FC<ControlsOverlayProps> = ({
         <button
           type="button"
           onClick={onSkill}
-          className={`shrink-0 h-9 [@media(max-height:540px)]:h-7 border-2 border-[#0F380F] px-2 text-[11px] font-black cursor-pointer flex items-center justify-center ${
+          disabled={!canUseSkill && !choosingSkill}
+          className={`shrink-0 h-9 [@media(max-height:540px)]:h-7 border-2 border-[#0F380F] px-2 text-[11px] font-black cursor-pointer disabled:cursor-not-allowed flex items-center justify-center ${
             choosingSkill ? 'bg-[#E53935] text-white animate-pulse' : canUseSkill ? 'bg-[#0F380F] text-[#9BBC0F]' : 'bg-[#306230]/50 text-[#9BBC0F]/60'
           }`}
-          title="Activate Dart Skill"
+          title={`Activate ${skillLabel} Skill`}
         >
-          {choosingSkill ? '🎯 CHOOSE DIR' : '⚡ DART'}
+          {choosingSkill ? '🎯 CHOOSE DIR' : `⚡ ${skillLabel}`}
         </button>
       )}
       <div className="flex min-w-0 min-h-9 [@media(max-height:540px)]:min-h-7 flex-1 flex-wrap items-center gap-1 border-2 border-dashed border-[#0F380F] bg-[#8BAC0F] px-2 py-1 text-[10px] font-bold text-[#0F380F] tabular-nums">
@@ -145,7 +149,7 @@ export const ControlsOverlay: React.FC<ControlsOverlayProps> = ({
           {queue.map((entry, index) => {
             const dir = entry.direction;
             const arrow = dir === 'UP' ? '↑' : dir === 'DOWN' ? '↓' : dir === 'LEFT' ? '←' : '→';
-            const label = entry.type === 'dart' ? `⚡${arrow}` : arrow;
+            const label = entry.type === 'dart' || entry.type === 'rattle' ? `⚡${arrow}` : arrow;
             return (
               <span key={`${dir}-${index}`} className="shrink-0 bg-[#0F380F] px-1 py-0.5 leading-none text-[#9BBC0F]">
                 {label}
