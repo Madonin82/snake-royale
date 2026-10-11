@@ -749,9 +749,17 @@ const GameApp: React.FC<{ campaignPlaytestLevel: CampaignLevel | null }> = ({ ca
     // lock persists — their queued moves are their own commitment.)
     // Only for actual AI snakes: in LOCAL_2P, P2 is human and their buffer
     // must persist like P1's.
+    // Once the AI's plan is in the visible buffer and locked, it cannot be
+    // changed until all moves are executed and the buffer is empty. Only
+    // replan when there's nothing left to execute.
     if (isBuiltInAiActive()) {
       for (const snake of current.snakes) {
         if (snake.isAlive && snake.id !== 'p1') {
+          const buf = moveBuffersRef.current[snake.id];
+          const isLocked = locksRef.current[snake.id];
+          if (isLocked && buf && buf.length > 0) {
+            continue; // Locked plan still executing — don't wipe it.
+          }
           moveBuffersRef.current[snake.id] = [];
           locksRef.current[snake.id] = false;
         }
