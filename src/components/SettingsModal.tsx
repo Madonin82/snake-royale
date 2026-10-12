@@ -2,9 +2,19 @@ import React, { useState, useEffect, useCallback } from 'react';
 import { GameSettings } from '../types/game';
 import { soundEngine } from '../audio/soundEngine';
 import { GamepadMenuAction } from '../game/gamepad';
+import { validateEmailAuthForm } from '../game/authValidation';
 import { ADMIN_UIDS, auth, signOutToAnonymous, rtdb } from '../firebase';
-import { GoogleAuthProvider, onAuthStateChanged, signInWithPopup, User } from 'firebase/auth';
-import { Settings, Volume2, VolumeX, X, Grid, Gauge, Tv, Trash2 } from 'lucide-react';
+import {
+  createUserWithEmailAndPassword,
+  EmailAuthProvider,
+  GoogleAuthProvider,
+  linkWithCredential,
+  onAuthStateChanged,
+  signInWithEmailAndPassword,
+  signInWithPopup,
+  User,
+} from 'firebase/auth';
+import { Settings, Volume2, VolumeX, X, Grid, Gauge, Tv, Trash2, Mail } from 'lucide-react';
 import { onValue, ref, remove } from 'firebase/database';
 
 interface SettingsModalProps {
@@ -14,7 +24,6 @@ interface SettingsModalProps {
   onUpdateSettings: (newSettings: Partial<GameSettings>) => void;
   isOnlineGuest?: boolean;
   onRegisterHandler?: (handler: ((action: GamepadMenuAction) => void) | null) => void;
-  onNavigateToEditor: () => void;
 }
 
 export const SettingsModal: React.FC<SettingsModalProps> = ({
@@ -24,7 +33,6 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
   onUpdateSettings,
   isOnlineGuest = false,
   onRegisterHandler,
-  onNavigateToEditor,
 }) => {
   const [focusIndex, setFocusIndex] = useState<number>(0);
   const [signedInUser, setSignedInUser] = useState<User | null>(auth.currentUser);
@@ -39,6 +47,11 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
   const [confirmDeleteRoomId, setConfirmDeleteRoomId] = useState<string | null>(null);
   const [authBusy, setAuthBusy] = useState<boolean>(false);
   const [authError, setAuthError] = useState<string | null>(null);
+  const [showEmailAuth, setShowEmailAuth] = useState<boolean>(false);
+  const [emailAuthMode, setEmailAuthMode] = useState<'SIGN_IN' | 'SIGN_UP'>('SIGN_IN');
+  const [emailInput, setEmailInput] = useState<string>('');
+  const [passwordInput, setPasswordInput] = useState<string>('');
+  const [confirmPasswordInput, setConfirmPasswordInput] = useState<string>('');
 
   useEffect(() => {
     if (!signedInUser || !ADMIN_UIDS.includes(signedInUser.uid)) return;
@@ -74,7 +87,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
     }
   };
 
-  type SettingsRow = 'STYLE' | 'TURNS' | 'GRID' | 'TICKS' | 'THINK_TIME' | 'SOUND' | 'CRT' | 'ACCOUNT' | 'ADMIN' | 'EDITOR' | 'CLOSE';
+  type SettingsRow = 'STYLE' | 'TURNS' | 'GRID' | 'TICKS' | 'THINK_TIME' | 'SOUND' | 'CRT' | 'ACCOUNT' | 'ADMIN' | 'CLOSE';
 
   const baseRows: SettingsRow[] = isOnlineGuest
     ? ['SOUND', 'CRT', 'ACCOUNT', 'CLOSE']
@@ -83,7 +96,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
     : ['STYLE', 'GRID', 'TICKS', 'SOUND', 'CRT', 'ACCOUNT', 'CLOSE'];
 
   const rows: SettingsRow[] = (signedInUser && ADMIN_UIDS.includes(signedInUser.uid))
-    ? [...baseRows.slice(0, -1), 'ADMIN', 'EDITOR', 'CLOSE']
+    ? [...baseRows.slice(0, -1), 'ADMIN', 'CLOSE']
     : baseRows;
 
   const currentRow = rows[focusIndex] || rows[0];
@@ -100,6 +113,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
     setAuthError(null);
     try {
       await signInWithPopup(auth, new GoogleAuthProvider());
+      setShowEmailAuth(false);
     } catch (error) {
       const code = typeof error === 'object' && error !== null && 'code' in error
         ? String(error.code)
@@ -113,11 +127,82 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
     }
   }, []);
 
+  const handleEmailAuthSubmit = useCallback(async (e?: React.FormEvent) => {
+    if (e) e.preventDefault();
+    setAuthError(null);
+
+    const validation = validateEmailAuthForm({
+      mode: emailAuthMode,
+      email: emailInput,
+      password: passwordInput,
+      confirmPassword: confirmPasswordInput,
+    });
+    if (!validation.valid) {
+      setAuthError(validation.error);
+      soundEngine.playDenied();
+      return;
+    }
+
+    setAuthBusy(true);
+    try {
+      if (emailAuthMode === 'SIGN_IN') {
+        await signInWithEmailAndPassword(auth, validation.trimmedEmail, passwordInput);
+      } else {
+        if (auth.currentUser && auth.currentUser.isAnonymous) {
+          try {
+            const credential = EmailAuthProvider.credential(validation.trimmedEmail, passwordInput);
+            await linkWithCredential(auth.currentUser, credential);
+          } catch (linkError) {
+            const linkCode = typeof linkError === 'object' && linkError !== null && 'code' in linkError
+              ? String(linkError.code)
+              : '';
+            if (linkCode === 'auth/credential-already-in-use' || linkCode === 'auth/email-already-in-use') {
+              throw linkError;
+            }
+            await createUserWithEmailAndPassword(auth, validation.trimmedEmail, passwordInput);
+          }
+        } else {
+          await createUserWithEmailAndPassword(auth, validation.trimmedEmail, passwordInput);
+        }
+      }
+      soundEngine.playMenuSelect();
+      setEmailInput('');
+      setPasswordInput('');
+      setConfirmPasswordInput('');
+      setShowEmailAuth(false);
+    } catch (error) {
+      const code = typeof error === 'object' && error !== null && 'code' in error
+        ? String(error.code)
+        : '';
+      let friendlyMessage = error instanceof Error ? error.message : String(error);
+      if (code === 'auth/invalid-credential' || code === 'auth/wrong-password' || code === 'auth/user-not-found') {
+        friendlyMessage = 'Invalid email or password.';
+      } else if (code === 'auth/email-already-in-use' || code === 'auth/credential-already-in-use') {
+        friendlyMessage = 'An account with this email already exists. Try signing in instead.';
+      } else if (code === 'auth/weak-password') {
+        friendlyMessage = 'Password is too weak (must be at least 6 characters).';
+      } else if (code === 'auth/invalid-email') {
+        friendlyMessage = 'Invalid email address format.';
+      } else if (code === 'auth/operation-not-allowed') {
+        friendlyMessage = 'Email/Password sign-in is not enabled in the Firebase Console yet.';
+      }
+      setAuthError(
+        `${emailAuthMode === 'SIGN_UP' ? 'Sign-up' : 'Sign-in'} failed: ${friendlyMessage}`,
+      );
+      soundEngine.playDenied();
+    } finally {
+      setAuthBusy(false);
+    }
+  }, [emailAuthMode, emailInput, passwordInput, confirmPasswordInput]);
+
   const handleSignOut = useCallback(async () => {
     setAuthBusy(true);
     setAuthError(null);
     try {
       await signOutToAnonymous();
+      setShowEmailAuth(false);
+      setPasswordInput('');
+      setConfirmPasswordInput('');
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       setAuthError(`Sign out failed: ${message}`);
@@ -201,10 +286,6 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
               else void handleGoogleSignIn();
             }
             break;
-          case 'EDITOR':
-            onNavigateToEditor();
-            onClose();
-            break;
           case 'CLOSE':
             onClose();
             break;
@@ -268,8 +349,6 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
           case 'CRT':
             onUpdateSettings({ crtFilterEnabled: !settings.crtFilterEnabled });
             break;
-          case 'EDITOR':
-            break;
           case 'CLOSE':
             break;
         }
@@ -331,7 +410,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
         )}
 
         {/* Options */}
-        <div className="flex flex-col gap-1.5 text-xs font-bold flex-1 justify-between min-h-0">
+        <div className="flex flex-col gap-1.5 text-xs font-bold flex-1 justify-between min-h-0 overflow-y-auto pr-0.5">
           {/* Play Style */}
           {!isOnlineGuest && (
             <div
@@ -588,7 +667,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
 
           {/* Optional account sign-in */}
           <div
-            className={`flex flex-col gap-1 p-2 border transition-all ${
+            className={`flex flex-col gap-1.5 p-2 border transition-all ${
               currentRow === 'ACCOUNT'
                 ? 'bg-[#8BAC0F] border-[#0F380F] ring-2 ring-[#0F380F]'
                 : 'bg-[#8BAC0F] border-[#0F380F]'
@@ -601,25 +680,177 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                 <span>ACCOUNT:</span>
                 {isGoogleSignedIn && signedInUser && (
                   <span className="truncate">
-                    {signedInUser.displayName || signedInUser.email || 'Google account'}
+                    {signedInUser.displayName || signedInUser.email || 'Signed In'}
                   </span>
                 )}
                 {isGoogleSignedIn && signedInUser && ADMIN_UIDS.includes(signedInUser.uid) && (
                   <span className="shrink-0 bg-[#0F380F] text-[#9BBC0F] px-1 text-[9px]">ADMIN ✓</span>
                 )}
               </div>
-              <button
-                type="button"
-                disabled={authBusy}
-                onClick={() => {
-                  if (isGoogleSignedIn) void handleSignOut();
-                  else void handleGoogleSignIn();
-                }}
-                className="shrink-0 px-2 py-1 border border-[#0F380F] font-black cursor-pointer disabled:cursor-wait disabled:opacity-60"
-              >
-                {authBusy ? 'PLEASE WAIT…' : isGoogleSignedIn ? 'SIGN OUT' : 'SIGN IN WITH GOOGLE'}
-              </button>
+              {isGoogleSignedIn ? (
+                <button
+                  type="button"
+                  disabled={authBusy}
+                  onClick={() => {
+                    void handleSignOut();
+                  }}
+                  className="shrink-0 px-2 py-1 border border-[#0F380F] bg-[#9BBC0F] hover:bg-[#0F380F] hover:text-[#9BBC0F] font-black cursor-pointer disabled:cursor-wait disabled:opacity-60"
+                >
+                  {authBusy ? 'PLEASE WAIT…' : 'SIGN OUT'}
+                </button>
+              ) : (
+                <span className="text-[10px] opacity-80">NOT SIGNED IN</span>
+              )}
             </div>
+
+            {!isGoogleSignedIn && (
+              <div className="grid grid-cols-2 gap-1">
+                <button
+                  type="button"
+                  disabled={authBusy}
+                  onClick={() => {
+                    void handleGoogleSignIn();
+                  }}
+                  className="px-2 py-1.5 border border-[#0F380F] bg-[#9BBC0F] hover:bg-[#0F380F] hover:text-[#9BBC0F] font-black text-[10px] cursor-pointer disabled:cursor-wait disabled:opacity-60"
+                >
+                  {authBusy && !showEmailAuth ? 'PLEASE WAIT…' : 'SIGN IN WITH GOOGLE'}
+                </button>
+                <button
+                  type="button"
+                  disabled={authBusy}
+                  data-testid="toggle-email-auth-btn"
+                  onClick={() => {
+                    soundEngine.playMenuSelect();
+                    setAuthError(null);
+                    setShowEmailAuth((prev) => !prev);
+                  }}
+                  className={`px-2 py-1.5 border border-[#0F380F] font-black text-[10px] cursor-pointer flex items-center justify-center gap-1 disabled:cursor-wait disabled:opacity-60 ${
+                    showEmailAuth
+                      ? 'bg-[#0F380F] text-[#9BBC0F]'
+                      : 'bg-[#9BBC0F] hover:bg-[#0F380F] hover:text-[#9BBC0F]'
+                  }`}
+                >
+                  <Mail className="w-3 h-3 shrink-0" />
+                  <span>EMAIL & PASSWORD</span>
+                </button>
+              </div>
+            )}
+
+            {!isGoogleSignedIn && showEmailAuth && (
+              <form
+                onSubmit={(e) => {
+                  void handleEmailAuthSubmit(e);
+                }}
+                onKeyDown={(e) => e.stopPropagation()}
+                className="flex flex-col gap-1.5 mt-0.5 pt-1.5 border-t border-[#0F380F]"
+              >
+                {/* Mode switcher: Sign In vs Sign Up */}
+                <div className="grid grid-cols-2 gap-1">
+                  <button
+                    type="button"
+                    data-testid="email-mode-signin"
+                    onClick={() => {
+                      soundEngine.playMenuSelect();
+                      setEmailAuthMode('SIGN_IN');
+                      setAuthError(null);
+                    }}
+                    className={`py-1 border border-[#0F380F] font-black text-[10px] cursor-pointer ${
+                      emailAuthMode === 'SIGN_IN'
+                        ? 'bg-[#0F380F] text-[#9BBC0F]'
+                        : 'bg-[#9BBC0F] text-[#0F380F] hover:opacity-90'
+                    }`}
+                  >
+                    SIGN IN
+                  </button>
+                  <button
+                    type="button"
+                    data-testid="email-mode-signup"
+                    onClick={() => {
+                      soundEngine.playMenuSelect();
+                      setEmailAuthMode('SIGN_UP');
+                      setAuthError(null);
+                    }}
+                    className={`py-1 border border-[#0F380F] font-black text-[10px] cursor-pointer ${
+                      emailAuthMode === 'SIGN_UP'
+                        ? 'bg-[#0F380F] text-[#9BBC0F]'
+                        : 'bg-[#9BBC0F] text-[#0F380F] hover:opacity-90'
+                    }`}
+                  >
+                    SIGN UP (NEW ACCOUNT)
+                  </button>
+                </div>
+
+                <label className="flex flex-col gap-0.5 text-[10px]">
+                  <span>EMAIL:</span>
+                  <input
+                    type="email"
+                    autoComplete="email"
+                    value={emailInput}
+                    onChange={(e) => {
+                      setEmailInput(e.target.value);
+                      if (authError) setAuthError(null);
+                    }}
+                    placeholder="you@example.com"
+                    disabled={authBusy}
+                    className="w-full px-2 py-1 bg-[#9BBC0F] border border-[#0F380F] text-[#0F380F] placeholder-[#306230]/70 font-mono text-xs font-bold focus:outline-none focus:ring-2 focus:ring-[#0F380F]"
+                  />
+                </label>
+
+                <label className="flex flex-col gap-0.5 text-[10px]">
+                  <span>PASSWORD:</span>
+                  <input
+                    type="password"
+                    autoComplete={emailAuthMode === 'SIGN_UP' ? 'new-password' : 'current-password'}
+                    value={passwordInput}
+                    onChange={(e) => {
+                      setPasswordInput(e.target.value);
+                      if (authError) setAuthError(null);
+                    }}
+                    placeholder={emailAuthMode === 'SIGN_UP' ? 'Min 6 characters' : 'Enter password'}
+                    disabled={authBusy}
+                    className="w-full px-2 py-1 bg-[#9BBC0F] border border-[#0F380F] text-[#0F380F] placeholder-[#306230]/70 font-mono text-xs font-bold focus:outline-none focus:ring-2 focus:ring-[#0F380F]"
+                  />
+                </label>
+
+                {emailAuthMode === 'SIGN_UP' && (
+                  <label className="flex flex-col gap-0.5 text-[10px]">
+                    <span className="flex items-center justify-between">
+                      <span>VERIFY PASSWORD (TYPE TWICE):</span>
+                      {confirmPasswordInput.length > 0 && (
+                        <span className="text-[9px] font-black">
+                          {passwordInput === confirmPasswordInput ? 'MATCH ✓' : 'NO MATCH ✗'}
+                        </span>
+                      )}
+                    </span>
+                    <input
+                      type="password"
+                      autoComplete="new-password"
+                      value={confirmPasswordInput}
+                      onChange={(e) => {
+                        setConfirmPasswordInput(e.target.value);
+                        if (authError) setAuthError(null);
+                      }}
+                      placeholder="Re-type password"
+                      disabled={authBusy}
+                      className="w-full px-2 py-1 bg-[#9BBC0F] border border-[#0F380F] text-[#0F380F] placeholder-[#306230]/70 font-mono text-xs font-bold focus:outline-none focus:ring-2 focus:ring-[#0F380F]"
+                    />
+                  </label>
+                )}
+
+                <button
+                  type="submit"
+                  disabled={authBusy}
+                  className="w-full py-1.5 mt-0.5 border border-[#0F380F] bg-[#0F380F] text-[#9BBC0F] hover:bg-[#306230] font-black text-[11px] uppercase cursor-pointer disabled:cursor-wait disabled:opacity-60"
+                >
+                  {authBusy
+                    ? 'PLEASE WAIT…'
+                    : emailAuthMode === 'SIGN_UP'
+                    ? 'CREATE ACCOUNT'
+                    : 'SIGN IN WITH EMAIL'}
+                </button>
+              </form>
+            )}
+
             {authError && <div role="status" className="text-[9px] font-bold">{authError}</div>}
           </div>
 
@@ -687,25 +918,6 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                 </div>
               )}
             </div>
-          )}
-
-          {/* Editor Link */}
-          {signedInUser && ADMIN_UIDS.includes(signedInUser.uid) && (
-            <button
-              onMouseEnter={() => setFocusIndex(rows.indexOf('EDITOR'))}
-              onClick={() => {
-                onNavigateToEditor();
-                onClose();
-              }}
-              className={`w-full py-2 border-2 border-[#0F380F] font-black text-xs uppercase cursor-pointer flex items-center justify-center gap-2 transition-all ${
-                currentRow === 'EDITOR'
-                  ? 'bg-[#0F380F] text-[#9BBC0F] ring-3 ring-[#0F380F] scale-[1.02]'
-                  : 'bg-[#0F380F] text-[#9BBC0F]'
-              }`}
-            >
-              {currentRow === 'EDITOR' && <span className="animate-pulse">►</span>}
-              <span>OPEN LEVEL EDITOR</span>
-            </button>
           )}
         </div>
 

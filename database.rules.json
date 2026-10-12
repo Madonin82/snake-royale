@@ -1,10 +1,16 @@
 {
   "rules": {
     "rooms": {
-      ".read": "auth != null && auth.uid === 'UV4T0gFhciXwOLY19CJ1yma3ZMg2'",
+      ".read": "auth != null && (auth.uid === 'UV4T0gFhciXwOLY19CJ1yma3ZMg2' || auth.uid === '1GPaHFzEg9NFAvIhc2lfkBpOegx2' || auth.uid === 'tKFbAQVe1UUfU944oS0ZBA3m7oS2')",
       "$roomId": {
         ".read": "auth != null",
-        ".write": "auth != null"
+        ".write": "auth != null",
+        "spectators": {
+          "$uid": {
+            ".read": "auth != null",
+            ".write": "auth != null && auth.uid === $uid"
+          }
+        }
       }
     },
     "bridgeSecrets": {
