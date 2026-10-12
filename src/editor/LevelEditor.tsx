@@ -1,6 +1,7 @@
 import React, { useState, useRef, useEffect, useCallback } from 'react';
 import { CampaignObjective, Position, Direction, SkillId, SkillsAvailableConfig } from '../types/game';
 import { parseCampaignObjective } from '../game/objectives';
+import { getPlayerColorPalette } from '../game/playerColors';
 import { CampaignLevel } from './levelSchema';
 import {
   createCampaignPlaytestState,
@@ -423,6 +424,7 @@ export const LevelEditor: React.FC = () => {
           return {
             ...importedSpawn,
             enabled: importedSpawn.enabled !== false,
+            ...(importedSpawn.name?.trim() ? { name: importedSpawn.name.trim() } : {}),
             startingScore: importedSpawn.startingScore ?? 0,
             startingSkillPoints: importedSpawn.startingSkillPoints ?? 0,
             aiStyle: importedSpawn.aiStyle ?? 'GREEDY',
@@ -541,34 +543,39 @@ export const LevelEditor: React.FC = () => {
               >
                 ◆ TOKEN
               </button>
-              {level.spawns.slice(0, 4).map((spawn, index) => (
+              {level.spawns.slice(0, 4).map((spawn, index) => {
+                const palette = getPlayerColorPalette(`p${index + 1}`, index);
+                return (
                 <React.Fragment key={index}>
                   <button
                     type="button"
                     disabled={!isSpawnEnabled(spawn)}
                     onClick={() => setActiveTool(`SPAWN_${index}`)}
-                    className={`py-2 px-1 text-[10px] font-black border-4 border-[#0F380F] transition-colors disabled:opacity-40 disabled:cursor-not-allowed ${
+                    className={`py-2 px-1 text-[10px] font-black border-4 ${palette.borderColor} transition-colors disabled:opacity-40 disabled:cursor-not-allowed flex items-center justify-center gap-1 ${
                       activeTool === `SPAWN_${index}`
-                        ? index === 2 ? 'bg-[#8B1E0F] text-white' : index === 3 ? 'bg-[#5B2C83] text-white' : 'bg-[#306230] text-[#9BBC0F]'
+                        ? index === 2 ? 'bg-[#8B1E0F] text-white' : index === 3 ? 'bg-[#5B2C83] text-white' : index === 0 ? 'bg-[#0F380F] text-[#9BBC0F]' : 'bg-[#306230] text-[#9BBC0F]'
                         : 'bg-[#8BAC0F] hover:bg-[#9BBC0F] text-[#0F380F]'
                     }`}
                   >
-                    P{index + 1} SPAWN
+                    <span className={`w-2.5 h-2.5 shrink-0 ${palette.chipBg} border border-[#0F380F]`} />
+                    <span>P{index + 1} SPAWN</span>
                   </button>
                   <button
                     type="button"
                     disabled={!isSpawnEnabled(spawn)}
                     onClick={() => setActiveTool(`PAINT_${index}`)}
-                    className={`py-2 px-1 text-[10px] font-black border-4 border-[#0F380F] transition-colors disabled:opacity-40 disabled:cursor-not-allowed ${
+                    className={`py-2 px-1 text-[10px] font-black border-4 ${palette.borderColor} transition-colors disabled:opacity-40 disabled:cursor-not-allowed flex items-center justify-center gap-1 ${
                       activeTool === `PAINT_${index}`
-                        ? index === 2 ? 'bg-[#8B1E0F] text-white' : index === 3 ? 'bg-[#5B2C83] text-white' : 'bg-[#306230] text-[#9BBC0F]'
+                        ? index === 2 ? 'bg-[#8B1E0F] text-white' : index === 3 ? 'bg-[#5B2C83] text-white' : index === 0 ? 'bg-[#0F380F] text-[#9BBC0F]' : 'bg-[#306230] text-[#9BBC0F]'
                         : 'bg-[#8BAC0F] hover:bg-[#9BBC0F] text-[#0F380F]'
                     }`}
                   >
-                    P{index + 1} PAINT
+                    <span className={`w-2.5 h-2.5 shrink-0 ${palette.chipBg} border border-[#0F380F]`} />
+                    <span>P{index + 1} PAINT</span>
                   </button>
                 </React.Fragment>
-              ))}
+                );
+              })}
               <button
                 type="button"
                 onClick={() => setActiveTool('ERASER')}
@@ -632,9 +639,9 @@ export const LevelEditor: React.FC = () => {
                     } else if (spawnIndex >= 0) {
                       const spawn = level.spawns[spawnIndex];
                       cellBg = spawnIndex === 0
-                        ? 'bg-[#306230]'
-                        : spawnIndex === 1
                         ? 'bg-[#0F380F]'
+                        : spawnIndex === 1
+                        ? 'bg-[#306230]'
                         : spawnIndex === 2
                         ? 'bg-[#8B1E0F]'
                         : 'bg-[#5B2C83]';
@@ -768,78 +775,120 @@ export const LevelEditor: React.FC = () => {
               )}
             </div>
 
-            {/* Spawn configuration */}
-            <div className="space-y-2 pt-1 border-t-2 border-[#0F380F]">
-              {level.spawns.slice(0, 4).map((spawn, index) => {
-                const enabled = isSpawnEnabled(spawn);
-                return (
-                <div key={index} className={`grid grid-cols-2 gap-2 border border-[#0F380F] p-2 ${enabled ? '' : 'opacity-60'}`}>
-                  <div className="col-span-2 flex items-center justify-between font-black">
-                    <span>P{index + 1} {index === 0 ? 'HUMAN' : 'AI'} SPAWN</span>
-                    <label className="flex items-center gap-1.5 cursor-pointer text-[10px]">
-                      <input
-                        type="checkbox"
-                        checked={enabled}
-                        onChange={e => updateSpawn(index, { enabled: e.target.checked })}
-                        className="accent-[#0F380F] cursor-pointer"
-                      />
-                      <span>ENABLED</span>
-                    </label>
+            {/* Spawn configuration — 2 cards per side (Left: P1, P2; Right: P3, P4) */}
+            <div className="pt-1 border-t-2 border-[#0F380F]">
+              <div className="font-black mb-1.5 flex items-center justify-between">
+                <span>PLAYER & BOT SPAWN CARDS (LEFT: P1, P2 · RIGHT: P3, P4)</span>
+              </div>
+              <div className="grid grid-cols-1 xl:grid-cols-2 gap-2">
+                {[
+                  [0, 1],
+                  [2, 3],
+                ].map((sideIndices, sideIdx) => (
+                  <div key={sideIdx} className="flex flex-col gap-2">
+                    {sideIndices.map((index) => {
+                      const spawn = level.spawns[index];
+                      if (!spawn) return null;
+                      const enabled = isSpawnEnabled(spawn);
+                      const palette = getPlayerColorPalette(`p${index + 1}`, index);
+                      const defaultNamePlaceholder = index === 0
+                        ? 'PLAYER 1'
+                        : isAvalenaStyle(spawn.aiStyle)
+                          ? 'AVALENA'
+                          : `BOT ${index + 1}`;
+                      const displayLabel = spawn.name?.trim() || defaultNamePlaceholder;
+                      return (
+                        <div
+                          key={index}
+                          className={`grid grid-cols-2 gap-2 border-4 ${palette.borderColor} bg-[#9BBC0F]/60 p-2 transition-opacity ${
+                            enabled ? palette.defaultShadow : 'opacity-55 border-dashed'
+                          }`}
+                        >
+                          <div className="col-span-2 flex items-center justify-between font-black border-b border-[#0F380F]/40 pb-1">
+                            <span className="flex items-center gap-1.5 min-w-0">
+                              <span className={`w-3.5 h-3.5 shrink-0 ${palette.chipBg} inline-block border-2 border-[#0F380F]`} />
+                              <span className="truncate">
+                                P{index + 1}: {displayLabel} ({index === 0 ? 'HUMAN' : 'BOT'})
+                              </span>
+                            </span>
+                            <label className="flex items-center gap-1.5 cursor-pointer text-[10px] shrink-0">
+                              <input
+                                type="checkbox"
+                                checked={enabled}
+                                onChange={e => updateSpawn(index, { enabled: e.target.checked })}
+                                className="accent-[#0F380F] cursor-pointer"
+                              />
+                              <span>ENABLED</span>
+                            </label>
+                          </div>
+                          <label className="col-span-2 flex flex-col gap-1 font-bold">
+                            NAME (DEFAULT: {defaultNamePlaceholder})
+                            <input
+                              type="text"
+                              maxLength={14}
+                              value={spawn.name ?? ''}
+                              placeholder={defaultNamePlaceholder}
+                              onChange={e => updateSpawn(index, { name: e.target.value.toUpperCase() })}
+                              className="w-full bg-[#9BBC0F] border-2 border-[#0F380F] px-2 py-1 font-mono font-bold outline-none placeholder:text-[#306230]/60"
+                            />
+                          </label>
+                          <label className="flex flex-col gap-1 font-bold">
+                            LENGTH
+                            <input type="number" min="1" max="50" value={spawn.startLength}
+                              onChange={e => updateSpawn(index, { startLength: Math.max(1, parseInt(e.target.value) || 1) })}
+                              className="w-full bg-[#9BBC0F] border-2 border-[#0F380F] px-2 py-1 font-mono font-bold outline-none" />
+                          </label>
+                          <label className="flex flex-col gap-1 font-bold">
+                            START SCORE
+                            <input type="number" min="0" value={spawn.startingScore}
+                              onChange={e => updateSpawn(index, { startingScore: Math.max(0, parseInt(e.target.value) || 0) })}
+                              className="w-full bg-[#9BBC0F] border-2 border-[#0F380F] px-2 py-1 font-mono font-bold outline-none" />
+                          </label>
+                          <label className="flex flex-col gap-1 font-bold">
+                            START SKILL PTS
+                            <input type="number" min="0" value={spawn.startingSkillPoints ?? 0}
+                              onChange={e => updateSpawn(index, { startingSkillPoints: Math.max(0, parseInt(e.target.value) || 0) })}
+                              className="w-full bg-[#9BBC0F] border-2 border-[#0F380F] px-2 py-1 font-mono font-bold outline-none" />
+                          </label>
+                          <label className="flex flex-col gap-1 font-bold">
+                            DIRECTION
+                            <select value={spawn.direction} onChange={e => updateSpawn(index, { direction: e.target.value as Direction })}
+                              className="w-full bg-[#9BBC0F] border-2 border-[#0F380F] px-2 py-1 font-mono font-bold outline-none">
+                              {(['UP', 'RIGHT', 'DOWN', 'LEFT'] as const).map(direction => <option key={direction} value={direction}>{direction}</option>)}
+                            </select>
+                          </label>
+                          {index > 0 && (
+                            <label className="flex flex-col gap-1 font-bold">
+                              AI STYLE
+                              <select value={spawn.aiStyle} onChange={e => updateSpawn(index, { aiStyle: e.target.value as CampaignLevel['spawns'][number]['aiStyle'] })}
+                                className="w-full bg-[#9BBC0F] border-2 border-[#0F380F] px-2 py-1 font-mono font-bold outline-none">
+                                <option value="GREEDY">GREEDY</option>
+                                <option value="TURTLE">TURTLE</option>
+                                <option value="CUTOFF">CUTOFF</option>
+                                <option value="HEADHUNTER">HEADHUNTER</option>
+                                <option value="PATROL">PATROL</option>
+                                <option value="AVALENA">AVALENA</option>
+                              </select>
+                            </label>
+                          )}
+                          <label className="flex flex-col gap-1 font-bold">
+                            SKILL
+                            <select value={spawn.equippedSkill ?? ''} onChange={e => updateSpawn(index, { equippedSkill: (e.target.value || null) as SkillId | null })}
+                              className="w-full bg-[#9BBC0F] border-2 border-[#0F380F] px-2 py-1 font-mono font-bold outline-none">
+                              <option value="">NONE</option>
+                              <option value="dart">DART</option>
+                              <option value="rattle">RATTLE</option>
+                            </select>
+                          </label>
+                          <div className="col-span-2 text-[9px] font-bold opacity-80">
+                            CELL {spawn.position.x},{spawn.position.y} · {spawn.body ? `${spawn.body.length} PAINTED CELLS` : 'AUTO BODY'}
+                          </div>
+                        </div>
+                      );
+                    })}
                   </div>
-                  <label className="flex flex-col gap-1 font-bold">
-                    LENGTH
-                    <input type="number" min="1" max="50" value={spawn.startLength}
-                      onChange={e => updateSpawn(index, { startLength: Math.max(1, parseInt(e.target.value) || 1) })}
-                      className="w-full bg-[#9BBC0F] border-2 border-[#0F380F] px-2 py-1 font-mono font-bold outline-none" />
-                  </label>
-                  <label className="flex flex-col gap-1 font-bold">
-                    START SCORE
-                    <input type="number" min="0" value={spawn.startingScore}
-                      onChange={e => updateSpawn(index, { startingScore: Math.max(0, parseInt(e.target.value) || 0) })}
-                      className="w-full bg-[#9BBC0F] border-2 border-[#0F380F] px-2 py-1 font-mono font-bold outline-none" />
-                  </label>
-                  <label className="flex flex-col gap-1 font-bold">
-                    START SKILL PTS
-                    <input type="number" min="0" value={spawn.startingSkillPoints ?? 0}
-                      onChange={e => updateSpawn(index, { startingSkillPoints: Math.max(0, parseInt(e.target.value) || 0) })}
-                      className="w-full bg-[#9BBC0F] border-2 border-[#0F380F] px-2 py-1 font-mono font-bold outline-none" />
-                  </label>
-                  <label className="flex flex-col gap-1 font-bold">
-                    DIRECTION
-                    <select value={spawn.direction} onChange={e => updateSpawn(index, { direction: e.target.value as Direction })}
-                      className="w-full bg-[#9BBC0F] border-2 border-[#0F380F] px-2 py-1 font-mono font-bold outline-none">
-                      {(['UP', 'RIGHT', 'DOWN', 'LEFT'] as const).map(direction => <option key={direction} value={direction}>{direction}</option>)}
-                    </select>
-                  </label>
-                  {index > 0 && (
-                    <label className="flex flex-col gap-1 font-bold">
-                      AI STYLE
-                      <select value={spawn.aiStyle} onChange={e => updateSpawn(index, { aiStyle: e.target.value as CampaignLevel['spawns'][number]['aiStyle'] })}
-                        className="w-full bg-[#9BBC0F] border-2 border-[#0F380F] px-2 py-1 font-mono font-bold outline-none">
-                        <option value="GREEDY">GREEDY</option>
-                        <option value="TURTLE">TURTLE</option>
-                        <option value="CUTOFF">CUTOFF</option>
-                        <option value="HEADHUNTER">HEADHUNTER</option>
-                        <option value="PATROL">PATROL</option>
-                        <option value="AVALENA">AVALENA</option>
-                      </select>
-                    </label>
-                  )}
-                  <label className="flex flex-col gap-1 font-bold">
-                    SKILL
-                    <select value={spawn.equippedSkill ?? ''} onChange={e => updateSpawn(index, { equippedSkill: (e.target.value || null) as SkillId | null })}
-                      className="w-full bg-[#9BBC0F] border-2 border-[#0F380F] px-2 py-1 font-mono font-bold outline-none">
-                      <option value="">NONE</option>
-                      <option value="dart">DART</option>
-                      <option value="rattle">RATTLE</option>
-                    </select>
-                  </label>
-                  <div className="col-span-2 text-[9px] font-bold opacity-80">
-                    CELL {spawn.position.x},{spawn.position.y} · {spawn.body ? `${spawn.body.length} PAINTED CELLS` : 'AUTO BODY'}
-                  </div>
-                </div>
-                );
-              })}
+                ))}
+              </div>
             </div>
 
             {/* Tokens */}

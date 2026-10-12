@@ -3,6 +3,8 @@ import test from 'node:test';
 import { calculateAIMove } from '../game/ai';
 import { processGameTick, queueSnakeDirection } from '../game/engine';
 import { isCampaignObjectiveComplete } from '../game/objectives';
+import { getPlayerColorPalette, getSeatDisplayTag, splitPlayersTwoPerSide } from '../game/playerColors';
+import { computeMatchStats } from '../game/stats';
 import { CampaignLevel } from './levelSchema';
 import {
   createCampaignPlaytestState,
@@ -388,3 +390,101 @@ test('multiplayer custom level applies 12x12 grid, walls, token config, starting
     tokensEatenInRound: 0,
   });
 });
+
+test('supports custom player and bot names on spawns or defaults to Bot number without redundancy', () => {
+  const level = createLevel();
+  level.spawns = [
+    { position: { x: 1, y: 1 }, direction: 'RIGHT', startLength: 3, startingScore: 0, name: 'Viper' },
+    { position: { x: 6, y: 1 }, direction: 'LEFT', startLength: 3, startingScore: 0, name: 'Rook', aiStyle: 'GREEDY' },
+    { position: { x: 1, y: 6 }, direction: 'RIGHT', startLength: 3, startingScore: 0, aiStyle: 'TURTLE' },
+    { position: { x: 6, y: 6 }, direction: 'LEFT', startLength: 3, startingScore: 0, name: '   ', aiStyle: 'HEADHUNTER' },
+  ];
+
+  const state = createCampaignPlaytestState(level);
+  assert.deepEqual(state.snakes.map(s => s.name), ['VIPER', 'ROOK', 'BOT 3', 'BOT 4']);
+
+  // Verify no redundant "(BOT N)" seat tag in SOLO_AI playtest mode
+  assert.equal(getSeatDisplayTag('p1', 'SOLO_AI'), '(YOU)');
+  assert.equal(getSeatDisplayTag('p2', 'SOLO_AI'), '');
+  assert.equal(getSeatDisplayTag('p3', 'SOLO_AI'), '');
+  assert.equal(getSeatDisplayTag('p4', 'SOLO_AI'), '');
+
+  // Export preserves custom names and omits blank names
+  const exported = getExportableCampaignLevel(level);
+  assert.deepEqual(exported.spawns.map(s => s.name), ['Viper', 'Rook', undefined, undefined]);
+
+  // Round-trip through JSON parser preserves custom names
+  const reparsed = parseCampaignLevelJson(JSON.stringify(exported));
+  assert.deepEqual(reparsed.spawns.map(s => s.name), ['Viper', 'Rook', undefined, undefined]);
+});
+
+test('splits players 2 per side (left: P1, P2; right: P3, P4) and assigns distinct snake colors', () => {
+  const fourPlayers = ['p1', 'p2', 'p3', 'p4'];
+  const split4 = splitPlayersTwoPerSide(fourPlayers);
+  assert.deepEqual(split4.left, ['p1', 'p2']);
+  assert.deepEqual(split4.right, ['p3', 'p4']);
+
+  const threePlayers = ['p1', 'p2', 'p3'];
+  const split3 = splitPlayersTwoPerSide(threePlayers);
+  assert.deepEqual(split3.left, ['p1', 'p2']);
+  assert.deepEqual(split3.right, ['p3']);
+
+  const twoPlayers = ['p1', 'p2'];
+  const split2 = splitPlayersTwoPerSide(twoPlayers);
+  assert.deepEqual(split2.left, ['p1']);
+  assert.deepEqual(split2.right, ['p2']);
+
+  assert.equal(getPlayerColorPalette('p1', 0).hex, '#0F380F');
+  assert.equal(getPlayerColorPalette('p2', 1).hex, '#306230');
+  assert.equal(getPlayerColorPalette('p3', 2).hex, '#8B1E0F');
+  assert.equal(getPlayerColorPalette('p4', 3).hex, '#5B2C83');
+});
+
+test('computes 4-player match stats with 1st-4th standings, points, tokens, and kills', () => {
+  const level = createLevel();
+  level.spawns = [
+    { position: { x: 1, y: 1 }, direction: 'RIGHT', startLength: 3, startingScore: 2, name: 'Viper' },
+    { position: { x: 4, y: 1 }, direction: 'LEFT', startLength: 3, startingScore: 5, name: 'Rook', aiStyle: 'GREEDY' },
+    { position: { x: 1, y: 6 }, direction: 'RIGHT', startLength: 3, startingScore: 1, name: 'Mantis', aiStyle: 'TURTLE' },
+    { position: { x: 6, y: 6 }, direction: 'LEFT', startLength: 3, startingScore: 0, aiStyle: 'HEADHUNTER' },
+  ];
+  const initialState = createCampaignPlaytestState(level);
+  const finalState = structuredClone(initialState);
+  finalState.tick = 10;
+  finalState.phase = 'OVER';
+  finalState.winner = 'p2';
+  // P2 (Rook): alive, 9 points (4 tokens collected), 2 kills -> 1st
+  finalState.snakes[1].score = 9;
+  finalState.snakes[1].kills = 2;
+  // P1 (Viper): alive, 6 points (4 tokens collected), 1 kill -> 2nd
+  finalState.snakes[0].score = 6;
+  finalState.snakes[0].kills = 1;
+  // P3 (Mantis): dead at tick 8, 3 points (2 tokens collected), killed by p2 -> 3rd
+  finalState.snakes[2].isAlive = false;
+  finalState.snakes[2].score = 3;
+  finalState.snakes[2].deathReason = 'OPPONENT';
+  finalState.snakes[2].killedBy = 'p2';
+  // P4 (BOT 4): dead at tick 4, 0 points, killed by p1 -> 4th
+  finalState.snakes[3].isAlive = false;
+  finalState.snakes[3].score = 0;
+  finalState.snakes[3].deathReason = 'OPPONENT';
+  finalState.snakes[3].killedBy = 'p1';
+
+  const stats = computeMatchStats([initialState, finalState], []);
+  assert.equal(stats.standings.length, 4);
+  assert.deepEqual(stats.standings.map(s => ({
+    id: s.id,
+    name: s.name,
+    standing: s.standing,
+    standingLabel: s.standingLabel,
+    points: s.points,
+    tokensCollected: s.tokensCollected,
+    kills: s.kills,
+  })), [
+    { id: 'p2', name: 'ROOK', standing: 1, standingLabel: '1ST', points: 9, tokensCollected: 4, kills: 2 },
+    { id: 'p1', name: 'VIPER', standing: 2, standingLabel: '2ND', points: 6, tokensCollected: 4, kills: 1 },
+    { id: 'p3', name: 'MANTIS', standing: 3, standingLabel: '3RD', points: 3, tokensCollected: 2, kills: 0 },
+    { id: 'p4', name: 'BOT 4', standing: 4, standingLabel: '4TH', points: 0, tokensCollected: 0, kills: 0 },
+  ]);
+});
+

@@ -1,7 +1,8 @@
 import React, { useEffect, useState } from 'react';
-import { BufferEntry, Direction, GameState, LatencyReport, PlayMode } from '../types/game';
+import { BufferEntry, GameState, LatencyReport, PlayMode } from '../types/game';
 import { Activity, Gamepad, Wifi } from 'lucide-react';
 import { getCampaignObjectiveProgress, isCampaignObjectiveComplete } from '../game/objectives';
+import { getPlayerColorPalette, getSeatDisplayTag, splitPlayersTwoPerSide } from '../game/playerColors';
 
 interface HudProps {
   gameState: GameState;
@@ -35,17 +36,12 @@ export const Hud: React.FC<HudProps> = ({
   onP2Undo,
   onP2Lock,
 }) => {
-  // Who is "you" on this screen, per seat — drives the (YOU) tags.
-  const seatTag = (seat: string): string => {
-    const seatNumber = Number(seat.slice(1));
-    if (playMode === 'ONLINE_SERVER' || playMode === 'ONLINE_SPECTATOR') return `(P${seatNumber})`;
-    if (playMode === 'SOLO_AI') return seat === 'p1' ? '(YOU)' : `(BOT ${seatNumber})`;
-    if (playMode === 'LOCAL_2P') return `(P${seatNumber})`;
-    if (viewerSeat) return viewerSeat === seat ? '(YOU)' : '(REMOTE)';
-    return seat === 'p1' ? '(YOU)' : '';
-  };
+  // Who is "you" on this screen, per seat — drives the (YOU) tags without redundant (BOT N) tags.
+  const seatTag = (seat: string): string => getSeatDisplayTag(seat, playMode, viewerSeat);
   const isRacing = gameState.phase === 'RACING';
   const isShrinking = gameState.phase === 'SHRINKING';
+  const isMultiCardSide = gameState.snakes.length > 2;
+  const { left: leftSnakes, right: rightSnakes } = splitPlayersTwoPerSide(gameState.snakes);
   const objectiveList = gameState.campaignObjectives
     ? [gameState.campaignObjectives.primary, ...gameState.campaignObjectives.bonus]
         .map((objective, index) => ({ objective, index }))
@@ -177,29 +173,86 @@ export const Hud: React.FC<HudProps> = ({
     );
   };
 
+  const renderPlanningStatusBadge = (isAlive: boolean, locked: boolean) => {
+    if (!gameState.turnBased || gameState.phase === 'OVER') return null;
+    if (!isAlive) {
+      return (
+        <span className="shrink-0 px-1 py-0.5 text-[9px] leading-none font-black bg-[#0F380F] text-[#9BBC0F] border border-[#0F380F]">
+          ✕ OUT
+        </span>
+      );
+    }
+    if (locked) {
+      return (
+        <span className="shrink-0 px-1 py-0.5 text-[9px] leading-none font-black bg-[#0F380F]/85 text-[#9BBC0F] border border-[#0F380F]">
+          🔒 LOCKED
+        </span>
+      );
+    }
+    return (
+      <span className="shrink-0 px-1 py-0.5 text-[9px] leading-none font-black bg-[#E0F8CF] text-[#0F380F] border border-[#0F380F]">
+        ✏️ THINKING
+      </span>
+    );
+  };
+
+  const getCardContainerClasses = (who: string) => {
+    const snakeIndex = gameState.snakes.findIndex(candidate => candidate.id === who);
+    const snake = gameState.snakes[snakeIndex];
+    const palette = getPlayerColorPalette(snake ?? who, snakeIndex >= 0 ? snakeIndex : 0);
+    const locked = isLocked(who);
+    const isAlive = snake?.isAlive ?? true;
+    const isTurnActive = gameState.turnBased && gameState.phase !== 'OVER';
+
+    if (!isAlive) {
+      return `bg-[#8BAC0F]/50 opacity-45 border-2 border-dashed ${palette.borderColor}`;
+    }
+    if (isTurnActive && locked) {
+      return `bg-[#8BAC0F]/75 opacity-60 border-2 border-dashed ${palette.borderColor} ${palette.lockedShadow}`;
+    }
+    if (isTurnActive && !locked) {
+      return `bg-[#9BBC0F] opacity-100 border-4 ${palette.borderColor} ${palette.activeHighlight}`;
+    }
+    return `bg-[#9BBC0F] opacity-100 border-4 ${palette.borderColor} ${palette.defaultShadow}`;
+  };
+
   const renderDesktopPlayerPanel = (who: string) => {
-    const snake = gameState.snakes.find(candidate => candidate.id === who);
+    const snakeIndex = gameState.snakes.findIndex(candidate => candidate.id === who);
+    const snake = gameState.snakes[snakeIndex];
     if (!snake) return null;
+    const palette = getPlayerColorPalette(snake, snakeIndex);
     const locked = isLocked(who);
     const canSeeMoves = replayActive || playMode === 'LOCAL_2P' || viewerSeat === who || gameState.snakes.length > 2;
     const lastTurn = gameState.lastTurnTimes?.[who] ?? null;
     const totalThink = gameState.totalThinkTime?.[who] ?? 0;
     const buffer = moveBuffers?.[who] ?? [];
     const countdown = thinkTimeRemaining?.[who] ?? null;
+    const tag = seatTag(who);
 
     return (
-      <div className="bg-[#9BBC0F] p-3 [@media(max-height:540px)]:p-2 border-2 border-[#0F380F] flex flex-col h-full min-h-0 overflow-hidden shadow-[2px_2px_0px_#0F380F] w-full font-mono text-[#0F380F]">
+      <div
+        data-seat={who}
+        data-locked={locked ? 'true' : 'false'}
+        data-planning={gameState.turnBased && gameState.phase !== 'OVER' && snake.isAlive && !locked ? 'true' : 'false'}
+        className={`${getCardContainerClasses(who)} ${
+          isMultiCardSide ? 'p-2' : 'p-3'
+        } [@media(max-height:540px)]:p-1.5 flex flex-col h-full min-h-0 overflow-hidden w-full font-mono text-[#0F380F] transition-all`}
+      >
         <div className="shrink-0">
-          <div className="flex items-center justify-between text-xs [@media(max-height:540px)]:text-[11px] font-bold mb-2 [@media(max-height:540px)]:mb-1 h-4">
+          <div className={`flex items-center justify-between gap-1 text-xs [@media(max-height:540px)]:text-[11px] font-bold ${isMultiCardSide ? 'mb-1' : 'mb-2'} [@media(max-height:540px)]:mb-1 h-4`}>
             <span className="flex items-center gap-1.5 min-w-0">
-              <span className={`w-3 h-3 [@media(max-height:540px)]:w-2.5 [@media(max-height:540px)]:h-2.5 shrink-0 ${who === 'p1' ? 'bg-[#0F380F]' : 'bg-[#306230]'} inline-block border border-[#0F380F]`} />
-              <span className="truncate">{snake.name} {seatTag(who)}</span>
+              <span
+                className={`w-3.5 h-3.5 [@media(max-height:540px)]:w-2.5 [@media(max-height:540px)]:h-2.5 shrink-0 ${palette.chipBg} inline-block border-2 border-[#0F380F] shadow-[1px_1px_0px_#0F380F]`}
+                title={`Snake color ${palette.hex}`}
+              />
+              <span className="truncate font-black">{snake.name}{tag ? ` ${tag}` : ''}</span>
             </span>
+            {renderPlanningStatusBadge(snake.isAlive, locked)}
           </div>
 
-          <div className="flex items-center justify-between mb-2 [@media(max-height:540px)]:mb-1 h-8 [@media(max-height:540px)]:h-6">
+          <div className={`flex items-center justify-between ${isMultiCardSide ? 'mb-1 h-6' : 'mb-2 h-8'} [@media(max-height:540px)]:mb-1 [@media(max-height:540px)]:h-6`}>
             <div className="flex items-baseline tabular-nums">
-              <span className="text-3xl [@media(max-height:540px)]:text-2xl leading-none font-black">{snake.score}</span>
+              <span className={`${isMultiCardSide ? 'text-2xl' : 'text-3xl'} [@media(max-height:540px)]:text-xl leading-none font-black`}>{snake.score}</span>
               <span className="text-[10px] font-semibold uppercase tracking-tight ml-1">PTS</span>
             </div>
             {snake.equippedSkill && (
@@ -215,8 +268,8 @@ export const Hud: React.FC<HudProps> = ({
           </div>
 
           {gameState.turnBased && (
-            <div className="mb-2 [@media(max-height:540px)]:mb-1 p-1.5 [@media(max-height:540px)]:p-1 bg-[#8BAC0F]/40 border border-[#0F380F] text-xs [@media(max-height:540px)]:text-[10px] font-bold h-[52px] [@media(max-height:540px)]:h-[42px] flex flex-col justify-between overflow-hidden">
-              <div className={`flex items-center justify-between gap-1 h-6 [@media(max-height:540px)]:h-5 ${locked ? 'text-[#0F380F] opacity-100 font-extrabold' : 'opacity-80'}`}>
+            <div className={`${isMultiCardSide ? 'mb-1 p-1 h-[40px]' : 'mb-2 p-1.5 h-[52px]'} [@media(max-height:540px)]:mb-1 [@media(max-height:540px)]:p-1 bg-[#8BAC0F]/40 border border-[#0F380F] text-xs [@media(max-height:540px)]:text-[10px] font-bold [@media(max-height:540px)]:h-[38px] flex flex-col justify-between overflow-hidden`}>
+              <div className={`flex items-center justify-between gap-1 h-5 ${locked ? 'text-[#0F380F] opacity-90' : 'text-[#0F380F] font-black'}`}>
                 <span className="truncate tabular-nums">
                   {gameState.phase === 'OVER'
                     ? gameState.winner === 'DRAW'
@@ -224,6 +277,8 @@ export const Hud: React.FC<HudProps> = ({
                       : gameState.winner === who
                       ? '★ WINNER'
                       : '✕ DEFEATED'
+                    : !snake.isAlive
+                    ? '✕ ELIMINATED'
                     : `${thinkLabel(who)} ${locked ? '🔒' : countdown === null ? '✏️' : ''}`}
                 </span>
                 <span className="shrink-0 w-9 text-right text-xl [@media(max-height:540px)]:text-base leading-none font-black tabular-nums">
@@ -257,14 +312,14 @@ export const Hud: React.FC<HudProps> = ({
                 const arrow = dir === 'UP' ? '↑' : dir === 'DOWN' ? '↓' : dir === 'LEFT' ? '←' : '→';
                 const label = entry.type === 'dart' || entry.type === 'rattle' ? `⚡${arrow}` : arrow;
                 return (
-                  <span key={idx} className="px-1 py-0.5 bg-[#0F380F] text-[#9BBC0F] text-[10px] leading-tight font-bold border border-[#0F380F] shrink-0">
+                  <span key={idx} className={`px-1 py-0.5 ${palette.badgeBg} text-[10px] leading-tight font-bold border border-[#0F380F] shrink-0`}>
                     {label}
                   </span>
                 );
               })
             )}
             {canSeeMoves && snake.pendingSkill && (
-              <span className="px-1 py-0.5 bg-[#0F380F] text-[#9BBC0F] text-[10px] leading-tight font-bold border border-[#0F380F] shrink-0">
+              <span className={`px-1 py-0.5 ${palette.badgeBg} text-[10px] leading-tight font-bold border border-[#0F380F] shrink-0`}>
                 ⚡
               </span>
             )}
@@ -274,69 +329,89 @@ export const Hud: React.FC<HudProps> = ({
     );
   };
 
-  const renderMobileCards = (
-    <div className={`mobile-cards-area grid ${gameState.snakes.length > 2 ? 'grid-cols-3' : 'grid-cols-2'} gap-2 w-full font-mono text-[#0F380F] shrink-0`}>
-    {gameState.snakes.map((snake) => {
-      const who = snake.id;
-        const locked = isLocked(who);
-        const buffer = moveBuffers?.[who] ?? [];
-        const local = replayActive || isLocalSeat(who) || gameState.snakes.length > 2;
-        const countdown = thinkTimeRemaining?.[who] ?? null;
-        const lastTurn = gameState.lastTurnTimes?.[who] ?? null;
-        const totalThink = gameState.totalThinkTime?.[who] ?? 0;
-        return (
-          <div key={who} className="bg-[#9BBC0F] p-2 border-2 border-[#0F380F] flex flex-col justify-between shadow-[2px_2px_0px_#0F380F] min-w-0 overflow-hidden">
-            <div className="shrink-0">
-              <div className="flex items-center justify-between text-[11px] font-bold h-4">
-                <span className="flex items-center gap-1 min-w-0">
-                  <span className={`w-2.5 h-2.5 shrink-0 ${who === 'p1' ? 'bg-[#0F380F]' : 'bg-[#306230]'} inline-block border border-[#0F380F]`} />
-                  <span className="truncate">{snake.name} {seatTag(who)}</span>
-                </span>
-                <span className="text-[10px] opacity-80 shrink-0 tabular-nums">LEN: {snake.body.length}</span>
-              </div>
-              <div className="flex items-center justify-between mt-1 h-6 tabular-nums gap-1">
-                <div className="flex items-baseline gap-1 shrink-0">
-                  <span className="text-2xl leading-none font-black">{snake.score}</span>
-                  <span className="text-[10px] font-semibold uppercase tracking-tight">PTS</span>
-                  <span className="text-[10px] font-bold shrink-0" title="Skill points">⚡{snake.skillPoints ?? 0}</span>
-                </div>
-                {renderOutcomeBadge(who)}
-                {gameState.turnBased && (
-                  <span className="text-[9px] font-bold opacity-80 whitespace-nowrap shrink-0">
-                    {lastTurn !== null ? `${lastTurn.toFixed(1)}s / ${fmtTotal(totalThink)}` : `TOT ${fmtTotal(totalThink)}`}
-                  </span>
-                )}
-              </div>
+  const renderMobilePlayerCard = (snake: GameState['snakes'][number]) => {
+    const who = snake.id;
+    const snakeIndex = gameState.snakes.findIndex(candidate => candidate.id === who);
+    const palette = getPlayerColorPalette(snake, snakeIndex);
+    const locked = isLocked(who);
+    const buffer = moveBuffers?.[who] ?? [];
+    const local = replayActive || isLocalSeat(who) || gameState.snakes.length > 2;
+    const countdown = thinkTimeRemaining?.[who] ?? null;
+    const lastTurn = gameState.lastTurnTimes?.[who] ?? null;
+    const totalThink = gameState.totalThinkTime?.[who] ?? 0;
+    const tag = seatTag(who);
+
+    return (
+      <div
+        key={who}
+        data-seat={who}
+        data-locked={locked ? 'true' : 'false'}
+        data-planning={gameState.turnBased && gameState.phase !== 'OVER' && snake.isAlive && !locked ? 'true' : 'false'}
+        className={`${getCardContainerClasses(who)} p-2 flex flex-col justify-between min-w-0 overflow-hidden transition-all`}
+      >
+        <div className="shrink-0">
+          <div className="flex items-center justify-between gap-1 text-[11px] font-bold h-4">
+            <span className="flex items-center gap-1 min-w-0">
+              <span className={`w-3 h-3 shrink-0 ${palette.chipBg} inline-block border-2 border-[#0F380F]`} />
+              <span className="truncate font-black">{snake.name}{tag ? ` ${tag}` : ''}</span>
+            </span>
+            <span className="flex items-center gap-1 shrink-0">
+              {renderPlanningStatusBadge(snake.isAlive, locked)}
+              <span className="text-[10px] opacity-80 shrink-0 tabular-nums">LEN: {snake.body.length}</span>
+            </span>
+          </div>
+          <div className="flex items-center justify-between mt-1 h-6 tabular-nums gap-1">
+            <div className="flex items-baseline gap-1 shrink-0">
+              <span className="text-2xl leading-none font-black">{snake.score}</span>
+              <span className="text-[10px] font-semibold uppercase tracking-tight">PTS</span>
+              <span className="text-[10px] font-bold shrink-0" title="Skill points">⚡{snake.skillPoints ?? 0}</span>
             </div>
+            {renderOutcomeBadge(who)}
             {gameState.turnBased && (
-              local ? (
-                <div className="mt-1.5 bg-[#8BAC0F]/40 border border-[#0F380F] px-1.5 h-7 flex items-center justify-between gap-1 text-[9px] font-bold">
-                  <span className="shrink-0 tabular-nums">{locked ? '🔒 ' : ''}QUEUE {buffer.length}/{snake.body.length}</span>
-                  <span className="min-w-0 flex-1 truncate text-right opacity-80">
-                    {buffer.map(entry => {
-                      const dir = entry.direction;
-                      const arrow = dir === 'UP' ? '↑' : dir === 'DOWN' ? '↓' : dir === 'LEFT' ? '←' : '→';
-                      return entry.type === 'dart' || entry.type === 'rattle' ? `⚡${arrow}` : arrow;
-                    }).join('')}
-                  </span>
-                  <span className="shrink-0 w-7 text-right text-base leading-none font-black tabular-nums">
-                    {!locked && countdown !== null && gameState.phase !== 'OVER' ? `${countdown}s` : ''}
-                  </span>
-                </div>
-              ) : (
-                <div className={`mt-1.5 bg-[#8BAC0F]/30 border border-[#0F380F]/60 px-1.5 h-7 flex items-center justify-between gap-1 overflow-hidden ${locked ? 'opacity-100 font-bold' : 'opacity-75'}`}>
-                  <span className="text-[10px] truncate tabular-nums">
-                    {thinkLabel(who)} {locked ? '🔒' : countdown === null ? `(${buffer.length})` : ''}
-                  </span>
-                  <span className="shrink-0 w-7 text-right text-base leading-none font-black tabular-nums">
-                    {!locked && countdown !== null && gameState.phase !== 'OVER' ? `${countdown}s` : ''}
-                  </span>
-                </div>
-              )
+              <span className="text-[9px] font-bold opacity-80 whitespace-nowrap shrink-0">
+                {lastTurn !== null ? `${lastTurn.toFixed(1)}s / ${fmtTotal(totalThink)}` : `TOT ${fmtTotal(totalThink)}`}
+              </span>
             )}
           </div>
-        );
-      })}
+        </div>
+        {gameState.turnBased && (
+          local ? (
+            <div className="mt-1.5 bg-[#8BAC0F]/40 border border-[#0F380F] px-1.5 h-7 flex items-center justify-between gap-1 text-[9px] font-bold">
+              <span className="shrink-0 tabular-nums">{locked ? '🔒 ' : '✏️ '}QUEUE {buffer.length}/{snake.body.length}</span>
+              <span className="min-w-0 flex-1 truncate text-right opacity-80">
+                {buffer.map(entry => {
+                  const dir = entry.direction;
+                  const arrow = dir === 'UP' ? '↑' : dir === 'DOWN' ? '↓' : dir === 'LEFT' ? '←' : '→';
+                  return entry.type === 'dart' || entry.type === 'rattle' ? `⚡${arrow}` : arrow;
+                }).join('')}
+              </span>
+              <span className="shrink-0 w-7 text-right text-base leading-none font-black tabular-nums">
+                {!locked && countdown !== null && gameState.phase !== 'OVER' ? `${countdown}s` : ''}
+              </span>
+            </div>
+          ) : (
+            <div className={`mt-1.5 bg-[#8BAC0F]/30 border border-[#0F380F]/60 px-1.5 h-7 flex items-center justify-between gap-1 overflow-hidden ${locked ? 'opacity-90' : 'font-black'}`}>
+              <span className="text-[10px] truncate tabular-nums">
+                {thinkLabel(who)} {locked ? '🔒' : countdown === null ? `(${buffer.length})` : ''}
+              </span>
+              <span className="shrink-0 w-7 text-right text-base leading-none font-black tabular-nums">
+                {!locked && countdown !== null && gameState.phase !== 'OVER' ? `${countdown}s` : ''}
+              </span>
+            </div>
+          )
+        )}
+      </div>
+    );
+  };
+
+  const renderMobileCards = (
+    <div className="mobile-cards-area grid grid-cols-2 gap-2 w-full font-mono text-[#0F380F] shrink-0">
+      <div className="flex flex-col gap-2 min-w-0">
+        {leftSnakes.map(snake => renderMobilePlayerCard(snake))}
+      </div>
+      <div className="flex flex-col gap-2 min-w-0">
+        {rightSnakes.map(snake => renderMobilePlayerCard(snake))}
+      </div>
     </div>
   );
 
@@ -390,11 +465,12 @@ export const Hud: React.FC<HudProps> = ({
       </div>
 
       <div className="portrait-opponents hidden w-full items-center gap-1 border-2 border-[#0F380F] bg-[#9BBC0F] px-1 py-0.5 font-mono text-[10px] font-bold text-[#0F380F]">
-        {gameState.snakes.map((snake) => {
+        {gameState.snakes.map((snake, idx) => {
           const who = snake.id;
+          const palette = getPlayerColorPalette(snake, idx);
           return (
-            <div key={who} className="flex min-w-0 flex-1 items-center gap-1">
-              <span className={`h-2 w-2 shrink-0 border border-[#0F380F] ${who === 'p1' ? 'bg-[#0F380F]' : 'bg-[#306230]'}`} />
+            <div key={who} className={`flex min-w-0 flex-1 items-center gap-1 ${isLocked(who) ? 'opacity-60' : 'opacity-100'}`}>
+              <span className={`h-2.5 w-2.5 shrink-0 border border-[#0F380F] ${palette.chipBg}`} />
               <span className="min-w-0 flex-1 truncate">{snake.name}</span>
               <span className="shrink-0">{snake.score}</span>
               <span className="shrink-0 opacity-80">L{snake.body.length}</span>
@@ -405,11 +481,13 @@ export const Hud: React.FC<HudProps> = ({
       </div>
 
       <div className="desktop-panel-left">
-        {gameState.snakes[0] && renderDesktopPlayerPanel(gameState.snakes[0].id)}
+        {leftSnakes.map(snake => (
+          <React.Fragment key={snake.id}>{renderDesktopPlayerPanel(snake.id)}</React.Fragment>
+        ))}
       </div>
 
       <div className="desktop-panel-right">
-        {gameState.snakes.slice(1).map(snake => (
+        {rightSnakes.map(snake => (
           <React.Fragment key={snake.id}>{renderDesktopPlayerPanel(snake.id)}</React.Fragment>
         ))}
       </div>

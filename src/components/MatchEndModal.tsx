@@ -6,6 +6,7 @@ import { RotateCcw, Home, Trophy, AlertTriangle, Play, ArrowLeft } from 'lucide-
 import { computeMatchStats, computeTurnLedger, MatchSummaryStats, TurnLedgerEntry } from '../game/stats';
 import { TurnDecision } from '../game/replayFile';
 import { getCampaignObjectiveProgress, isCampaignObjectiveComplete } from '../game/objectives';
+import { getPlayerColorPalette, splitPlayersTwoPerSide } from '../game/playerColors';
 
 interface MatchEndModalProps {
   gameState: GameState;
@@ -25,8 +26,16 @@ interface MatchEndModalProps {
   turnDecisions?: TurnDecision[];
 }
 
-export const Sparkline: React.FC<{ p1Scores: number[]; p2Scores: number[] }> = ({ p1Scores, p2Scores }) => {
-  const maxScore = Math.max(1, ...p1Scores, ...p2Scores);
+export const Sparkline: React.FC<{
+  p1Scores: number[];
+  p2Scores: number[];
+  scoresBySeat?: Record<string, number[]>;
+}> = ({ p1Scores, p2Scores, scoresBySeat }) => {
+  const seatEntries = scoresBySeat && Object.keys(scoresBySeat).length > 0
+    ? Object.entries(scoresBySeat)
+    : [['p1', p1Scores], ['p2', p2Scores]] as [string, number[]][];
+  const allValues = seatEntries.flatMap(([, scores]) => scores);
+  const maxScore = Math.max(1, ...allValues);
   const width = 110;
   const height = 18;
   const points = (scores: number[]) => {
@@ -40,16 +49,31 @@ export const Sparkline: React.FC<{ p1Scores: number[]; p2Scores: number[] }> = (
 
   return (
     <svg width={width} height={height} className="inline-block overflow-visible align-middle">
-      <polyline fill="none" stroke="#0F380F" strokeWidth="1.5" points={points(p1Scores)} />
-      <polyline fill="none" stroke="#306230" strokeWidth="1.5" strokeDasharray="2 2" points={points(p2Scores)} />
+      {seatEntries.map(([seat, scores], idx) => {
+        const palette = getPlayerColorPalette(seat, idx);
+        return (
+          <polyline
+            key={seat}
+            fill="none"
+            stroke={palette.hex}
+            strokeWidth="1.5"
+            strokeDasharray={idx % 2 === 1 ? '2 2' : undefined}
+            points={points(scores)}
+          />
+        );
+      })}
     </svg>
   );
 };
 
-export const TurnLedgerView: React.FC<{ entries: TurnLedgerEntry[]; matchStats: MatchSummaryStats }> = ({ entries, matchStats }) => {
+export const TurnLedgerView: React.FC<{ entries: TurnLedgerEntry[]; matchStats: MatchSummaryStats; snakes?: GameState['snakes'] }> = ({ entries, matchStats, snakes }) => {
   const [isOpen, setIsOpen] = useState(false);
-  const p1Entries = entries.filter(e => e.seat === 'p1');
-  const p2Entries = entries.filter(e => e.seat === 'p2');
+  const activeSeats = snakes && snakes.length > 0
+    ? snakes.map((snake, idx) => ({ id: snake.id, name: snake.name, color: snake.color, idx }))
+    : [
+        { id: 'p1', name: 'P1', color: '#0F380F', idx: 0 },
+        { id: 'p2', name: 'P2', color: '#306230', idx: 1 },
+      ];
 
   return (
     <>
@@ -64,55 +88,45 @@ export const TurnLedgerView: React.FC<{ entries: TurnLedgerEntry[]; matchStats: 
         <span>TURNS: {matchStats.totalTurns} · TIME: {matchStats.durationFormatted} <span className="underline">{isOpen ? '▴ HIDE LEDGER' : '▾ SHOW LEDGER'}</span></span>
         <span className="flex items-center gap-1" onClick={(e) => e.stopPropagation()}>
           <span className="opacity-80">SCORE:</span>
-          <Sparkline p1Scores={matchStats.p1Scores} p2Scores={matchStats.p2Scores} />
+          <Sparkline
+            p1Scores={matchStats.p1Scores}
+            p2Scores={matchStats.p2Scores}
+            scoresBySeat={matchStats.scoresBySeat}
+          />
         </span>
       </div>
 
       {isOpen && (
         <div className="flex flex-col sm:grid sm:grid-cols-2 gap-2 shrink-0 animate-fadeIn">
-          {/* P1 Column */}
-          <div className="bg-[#8BAC0F] border-2 border-[#0F380F] p-1.5 text-left text-[10px] font-mono">
-            <div className="font-black border-b border-[#0F380F] pb-0.5 mb-1 flex justify-between">
-              <span>P1 TURNS</span>
-              <span>({p1Entries.length})</span>
-            </div>
-            <div className="space-y-1 max-h-36 overflow-y-auto pr-1">
-              {p1Entries.length === 0 ? (
-                <div className="opacity-60 italic text-center py-2">No turns recorded</div>
-              ) : (
-                p1Entries.map((e, idx) => (
-                  <div key={idx} className="bg-[#9BBC0F] border border-[#0F380F] p-1 flex flex-wrap items-center justify-between gap-1 tabular-nums">
-                    <span className="font-black">T{e.tick}</span>
-                    <span className="font-bold tracking-widest text-[#306230]">{e.arrows.length > 0 ? e.arrows.join(' ') : '—'}</span>
-                    <span className="opacity-95">{e.lockTimeMs > 0 ? `${(e.lockTimeMs / 1000).toFixed(1)}s` : '—'}{e.isAutoLock ? ' [AUTO]' : ''}</span>
-                    <span className="font-bold">{e.tokensCollected > 0 ? `+${e.tokensCollected} 💎` : e.terminalResult || (e.scoreDelta !== 0 ? `${e.scoreDelta > 0 ? '+' : ''}${e.scoreDelta}` : '')}</span>
-                  </div>
-                ))
-              )}
-            </div>
-          </div>
-
-          {/* P2 Column */}
-          <div className="bg-[#8BAC0F] border-2 border-[#0F380F] p-1.5 text-left text-[10px] font-mono">
-            <div className="font-black border-b border-[#0F380F] pb-0.5 mb-1 flex justify-between">
-              <span>P2 TURNS</span>
-              <span>({p2Entries.length})</span>
-            </div>
-            <div className="space-y-1 max-h-36 overflow-y-auto pr-1">
-              {p2Entries.length === 0 ? (
-                <div className="opacity-60 italic text-center py-2">No turns recorded</div>
-              ) : (
-                p2Entries.map((e, idx) => (
-                  <div key={idx} className="bg-[#9BBC0F] border border-[#0F380F] p-1 flex flex-wrap items-center justify-between gap-1 tabular-nums">
-                    <span className="font-black">T{e.tick}</span>
-                    <span className="font-bold tracking-widest text-[#306230]">{e.arrows.length > 0 ? e.arrows.join(' ') : '—'}</span>
-                    <span className="opacity-95">{e.lockTimeMs > 0 ? `${(e.lockTimeMs / 1000).toFixed(1)}s` : '—'}{e.isAutoLock ? ' [AUTO]' : ''}</span>
-                    <span className="font-bold">{e.tokensCollected > 0 ? `+${e.tokensCollected} 💎` : e.terminalResult || (e.scoreDelta !== 0 ? `${e.scoreDelta > 0 ? '+' : ''}${e.scoreDelta}` : '')}</span>
-                  </div>
-                ))
-              )}
-            </div>
-          </div>
+          {activeSeats.map((seatInfo) => {
+            const seatEntries = entries.filter(e => e.seat === seatInfo.id);
+            const palette = getPlayerColorPalette({ id: seatInfo.id, color: seatInfo.color }, seatInfo.idx);
+            return (
+              <div key={seatInfo.id} className={`bg-[#8BAC0F] border-2 ${palette.borderColor} p-1.5 text-left text-[10px] font-mono`}>
+                <div className="font-black border-b border-[#0F380F] pb-0.5 mb-1 flex justify-between items-center gap-1">
+                  <span className="flex items-center gap-1 truncate">
+                    <span className={`inline-block w-2 h-2 shrink-0 border border-[#0F380F] ${palette.chipBg}`} />
+                    <span className="truncate">{seatInfo.name} TURNS</span>
+                  </span>
+                  <span className="shrink-0">({seatEntries.length})</span>
+                </div>
+                <div className="space-y-1 max-h-36 overflow-y-auto pr-1">
+                  {seatEntries.length === 0 ? (
+                    <div className="opacity-60 italic text-center py-2">No turns recorded</div>
+                  ) : (
+                    seatEntries.map((e, idx) => (
+                      <div key={idx} className="bg-[#9BBC0F] border border-[#0F380F] p-1 flex flex-wrap items-center justify-between gap-1 tabular-nums">
+                        <span className="font-black">T{e.tick}</span>
+                        <span className="font-bold tracking-widest text-[#306230]">{e.arrows.length > 0 ? e.arrows.join(' ') : '—'}</span>
+                        <span className="opacity-95">{e.lockTimeMs > 0 ? `${(e.lockTimeMs / 1000).toFixed(1)}s` : '—'}{e.isAutoLock ? ' [AUTO]' : ''}</span>
+                        <span className="font-bold">{e.tokensCollected > 0 ? `+${e.tokensCollected} 💎` : e.terminalResult || (e.scoreDelta !== 0 ? `${e.scoreDelta > 0 ? '+' : ''}${e.scoreDelta}` : '')}</span>
+                      </div>
+                    ))
+                  )}
+                </div>
+              </div>
+            );
+          })}
         </div>
       )}
     </>
@@ -143,9 +157,10 @@ export const MatchEndModal: React.FC<MatchEndModalProps> = ({
   const winnerSnake = gameState.winner && gameState.winner !== 'DRAW'
     ? gameState.snakes.find(snake => snake.id === gameState.winner) ?? null
     : null;
-  
-  const [expandedP1, setExpandedP1] = useState(true);
-  const [expandedP2, setExpandedP2] = useState(true);
+
+  const [expandedBySeat, setExpandedBySeat] = useState<Record<string, boolean>>(() =>
+    Object.fromEntries(gameState.snakes.map(snake => [snake.id, true]))
+  );
 
   const history = matchHistory.length > 0 ? matchHistory : [gameState];
   const matchStats = computeMatchStats(history, turnDecisions);
@@ -253,9 +268,83 @@ export const MatchEndModal: React.FC<MatchEndModalProps> = ({
     );
   }
 
+  const indexedSnakes = gameState.snakes.map((snake, index) => ({ snake, index }));
+  const { left: leftSnakes, right: rightSnakes } = splitPlayersTwoPerSide(indexedSnakes);
+
+  const renderStatCard = ({ snake, index }: { snake: GameState['snakes'][number]; index: number }) => {
+    const who = snake.id;
+    const stats = matchStats.statsBySeat[who] ?? (who === 'p1' ? matchStats.p1Stats : matchStats.p2Stats);
+    const isExpanded = expandedBySeat[who] ?? true;
+    const isWinner = gameState.winner === who;
+    const palette = getPlayerColorPalette(snake, index);
+
+    return (
+      <div
+        key={who}
+        data-testid={`match-end-card-${who}`}
+        className={`p-2 [@media(max-height:520px)]:p-1.5 border-2 ${palette.borderColor} ${palette.defaultShadow} flex flex-col items-center transition-all ${
+          isWinner ? 'bg-[#9BBC0F]' : 'bg-[#8BAC0F]/90'
+        }`}
+      >
+        <div
+          onClick={() => {
+            soundEngine.playMenuSelect();
+            setExpandedBySeat(prev => ({ ...prev, [who]: !(prev[who] ?? true) }));
+          }}
+          className="flex items-center justify-between gap-1.5 w-full text-[11px] font-bold cursor-pointer hover:opacity-80"
+          title="Tap to toggle panel"
+        >
+          <span className="flex items-center gap-1.5 min-w-0 truncate">
+            <span
+              data-testid={`match-end-color-chip-${who}`}
+              className={`inline-block w-2.5 h-2.5 shrink-0 border border-[#0F380F] ${palette.chipBg}`}
+              title={`Snake Color ${palette.hex}`}
+            />
+            <span
+              data-testid={`match-end-standing-${who}`}
+              className={`px-1 py-0.5 text-[9px] font-black leading-none shrink-0 border border-[#0F380F] ${
+                stats.standing === 1 ? 'bg-[#0F380F] text-[#9BBC0F]' : 'bg-[#9BBC0F] text-[#0F380F]'
+              }`}
+            >
+              {stats.standingLabel}
+            </span>
+            <span className="truncate font-black">{snake.name}</span>
+          </span>
+          <span className="text-[9px] opacity-80 shrink-0">{isExpanded ? '▴ HIDE STATS' : '▾ SHOW STATS'}</span>
+        </div>
+
+        {/* Standings summary bar: Points, Tokens, Kills */}
+        <div className="grid grid-cols-3 gap-1 w-full mt-1.5 [@media(max-height:520px)]:mt-1 bg-[#9BBC0F]/70 border border-[#0F380F] px-1.5 py-1 text-center">
+          <div className="flex flex-col items-center">
+            <span className="text-sm [@media(max-height:520px)]:text-xs font-black leading-none tabular-nums">{stats.points}</span>
+            <span className="text-[8px] font-bold opacity-80 uppercase mt-0.5">POINTS</span>
+          </div>
+          <div className="flex flex-col items-center border-x border-[#0F380F]/40">
+            <span className="text-sm [@media(max-height:520px)]:text-xs font-black leading-none tabular-nums">{stats.tokensCollected}</span>
+            <span className="text-[8px] font-bold opacity-80 uppercase mt-0.5">TOKENS</span>
+          </div>
+          <div className="flex flex-col items-center">
+            <span className="text-sm [@media(max-height:520px)]:text-xs font-black leading-none tabular-nums">{stats.kills}</span>
+            <span className="text-[8px] font-bold opacity-80 uppercase mt-0.5">KILLS</span>
+          </div>
+        </div>
+
+        {isExpanded && (
+          <div className="mt-1.5 pt-1.5 border-t border-[#0F380F] w-full text-left text-[10px] font-bold space-y-1 bg-[#8BAC0F]/50 p-1.5">
+            <div className="flex justify-between"><span>Avg Lock:</span><span className="tabular-nums">{stats.avgLockTime}</span></div>
+            <div className="flex justify-between"><span>Fast / Slow:</span><span className="tabular-nums">{stats.fastestLock} / {stats.slowestLock}</span></div>
+            <div className="flex justify-between"><span>Auto-Locks:</span><span className="tabular-nums">{stats.autoLockPct}</span></div>
+            <div className="flex justify-between"><span>Avg Queue:</span><span className="tabular-nums">{stats.avgQueueLen}</span></div>
+            <div className="flex justify-between"><span>Outcome:</span><span className="truncate max-w-[110px]">{stats.causeOfDeath}</span></div>
+          </div>
+        )}
+      </div>
+    );
+  };
+
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-2 sm:p-4 [@media(max-height:520px)]:p-1 bg-black/80 backdrop-blur-xs font-mono select-none">
-      <div className="mobile-scroll-panel w-full max-w-sm [@media(orientation:landscape)]:max-w-[640px] max-h-[96dvh] [@media(max-height:520px)]:max-h-[98dvh] bg-[#9BBC0F] border-4 border-[#0F380F] shadow-[8px_8px_0px_#0F380F] [@media(max-height:520px)]:shadow-[4px_4px_0px_#0F380F] text-[#0F380F] p-3 sm:p-4 [@media(max-height:520px)]:p-2 flex flex-col justify-between gap-2 [@media(max-height:520px)]:gap-1 text-center overflow-y-auto">
+      <div className="mobile-scroll-panel w-full max-w-sm sm:max-w-[660px] [@media(orientation:landscape)]:max-w-[680px] max-h-[96dvh] [@media(max-height:520px)]:max-h-[98dvh] bg-[#9BBC0F] border-4 border-[#0F380F] shadow-[8px_8px_0px_#0F380F] [@media(max-height:520px)]:shadow-[4px_4px_0px_#0F380F] text-[#0F380F] p-3 sm:p-4 [@media(max-height:520px)]:p-2 flex flex-col justify-between gap-2 [@media(max-height:520px)]:gap-1 text-center overflow-y-auto">
         {/* Banner */}
         <div className="border-b-4 [@media(max-height:520px)]:border-b-2 border-[#0F380F] pb-2 [@media(max-height:520px)]:pb-1 shrink-0">
           <div className="flex items-center justify-center gap-2">
@@ -271,6 +360,30 @@ export const MatchEndModal: React.FC<MatchEndModalProps> = ({
           <div className="text-xs [@media(max-height:520px)]:text-[11px] font-bold mt-1 [@media(max-height:520px)]:mt-0.5 text-[#306230] leading-snug">
             {gameState.winReason}
           </div>
+          {/* Final Standings Banner (1st - 4th) */}
+          {matchStats.standings.length > 0 && (
+            <div
+              data-testid="match-end-standings-strip"
+              className="mt-1.5 flex flex-wrap items-center justify-center gap-1.5 text-[10px] font-black"
+            >
+              {matchStats.standings.map((entry) => {
+                const snakeIndex = gameState.snakes.findIndex(s => s.id === entry.id);
+                const palette = getPlayerColorPalette({ id: entry.id, color: entry.color }, snakeIndex >= 0 ? snakeIndex : 0);
+                return (
+                  <span
+                    key={entry.id}
+                    className={`inline-flex items-center gap-1 px-1.5 py-0.5 border border-[#0F380F] ${
+                      entry.standing === 1 ? 'bg-[#0F380F] text-[#9BBC0F]' : 'bg-[#8BAC0F] text-[#0F380F]'
+                    }`}
+                  >
+                    <span className={`inline-block w-2 h-2 border border-[#9BBC0F]/60 ${palette.chipBg}`} />
+                    <span>{entry.standingLabel} {entry.name}</span>
+                    <span className="opacity-85">({entry.points} PTS · {entry.tokensCollected} 💎 · {entry.kills} ⚔)</span>
+                  </span>
+                );
+              })}
+            </div>
+          )}
         </div>
 
         {objectiveRows.length > 0 && (
@@ -288,54 +401,21 @@ export const MatchEndModal: React.FC<MatchEndModalProps> = ({
           </div>
         )}
 
-        {/* Final Stats Breakdown — Independent Expandable Player Cards */}
-        <div className="flex flex-col sm:grid sm:grid-cols-2 gap-2 bg-[#8BAC0F] p-2.5 [@media(max-height:520px)]:p-1.5 border-2 border-[#0F380F] shrink-0">
-          {(['p1', 'p2'] as const).map((who) => {
-            const snake = who === 'p1' ? p1 : p2;
-            const stats = who === 'p1' ? matchStats.p1Stats : matchStats.p2Stats;
-            const isExpanded = who === 'p1' ? expandedP1 : expandedP2;
-            const isWinner = gameState.winner === who;
-
-            return (
-              <div
-                key={who}
-                className={`p-2 [@media(max-height:520px)]:p-1.5 border-2 border-[#0F380F] flex flex-col items-center transition-all ${
-                  isWinner ? 'bg-[#9BBC0F]' : 'bg-[#8BAC0F]/85'
-                }`}
-              >
-                <div
-                  onClick={() => {
-                    soundEngine.playMenuSelect();
-                    if (who === 'p1') setExpandedP1(prev => !prev);
-                    else setExpandedP2(prev => !prev);
-                  }}
-                  className="flex items-center justify-between w-full text-[11px] font-bold cursor-pointer hover:opacity-80"
-                  title="Tap to toggle panel"
-                >
-                  <span className="truncate">{snake.name}</span>
-                  <span className="text-[9px] opacity-80">{isExpanded ? '▴ HIDE STATS' : '▾ SHOW STATS'}</span>
-                </div>
-                <div className="flex items-baseline gap-1 mt-1 [@media(max-height:520px)]:mt-0.5">
-                  <span className="text-3xl [@media(max-height:520px)]:text-xl font-black leading-none">{snake.score}</span>
-                  <span className="text-[10px] font-bold opacity-80 uppercase">TOKENS</span>
-                </div>
-
-                {isExpanded && (
-                  <div className="mt-2 pt-2 border-t border-[#0F380F] w-full text-left text-[10px] font-bold space-y-1 bg-[#8BAC0F]/50 p-1.5">
-                    <div className="flex justify-between"><span>Avg Lock:</span><span className="tabular-nums">{stats.avgLockTime}</span></div>
-                    <div className="flex justify-between"><span>Fast / Slow:</span><span className="tabular-nums">{stats.fastestLock} / {stats.slowestLock}</span></div>
-                    <div className="flex justify-between"><span>Auto-Locks:</span><span className="tabular-nums">{stats.autoLockPct}</span></div>
-                    <div className="flex justify-between"><span>Avg Queue:</span><span className="tabular-nums">{stats.avgQueueLen}</span></div>
-                    <div className="flex justify-between"><span>Outcome:</span><span className="truncate max-w-[110px]">{stats.causeOfDeath}</span></div>
-                  </div>
-                )}
-              </div>
-            );
-          })}
+        {/* Final Stats Breakdown — 2 cards per side (Left: P1, P2; Right: P3, P4) */}
+        <div
+          data-testid="match-end-cards-grid"
+          className="flex flex-col sm:grid sm:grid-cols-2 gap-2 bg-[#8BAC0F] p-2.5 [@media(max-height:520px)]:p-1.5 border-2 border-[#0F380F] shrink-0"
+        >
+          <div data-testid="match-end-side-left" className="flex flex-col gap-2">
+            {leftSnakes.map(renderStatCard)}
+          </div>
+          <div data-testid="match-end-side-right" className="flex flex-col gap-2">
+            {rightSnakes.map(renderStatCard)}
+          </div>
         </div>
 
         {/* Per-Turn Detail Ledger (with collapsible TURNS/TIME toggle row) */}
-        <TurnLedgerView entries={turnLedgerEntries} matchStats={matchStats} />
+        <TurnLedgerView entries={turnLedgerEntries} matchStats={matchStats} snakes={gameState.snakes} />
 
         {/* Series scoreboard + think-time totals */}
         {((series && (series.p1 + series.p2 + series.draws) > 0) ||
@@ -349,7 +429,7 @@ export const MatchEndModal: React.FC<MatchEndModalProps> = ({
             )}
             {gameState.turnBased && Object.values(gameState.totalThinkTime).some(seconds => seconds > 0) && (
               <span className="text-[10px] font-bold opacity-85">
-                ⏱ THINK — {gameState.snakes.slice(0, 2).map(snake =>
+                ⏱ THINK — {gameState.snakes.map(snake =>
                   `${snake.name} ${Math.floor((gameState.totalThinkTime[snake.id] ?? 0) / 60)}:${String(Math.floor((gameState.totalThinkTime[snake.id] ?? 0) % 60)).padStart(2, '0')}`,
                 ).join(' · ')}
               </span>

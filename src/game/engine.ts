@@ -492,11 +492,14 @@ export function processGameTick(
     return darter.skillPoints > opponent.skillPoints &&
       darter.body.length > opponent.body.length;
   };
-  const snipeKill = (snakes: Snake[], victimIdx: number, events: { deathOccurred: boolean }) => {
+  const snipeKill = (snakes: Snake[], victimIdx: number, darterIdx: number, events: { deathOccurred: boolean }) => {
     const victim = snakes[victimIdx];
+    const darter = snakes[darterIdx];
     victim.isAlive = false;
     victim.deathPosition = { ...victim.body[0] };
     victim.deathReason = 'OPPONENT';
+    victim.killedBy = darter.id;
+    darter.kills = (darter.kills ?? 0) + 1;
     // Vaporized by the dart: the corpse must not block the darter's remaining
     // sub-steps (or the snipe would suicide whenever the path crosses the body).
     victim.body = [];
@@ -539,7 +542,7 @@ export function processGameTick(
     const willGrow = nextHeads.map((head, idx) =>
       movingIndices.includes(idx) && state.tokens.some(token => token.x === head.x && token.y === head.y),
     );
-    const deaths = snakes.map(() => ({ wall: false, self: false, body: false, headOn: false }));
+    const deaths = snakes.map(() => ({ wall: false, self: false, body: false, headOn: false, killerId: undefined as string | undefined }));
 
     for (const i of movingIndices) {
       const snake = snakes[i];
@@ -555,6 +558,7 @@ export function processGameTick(
           : snakes[j].body.slice(0, -1);
         if (otherBody.some(segment => segment.x === head.x && segment.y === head.y)) {
           deaths[i].body = true;
+          deaths[i].killerId = snakes[j].id;
         }
       }
     }
@@ -577,7 +581,7 @@ export function processGameTick(
             const darterIdx = iDarting ? i : j;
             const victimIdx = iDarting ? j : i;
             if (snipeIsLethal(snakes[darterIdx], snakes[victimIdx])) {
-              snipeKill(snakes, victimIdx, events);
+              snipeKill(snakes, victimIdx, darterIdx, events);
               continue;
             }
           }
@@ -598,10 +602,12 @@ export function processGameTick(
           if (i === j || !snakes[j].isAlive || movingIndices.includes(j)) continue;
           if (nextHeads[i].x === snakes[j].body[0].x && nextHeads[i].y === snakes[j].body[0].y) {
             if (activeDarts.has(snakes[i].id) && snipeIsLethal(snakes[i], snakes[j])) {
-              snipeKill(snakes, j, events);
+              snipeKill(snakes, j, i, events);
               deaths[i].body = false;
+              deaths[i].killerId = undefined;
             } else {
               deaths[i].body = true;
+              deaths[i].killerId = snakes[j].id;
             }
           }
         }
@@ -615,6 +621,13 @@ export function processGameTick(
       snake.isAlive = false;
       snake.deathPosition = nextHeads[i];
       snake.deathReason = death.headOn ? 'HEAD_ON' : death.wall ? 'WALL' : death.self ? 'SELF' : 'OPPONENT';
+      if (snake.deathReason === 'OPPONENT' && death.killerId) {
+        snake.killedBy = death.killerId;
+        const killer = snakes.find(candidate => candidate.id === death.killerId);
+        if (killer) {
+          killer.kills = (killer.kills ?? 0) + 1;
+        }
+      }
       return true;
     });
 

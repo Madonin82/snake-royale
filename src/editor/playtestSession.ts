@@ -26,10 +26,14 @@ export function getExportableCampaignLevel(level: CampaignLevel): CampaignLevel 
   return {
     ...level,
     skillsAvailable: level.skillsAvailable ?? 'after_race',
-    spawns: getEnabledSpawns(level).map(({ enabled: _enabled, ...spawn }) => ({
-      ...spawn,
-      equippedSkill: spawn.equippedSkill ?? (isAvalenaStyle(spawn.aiStyle) ? 'dart' : null),
-    })),
+    spawns: getEnabledSpawns(level).map(({ enabled: _enabled, name, ...spawn }) => {
+      const trimmedName = name?.trim();
+      return {
+        ...spawn,
+        ...(trimmedName ? { name: trimmedName } : {}),
+        equippedSkill: spawn.equippedSkill ?? (isAvalenaStyle(spawn.aiStyle) ? 'dart' : null),
+      };
+    }),
   };
 }
 
@@ -156,10 +160,12 @@ export function createCampaignPlaytestState(
       : createSpawnBody(spawn, level.gridSize, wallCells, occupied);
     const template = initial.snakes[index] ?? initial.snakes[1];
     const avalena = index > 0 && isAvalenaStyle(spawn.aiStyle);
+    const customName = spawn.name?.trim();
+    const defaultName = index === 0 ? template.name : avalena ? 'AVALENA' : `BOT ${index + 1}`;
     return {
       ...template,
       id: `p${index + 1}`,
-      name: index === 0 ? template.name : avalena ? 'AVALENA' : `BOT ${index + 1}`,
+      name: (customName ? customName.toUpperCase() : defaultName).slice(0, 14),
       color: colors[index] ?? template.color,
       body,
       direction: spawn.direction,

@@ -7,6 +7,7 @@ export type CampaignAiStyle = 'GREEDY' | 'TURTLE' | 'CUTOFF' | 'HEADHUNTER' | 'P
 
 export interface SpawnConfig {
   enabled?: boolean;
+  name?: string;
   position: Position;
   direction: Direction;
   startLength: number;

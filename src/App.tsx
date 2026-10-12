@@ -1073,6 +1073,21 @@ const GameApp: React.FC<{ campaignPlaytestLevel: CampaignLevel | null }> = ({ ca
     }
   }, [aiMode, applyThinkTransition, campaignPlaytestLevel, commitLocks, dispatchAiState, isBuiltInAiActive, playTickEvents, triggerHitstop]);
 
+  // Kick off AI planning at the start of turn-based solo/playtest matches so
+  // bot cards immediately lock their initial plan and only active thinkers
+  // remain highlighted.
+  useEffect(() => {
+    if (inLobby || inOnlineLobby || replayActive) return;
+    if (!settings.turnBased || gameState.phase === 'OVER') return;
+    if (!isBuiltInAiActive()) return;
+    const hasUnlockedBot = gameState.snakes.some(
+      snake => snake.isAlive && snake.id !== 'p1' && !locksRef.current[snake.id],
+    );
+    if (hasUnlockedBot) {
+      maybeAdvanceTurn();
+    }
+  }, [gameState.phase, gameState.tick, inLobby, inOnlineLobby, isBuiltInAiActive, maybeAdvanceTurn, replayActive, settings.turnBased]);
+
   const autoLockPlayer = useCallback((who: string) => {
     if (locksRef.current[who]) return;
     const current = stateRef.current;

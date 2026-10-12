@@ -1,9 +1,14 @@
 import { GameState } from '../types/game';
 import { TurnDecision } from './replayFile';
+import { getPlayerColorPalette } from './playerColors';
 
 export interface PlayerMatchStats {
   score: number;
+  points: number;
   tokensCollected: number;
+  kills: number;
+  standing: number;
+  standingLabel: string;
   length: number;
   avgLockTime: string;
   fastestLock: string;
@@ -14,11 +19,30 @@ export interface PlayerMatchStats {
   causeOfDeath: string;
 }
 
+export interface StandingEntry {
+  id: string;
+  seat: string;
+  name: string;
+  color: string;
+  standing: number;
+  standingLabel: string;
+  points: number;
+  tokens: number;
+  tokensCollected: number;
+  kills: number;
+  length: number;
+  isAlive: boolean;
+  causeOfDeath: string;
+}
+
 export interface MatchSummaryStats {
   totalTurns: number;
   durationFormatted: string;
   scores: Record<string, number[]>;
+  scoresBySeat: Record<string, number[]>;
   playerStats: Record<string, PlayerMatchStats>;
+  statsBySeat: Record<string, PlayerMatchStats>;
+  standings: StandingEntry[];
   p1Scores: number[];
   p2Scores: number[];
   p1Stats: PlayerMatchStats;
@@ -120,13 +144,95 @@ export function computeMatchStats(
   };
 
   const turnTimes: Record<string, number[]> = {};
-  for (const st of matchHistory) {
+  const computedKills: Record<string, number> = {};
+  const deathTicks: Record<string, number> = {};
+
+  for (let i = 0; i < matchHistory.length; i++) {
+    const st = matchHistory[i];
+    const prevSt = i > 0 ? matchHistory[i - 1] : null;
     if (st.lastTurnTimes) {
       for (const [id, seconds] of Object.entries(st.lastTurnTimes)) {
         if (seconds > 0) (turnTimes[id] ??= []).push(seconds);
       }
     }
+
+    for (const snake of st.snakes ?? []) {
+      const prevSnake = prevSt?.snakes?.find(candidate => candidate.id === snake.id);
+      const justDied = prevSnake ? (prevSnake.isAlive && !snake.isAlive) : !snake.isAlive;
+      if (justDied && deathTicks[snake.id] === undefined) {
+        deathTicks[snake.id] = st.tick ?? i;
+      }
+      if (justDied) {
+        if (snake.killedBy) {
+          computedKills[snake.killedBy] = (computedKills[snake.killedBy] ?? 0) + 1;
+        } else if (snake.deathReason === 'OPPONENT' && snake.deathPosition) {
+          const killer = (st.snakes ?? []).find(
+            other =>
+              other.id !== snake.id &&
+              other.body.some(seg => seg.x === snake.deathPosition!.x && seg.y === snake.deathPosition!.y),
+          ) ?? (prevSt?.snakes ?? []).find(
+            other =>
+              other.id !== snake.id &&
+              other.body.some(seg => seg.x === snake.deathPosition!.x && seg.y === snake.deathPosition!.y),
+          );
+          if (killer) {
+            computedKills[killer.id] = (computedKills[killer.id] ?? 0) + 1;
+          }
+        }
+      }
+    }
   }
+
+  const getKillsForSeat = (seat: string): number => {
+    const snake = finalState.snakes.find(candidate => candidate.id === seat);
+    return Math.max(snake?.kills ?? 0, computedKills[seat] ?? 0);
+  };
+
+  const getDeathCause = (seat: string): string => {
+    const snake = finalState.snakes.find(candidate => candidate.id === seat);
+    let cause = 'Survived';
+    if (snake && !snake.isAlive) {
+      if (snake.deathReason === 'WALL') cause = 'Wall collision';
+      else if (snake.deathReason === 'SELF') cause = 'Self collision';
+      else if (snake.deathReason === 'OPPONENT' || snake.deathReason === 'HEAD_ON') cause = 'Opponent collision';
+      else if (snake.deathReason === 'SHRINK') cause = 'Ring shrink';
+      else cause = 'Crash';
+    } else if (finalState.phase === 'OVER' && finalState.winner && finalState.winner !== seat && finalState.winner !== 'DRAW') {
+      cause = 'Timeout / Defeat';
+    }
+    return cause;
+  };
+
+  const ORDINALS = ['1ST', '2ND', '3RD', '4TH'];
+  const sortedSnakes = [...(finalState.snakes ?? [])].sort((a, b) => {
+    if (finalState.winner && finalState.winner !== 'DRAW') {
+      if (a.id === finalState.winner && b.id !== finalState.winner) return -1;
+      if (b.id === finalState.winner && a.id !== finalState.winner) return 1;
+    }
+    if (a.isAlive !== b.isAlive) return a.isAlive ? -1 : 1;
+    if (!a.isAlive && !b.isAlive) {
+      const aDeath = deathTicks[a.id] ?? 0;
+      const bDeath = deathTicks[b.id] ?? 0;
+      if (bDeath !== aDeath) return bDeath - aDeath;
+    }
+    const aPts = a.score ?? 0;
+    const bPts = b.score ?? 0;
+    if (bPts !== aPts) return bPts - aPts;
+    const aKills = getKillsForSeat(a.id);
+    const bKills = getKillsForSeat(b.id);
+    if (bKills !== aKills) return bKills - aKills;
+    return (b.body?.length ?? 0) - (a.body?.length ?? 0);
+  });
+
+  const standingMap = new Map<string, { standing: number; standingLabel: string }>();
+  sortedSnakes.forEach((snake, idx) => {
+    standingMap.set(snake.id, {
+      standing: idx + 1,
+      standingLabel: ORDINALS[idx] ?? `${idx + 1}TH`,
+    });
+  });
+
+  const initialState = matchHistory[0] ?? finalState;
 
   const getLockStats = (seat: string): PlayerMatchStats => {
     const times = turnTimes[seat] ?? [];
@@ -143,20 +249,22 @@ export function computeMatchStats(
     const avgQueue = queueLens.length > 0 ? (queueLens.reduce((a, b) => a + b, 0) / queueLens.length).toFixed(1) : '—';
 
     const snake = finalState.snakes.find(candidate => candidate.id === seat);
-    let cause = 'Survived';
-    if (snake && !snake.isAlive) {
-      if (snake.deathReason === 'WALL') cause = 'Wall collision';
-      else if (snake.deathReason === 'SELF') cause = 'Self collision';
-      else if (snake.deathReason === 'OPPONENT' || snake.deathReason === 'HEAD_ON') cause = 'Opponent collision';
-      else if (snake.deathReason === 'SHRINK') cause = 'Ring shrink';
-      else cause = 'Crash';
-    } else if (finalState.phase === 'OVER' && finalState.winner && finalState.winner !== seat && finalState.winner !== 'DRAW') {
-      cause = 'Timeout / Defeat';
-    }
+    const initialSnake = initialState.snakes?.find(candidate => candidate.id === seat);
+    const finalScore = snake?.score ?? 0;
+    const startScore = initialSnake?.score ?? 0;
+    const tokensCollected = matchHistory.length > 1
+      ? Math.max(0, finalScore - startScore)
+      : finalScore;
+    const cause = getDeathCause(seat);
+    const rank = standingMap.get(seat) ?? { standing: 1, standingLabel: '1ST' };
 
     return {
-      score: snake?.score ?? 0,
-      tokensCollected: snake?.score ?? 0,
+      score: finalScore,
+      points: finalScore,
+      tokensCollected,
+      kills: getKillsForSeat(seat),
+      standing: rank.standing,
+      standingLabel: rank.standingLabel,
       length: snake?.body?.length ?? 0,
       avgLockTime: avgLock,
       fastestLock: fastLock,
@@ -176,6 +284,25 @@ export function computeMatchStats(
     matchHistory.map(state => state.snakes?.find(snake => snake.id === id)?.score ?? 0),
   ]));
   const playerStats = Object.fromEntries(playerIds.map(id => [id, getLockStats(id)]));
+  const standings: StandingEntry[] = sortedSnakes.map((snake, idx) => {
+    const st = playerStats[snake.id] ?? getLockStats(snake.id);
+    const palette = getPlayerColorPalette(snake, idx);
+    return {
+      id: snake.id,
+      seat: snake.id,
+      name: snake.name || snake.id.toUpperCase(),
+      color: palette.hex,
+      standing: st.standing,
+      standingLabel: st.standingLabel,
+      points: st.points,
+      tokens: st.tokensCollected,
+      tokensCollected: st.tokensCollected,
+      kills: st.kills,
+      length: st.length,
+      isAlive: snake.isAlive,
+      causeOfDeath: st.causeOfDeath,
+    };
+  });
   const p1Scores = scores[p1Id] ?? [];
   const p2Scores = scores[p2Id] ?? [];
   const totalTurns = finalState.tick ?? matchHistory.length;
@@ -190,10 +317,13 @@ export function computeMatchStats(
     totalTurns,
     durationFormatted,
     scores,
+    scoresBySeat: scores,
     playerStats,
+    statsBySeat: playerStats,
+    standings,
     p1Scores,
     p2Scores,
-    p1Stats: getLockStats(p1Id),
-    p2Stats: getLockStats(p2Id),
+    p1Stats: playerStats[p1Id] ?? getLockStats(p1Id),
+    p2Stats: playerStats[p2Id] ?? getLockStats(p2Id),
   };
 }

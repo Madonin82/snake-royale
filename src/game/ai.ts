@@ -6,6 +6,10 @@ const ALL_DIRECTIONS: Direction[] = ['UP', 'RIGHT', 'DOWN', 'LEFT'];
 
 const posKey = (p: Position): string => `${p.x},${p.y}`;
 
+function sameTeam(a: Snake, b: Snake): boolean {
+  return Boolean(a.teamId && b.teamId && a.teamId === b.teamId);
+}
+
 /** Standard tiebreak: skill points, then length. Returns the winner, or null on a draw. */
 function tiebreakWinner(a: Snake, b: Snake): Snake | null {
   const aPts = a.skillPoints ?? 0;
@@ -94,9 +98,9 @@ function calculateAvalenaAction(
   const me = gameState.snakes.find(snake => snake.id === botRole);
   if (!me || !me.isAlive) return { direction: null, skill: null };
 
-  const player = gameState.snakes.find(snake => snake.id === 'p1') ??
-    gameState.snakes.find(snake => snake.id !== botRole && snake.isAlive) ??
-    gameState.snakes.find(snake => snake.id !== botRole);
+  const player = gameState.snakes.find(snake => snake.id === 'p1' && !sameTeam(me, snake)) ??
+    gameState.snakes.find(snake => snake.id !== botRole && snake.isAlive && !sameTeam(me, snake)) ??
+    gameState.snakes.find(snake => snake.id !== botRole && !sameTeam(me, snake));
 
   // Hunt trigger reads the skill wallet, not tokens: her design is farm → hunt →
   // farm, and the return trip only happens if darting drops her back under the
@@ -228,7 +232,7 @@ function getOpponentThreatCells(
   const threat = new Set<string>();
   const snipeTargets = new Set<string>();
   for (const snake of gameState.snakes) {
-    if (snake.id === botRole) continue;
+    if (snake.id === botRole || sameTeam(me, snake)) continue;
     for (const key of getOpponentBodyThreat(snake, gameState.tokens)) {
       threat.add(key);
     }
@@ -258,7 +262,7 @@ function calculateHuntMoveTowardTarget(
 ): Direction | null {
   const me = gameState.snakes.find(snake => snake.id === botRole);
   if (!me || !me.isAlive) return null;
-  const opponents = gameState.snakes.filter(snake => snake.id !== botRole);
+  const opponents = gameState.snakes.filter(snake => snake.id !== botRole && !sameTeam(me, snake));
   const head = me.body[0];
   const currentDir = me.direction;
   const validDirs = ALL_DIRECTIONS.filter(d => !isOppositeDirection(currentDir, d));
@@ -310,7 +314,8 @@ export function calculateAIMove(
   }
   const me = gameState.snakes.find(snake => snake.id === botRole);
   if (!me) return null;
-  const opponents = gameState.snakes.filter(snake => snake.id !== botRole);
+  const opponents = gameState.snakes.filter(snake => snake.id !== botRole && !sameTeam(me, snake));
+  const teammates = gameState.teamProtection ? gameState.snakes.filter(snake => snake.id !== botRole && sameTeam(me, snake)) : [];
   const livingOpponents = opponents.filter(snake => snake.isAlive);
 
   if (!me.isAlive) return null;
@@ -351,6 +356,14 @@ export function calculateAIMove(
       continue;
     }
 
+    // 3b. HARD RULE: Avoid Teammate Body
+    const hitsTeammateBody = teammates.some(teammate =>
+      getOpponentBodyThreat(teammate, gameState.tokens).has(posKey(nextPos)),
+    );
+    if (hitsTeammateBody) {
+      continue;
+    }
+
     // 4. Opponent Head Proximity / Head-on hazard
     // A head-on happens when both heads enter the same cell on the same
     // sub-step — i.e. my destination is in the opponent's reachable set
@@ -380,6 +393,23 @@ export function calculateAIMove(
     }
     score -= headOnPenalty;
 
+    // 4b. Multiplayer Head Proximity / Spacing Penalty (prevent clumping and mutual crashes in 3-4 player games)
+    let proximityPenalty = 0;
+    if (gameState.snakes.length > 2) {
+      for (const opponent of livingOpponents) {
+        const oppHead = opponent.body[0];
+        const distToOppHead = Math.abs(nextPos.x - oppHead.x) + Math.abs(nextPos.y - oppHead.y);
+        if (distToOppHead === 1) {
+          proximityPenalty += 600;
+        } else if (distToOppHead === 2) {
+          proximityPenalty += 180;
+        } else if (distToOppHead === 3) {
+          proximityPenalty += 40;
+        }
+      }
+    }
+    score -= proximityPenalty;
+
     // 5. Token Seeking (Manhattan Distance to nearest token)
     if (gameState.tokens.length > 0) {
       let bestTokenScore = 0;
@@ -390,7 +420,7 @@ export function calculateAIMove(
         // first — heavily discount it instead of dying for it.
         const contested = livingOpponents.some(opponent => {
           const oppDist = Math.abs(opponent.body[0].x - token.x) + Math.abs(opponent.body[0].y - token.y);
-          return oppDist < d;
+          return oppDist <= d;
         });
         const tokenScore = (gridSize * 2 - d) * 10 * (contested ? 0.15 : 1);
         if (tokenScore > bestTokenScore) bestTokenScore = tokenScore;

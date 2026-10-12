@@ -14,6 +14,7 @@ interface SettingsModalProps {
   onUpdateSettings: (newSettings: Partial<GameSettings>) => void;
   isOnlineGuest?: boolean;
   onRegisterHandler?: (handler: ((action: GamepadMenuAction) => void) | null) => void;
+  onNavigateToEditor: () => void;
 }
 
 export const SettingsModal: React.FC<SettingsModalProps> = ({
@@ -23,6 +24,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
   onUpdateSettings,
   isOnlineGuest = false,
   onRegisterHandler,
+  onNavigateToEditor,
 }) => {
   const [focusIndex, setFocusIndex] = useState<number>(0);
   const [signedInUser, setSignedInUser] = useState<User | null>(auth.currentUser);
@@ -72,7 +74,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
     }
   };
 
-  type SettingsRow = 'STYLE' | 'TURNS' | 'GRID' | 'TICKS' | 'THINK_TIME' | 'SOUND' | 'CRT' | 'ACCOUNT' | 'ADMIN' | 'CLOSE';
+  type SettingsRow = 'STYLE' | 'TURNS' | 'GRID' | 'TICKS' | 'THINK_TIME' | 'SOUND' | 'CRT' | 'ACCOUNT' | 'ADMIN' | 'EDITOR' | 'CLOSE';
 
   const baseRows: SettingsRow[] = isOnlineGuest
     ? ['SOUND', 'CRT', 'ACCOUNT', 'CLOSE']
@@ -81,7 +83,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
     : ['STYLE', 'GRID', 'TICKS', 'SOUND', 'CRT', 'ACCOUNT', 'CLOSE'];
 
   const rows: SettingsRow[] = (signedInUser && ADMIN_UIDS.includes(signedInUser.uid))
-    ? [...baseRows.slice(0, -1), 'ADMIN', 'CLOSE']
+    ? [...baseRows.slice(0, -1), 'ADMIN', 'EDITOR', 'CLOSE']
     : baseRows;
 
   const currentRow = rows[focusIndex] || rows[0];
@@ -199,6 +201,10 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
               else void handleGoogleSignIn();
             }
             break;
+          case 'EDITOR':
+            onNavigateToEditor();
+            onClose();
+            break;
           case 'CLOSE':
             onClose();
             break;
@@ -261,6 +267,8 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
           }
           case 'CRT':
             onUpdateSettings({ crtFilterEnabled: !settings.crtFilterEnabled });
+            break;
+          case 'EDITOR':
             break;
           case 'CLOSE':
             break;
@@ -679,6 +687,25 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                 </div>
               )}
             </div>
+          )}
+
+          {/* Editor Link */}
+          {signedInUser && ADMIN_UIDS.includes(signedInUser.uid) && (
+            <button
+              onMouseEnter={() => setFocusIndex(rows.indexOf('EDITOR'))}
+              onClick={() => {
+                onNavigateToEditor();
+                onClose();
+              }}
+              className={`w-full py-2 border-2 border-[#0F380F] font-black text-xs uppercase cursor-pointer flex items-center justify-center gap-2 transition-all ${
+                currentRow === 'EDITOR'
+                  ? 'bg-[#0F380F] text-[#9BBC0F] ring-3 ring-[#0F380F] scale-[1.02]'
+                  : 'bg-[#0F380F] text-[#9BBC0F]'
+              }`}
+            >
+              {currentRow === 'EDITOR' && <span className="animate-pulse">►</span>}
+              <span>OPEN LEVEL EDITOR</span>
+            </button>
           )}
         </div>
 

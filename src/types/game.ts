@@ -33,6 +33,8 @@ export interface Snake {
   pendingSkill?: PendingSkill | null;
   deathReason?: 'WALL' | 'SELF' | 'OPPONENT' | 'SHRINK' | 'HEAD_ON';
   deathPosition?: Position;
+  kills?: number;
+  killedBy?: string;
 }
 
 export type GamePhase = 'LOBBY' | 'RACING' | 'SHRINKING' | 'OVER';
