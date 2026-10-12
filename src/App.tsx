@@ -382,9 +382,23 @@ const GameApp: React.FC<{ campaignPlaytestLevel: CampaignLevel | null }> = ({ ca
     const queues: Record<string, BufferEntry[]> = Object.fromEntries(
       baseState.snakes.map(snake => [snake.id, [] as BufferEntry[]]),
     );
-    for (const d of decisions) {
-      if (d.tick === currentTick) {
-        queues[d.seat] = d.queue;
+    for (const snake of baseState.snakes) {
+      if (!snake.isAlive) continue;
+      const seat = snake.id;
+      const exactDecision = decisions.find(d => d.seat === seat && d.tick === currentTick);
+      if (exactDecision) {
+        queues[seat] = exactDecision.queue;
+        continue;
+      }
+      // If a multi-move buffer was locked on an earlier tick and is still draining on currentTick,
+      // slice the remaining uncommitted moves so the replay HUD shows the active buffer.
+      const priorDecisions = decisions.filter(d => d.seat === seat && d.tick < currentTick);
+      const latestPrior = priorDecisions[priorDecisions.length - 1];
+      if (latestPrior) {
+        const elapsedTicks = currentTick - latestPrior.tick;
+        if (elapsedTicks > 0 && elapsedTicks < latestPrior.queue.length) {
+          queues[seat] = latestPrior.queue.slice(elapsedTicks);
+        }
       }
     }
     return queues;
@@ -2670,6 +2684,7 @@ const GameApp: React.FC<{ campaignPlaytestLevel: CampaignLevel | null }> = ({ ca
               <Hud
                 gameState={displayState}
                 playMode={playMode}
+                isPlaytest={Boolean(campaignPlaytestLevel)}
                 latencyReport={latencyReport}
                 onOpenLatencyHarness={() => setLatencyModalOpen(true)}
                 onOpenSettings={() => setSettingsModalOpen(true)}

@@ -5,7 +5,8 @@ import { soundEngine } from '../audio/soundEngine';
 import { GameState } from '../types/game';
 import { TurnDecision } from '../game/replayFile';
 import { computeMatchStats, computeTurnLedger } from '../game/stats';
-import { Sparkline, TurnLedgerView } from './MatchEndModal';
+import { getPlayerColorPalette, splitPlayersTwoPerSide } from '../game/playerColors';
+import { TurnLedgerView } from './MatchEndModal';
 
 interface ReplayControlsProps {
   index: number; // current turn index (0-based)
@@ -38,15 +39,94 @@ export const ReplayControls: React.FC<ReplayControlsProps> = ({
 }) => {
   const max = Math.max(0, total - 1);
   const [statsOpen, setStatsOpen] = useState(false);
-  
-  const [expandedP1, setExpandedP1] = useState(true);
-  const [expandedP2, setExpandedP2] = useState(true);
 
   const matchStats = computeMatchStats(matchHistory, turnDecisions);
   const turnLedgerEntries = computeTurnLedger(matchHistory, turnDecisions);
   const finalState = matchHistory[matchHistory.length - 1] || matchHistory[0];
-  const p1 = finalState?.snakes?.find(snake => snake.id === 'p1') ?? finalState?.snakes?.[0] ?? { name: 'PLAYER 1', score: 0 };
-  const p2 = finalState?.snakes?.find(snake => snake.id === 'p2') ?? finalState?.snakes?.[1] ?? { name: 'PLAYER 2', score: 0 };
+  const snakes = finalState?.snakes && finalState.snakes.length > 0
+    ? finalState.snakes
+    : [
+        { id: 'p1', name: 'PLAYER 1', color: '#0F380F', score: 0, kills: 0, isAlive: true, body: [], direction: 'RIGHT' as const, queuedDirection: null, skillPoints: 0, equippedSkill: null },
+        { id: 'p2', name: 'PLAYER 2', color: '#306230', score: 0, kills: 0, isAlive: true, body: [], direction: 'LEFT' as const, queuedDirection: null, skillPoints: 0, equippedSkill: null },
+      ];
+
+  const [expandedBySeat, setExpandedBySeat] = useState<Record<string, boolean>>(() =>
+    Object.fromEntries(snakes.map(snake => [snake.id, true]))
+  );
+
+  const indexedSnakes = snakes.map((snake, idx) => ({ snake, index: idx }));
+  const { left: leftSnakes, right: rightSnakes } = splitPlayersTwoPerSide(indexedSnakes);
+
+  const renderStatCard = ({ snake, index: snakeIndex }: { snake: typeof snakes[number]; index: number }) => {
+    const who = snake.id;
+    const stats = matchStats.statsBySeat[who] ?? (who === 'p1' ? matchStats.p1Stats : matchStats.p2Stats);
+    const isExpanded = expandedBySeat[who] ?? true;
+    const isWinner = finalState?.winner === who;
+    const palette = getPlayerColorPalette(snake, snakeIndex);
+
+    return (
+      <div
+        key={who}
+        data-testid={`replay-stats-card-${who}`}
+        className={`p-2 border-2 ${palette.borderColor} ${palette.defaultShadow} flex flex-col items-center transition-all ${
+          isWinner ? 'bg-[#9BBC0F]' : 'bg-[#8BAC0F]/90'
+        }`}
+      >
+        <div
+          onClick={() => {
+            soundEngine.playMenuSelect();
+            setExpandedBySeat(prev => ({ ...prev, [who]: !(prev[who] ?? true) }));
+          }}
+          className="flex items-center justify-between gap-1.5 w-full text-[11px] font-bold cursor-pointer hover:opacity-80"
+          title="Tap to toggle panel"
+        >
+          <span className="flex items-center gap-1.5 min-w-0 truncate">
+            <span
+              data-testid={`replay-stats-color-chip-${who}`}
+              className={`inline-block w-2.5 h-2.5 shrink-0 border border-[#0F380F] ${palette.chipBg}`}
+              title={`Snake Color ${palette.hex}`}
+            />
+            <span
+              data-testid={`replay-stats-standing-${who}`}
+              className={`px-1 py-0.5 text-[9px] font-black leading-none shrink-0 border border-[#0F380F] ${
+                stats.standing === 1 ? 'bg-[#0F380F] text-[#9BBC0F]' : 'bg-[#9BBC0F] text-[#0F380F]'
+              }`}
+            >
+              {stats.standingLabel}
+            </span>
+            <span className="truncate font-black">{snake.name}</span>
+          </span>
+          <span className="text-[9px] opacity-80 shrink-0">{isExpanded ? '▴ HIDE STATS' : '▾ SHOW STATS'}</span>
+        </div>
+
+        {/* Standings summary bar: Points, Tokens, Kills */}
+        <div className="grid grid-cols-3 gap-1 w-full mt-1.5 bg-[#9BBC0F]/70 border border-[#0F380F] px-1.5 py-1 text-center">
+          <div className="flex flex-col items-center">
+            <span className="text-sm font-black leading-none tabular-nums">{stats.points}</span>
+            <span className="text-[8px] font-bold opacity-80 uppercase mt-0.5">POINTS</span>
+          </div>
+          <div className="flex flex-col items-center border-x border-[#0F380F]/40">
+            <span className="text-sm font-black leading-none tabular-nums">{stats.tokensCollected}</span>
+            <span className="text-[8px] font-bold opacity-80 uppercase mt-0.5">TOKENS</span>
+          </div>
+          <div className="flex flex-col items-center">
+            <span className="text-sm font-black leading-none tabular-nums">{stats.kills}</span>
+            <span className="text-[8px] font-bold opacity-80 uppercase mt-0.5">KILLS</span>
+          </div>
+        </div>
+
+        {isExpanded && (
+          <div className="mt-1.5 pt-1.5 border-t border-[#0F380F] w-full text-[10px] font-bold space-y-1 bg-[#8BAC0F]/50 p-1.5">
+            <div className="flex justify-between"><span>Avg Lock:</span><span className="tabular-nums">{stats.avgLockTime}</span></div>
+            <div className="flex justify-between"><span>Fast / Slow:</span><span className="tabular-nums">{stats.fastestLock} / {stats.slowestLock}</span></div>
+            <div className="flex justify-between"><span>Auto-Locks:</span><span className="tabular-nums">{stats.autoLockPct}</span></div>
+            <div className="flex justify-between"><span>Avg Queue:</span><span className="tabular-nums">{stats.avgQueueLen}</span></div>
+            <div className="flex justify-between"><span>Outcome:</span><span className="truncate max-w-[110px]">{stats.causeOfDeath}</span></div>
+          </div>
+        )}
+      </div>
+    );
+  };
 
   useEffect(() => {
     const handleAction = (action: GamepadMenuAction) => {
@@ -113,47 +193,46 @@ export const ReplayControls: React.FC<ReplayControlsProps> = ({
             </button>
           </div>
 
-          <div className="flex flex-col sm:grid sm:grid-cols-2 gap-2">
-            {(['p1', 'p2'] as const).map((who) => {
-              const snake = who === 'p1' ? p1 : p2;
-              const stats = who === 'p1' ? matchStats.p1Stats : matchStats.p2Stats;
-              const isExpanded = who === 'p1' ? expandedP1 : expandedP2;
-
-              return (
-                <div
-                  key={who}
-                  className="p-2 border-2 border-[#0F380F] bg-[#8BAC0F]/85 flex flex-col items-center"
-                >
-                  <div
-                    onClick={() => {
-                      soundEngine.playMenuSelect();
-                      if (who === 'p1') setExpandedP1(prev => !prev);
-                      else setExpandedP2(prev => !prev);
-                    }}
-                    className="flex items-center justify-between w-full text-[11px] font-bold cursor-pointer hover:opacity-80"
-                    title="Tap to toggle panel"
+          {/* Final Standings Banner (1st - 4th) */}
+          {matchStats.standings.length > 0 && (
+            <div
+              data-testid="replay-stats-standings-strip"
+              className="flex flex-wrap items-center justify-center gap-1.5 text-[10px] font-black"
+            >
+              {matchStats.standings.map((entry) => {
+                const snakeIndex = snakes.findIndex(s => s.id === entry.id);
+                const palette = getPlayerColorPalette({ id: entry.id, color: entry.color }, snakeIndex >= 0 ? snakeIndex : 0);
+                return (
+                  <span
+                    key={entry.id}
+                    className={`inline-flex items-center gap-1 px-1.5 py-0.5 border border-[#0F380F] ${
+                      entry.standing === 1 ? 'bg-[#0F380F] text-[#9BBC0F]' : 'bg-[#8BAC0F] text-[#0F380F]'
+                    }`}
                   >
-                    <span className="truncate">{snake.name}</span>
-                    <span className="text-[9px] opacity-80">{isExpanded ? '▴ HIDE STATS' : '▾ SHOW STATS'}</span>
-                  </div>
-                  <div className="text-xl font-black mt-0.5 tabular-nums">{stats.score} PTS</div>
+                    <span className={`inline-block w-2 h-2 border border-[#9BBC0F]/60 ${palette.chipBg}`} />
+                    <span>{entry.standingLabel} {entry.name}</span>
+                    <span className="opacity-85">({entry.points} PTS · {entry.tokensCollected} 💎 · {entry.kills} ⚔)</span>
+                  </span>
+                );
+              })}
+            </div>
+          )}
 
-                  {isExpanded && (
-                    <div className="mt-2 pt-1.5 border-t border-[#0F380F] w-full text-[10px] font-bold space-y-1 bg-[#8BAC0F]/50 p-1.5">
-                      <div className="flex justify-between"><span>Avg Lock:</span><span className="tabular-nums">{stats.avgLockTime}</span></div>
-                      <div className="flex justify-between"><span>Fast / Slow:</span><span className="tabular-nums">{stats.fastestLock} / {stats.slowestLock}</span></div>
-                      <div className="flex justify-between"><span>Auto-Locks:</span><span className="tabular-nums">{stats.autoLockPct}</span></div>
-                      <div className="flex justify-between"><span>Avg Queue:</span><span className="tabular-nums">{stats.avgQueueLen}</span></div>
-                      <div className="flex justify-between"><span>Outcome:</span><span className="truncate max-w-[110px]">{stats.causeOfDeath}</span></div>
-                    </div>
-                  )}
-                </div>
-              );
-            })}
+          {/* Player Stat Cards — 2 per side (Left: P1, P2; Right: P3, P4) */}
+          <div
+            data-testid="replay-stats-cards-grid"
+            className="flex flex-col sm:grid sm:grid-cols-2 gap-2"
+          >
+            <div data-testid="replay-stats-side-left" className="flex flex-col gap-2">
+              {leftSnakes.map(renderStatCard)}
+            </div>
+            <div data-testid="replay-stats-side-right" className="flex flex-col gap-2">
+              {rightSnakes.map(renderStatCard)}
+            </div>
           </div>
 
           {/* Per-Turn Detail Ledger (with collapsible TURNS/TIME toggle row) */}
-          <TurnLedgerView entries={turnLedgerEntries} matchStats={matchStats} />
+          <TurnLedgerView entries={turnLedgerEntries} matchStats={matchStats} snakes={finalState?.snakes} />
         </div>
       )}
 

@@ -1,13 +1,13 @@
 import { CampaignObjective, GameState } from '../types/game';
 
-const OBJECTIVE_PATTERN = /^(collect|first_to|survive|win_under|shutout|outscore)(?::(\d+))?$/i;
+const OBJECTIVE_PATTERN = /^(survival|collect|first_to|survive|win_under|shutout|outscore)(?::(\d+))?$/i;
 
 export function parseCampaignObjective(text: string): CampaignObjective | null {
   const match = OBJECTIVE_PATTERN.exec(text.trim());
   if (!match) return null;
 
   const kind = match[1].toLowerCase() as CampaignObjective['kind'];
-  const requiresTarget = kind !== 'shutout';
+  const requiresTarget = kind !== 'shutout' && kind !== 'survival';
   const target = requiresTarget ? Number(match[2]) : 0;
   if (requiresTarget && (!Number.isSafeInteger(target) || target < 1)) return null;
   if (!requiresTarget && match[2] !== undefined) return null;
@@ -83,6 +83,8 @@ export function isCampaignObjectiveComplete(
   if (!p1) return false;
 
   switch (objective.kind) {
+    case 'survival':
+      return state.phase === 'OVER' && state.winner === 'p1';
     case 'collect':
       return (state.campaignObjectives?.p1TokensCollected ?? 0) >= objective.target;
     case 'first_to':
@@ -104,6 +106,16 @@ export function getCampaignObjectiveProgress(
   objectiveIndex: number,
 ): string {
   switch (objective.kind) {
+    case 'survival': {
+      const aliveCount = state.snakes.filter(snake => snake.isAlive).length;
+      if (state.phase === 'OVER') {
+        const winnerSnake = state.snakes.find(snake => snake.id === state.winner);
+        return state.winner === 'DRAW'
+          ? 'Survival: Draw (Tiebreak)'
+          : `Survival: ${winnerSnake?.name ?? 'Winner'} wins`;
+      }
+      return `Survival: ${aliveCount}/${state.snakes.length} alive`;
+    }
     case 'collect':
       return `Tokens: ${state.campaignObjectives?.p1TokensCollected ?? 0}/${objective.target}`;
     case 'first_to': {

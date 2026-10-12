@@ -7,6 +7,7 @@ import { getPlayerColorPalette, getSeatDisplayTag, splitPlayersTwoPerSide } from
 interface HudProps {
   gameState: GameState;
   playMode: PlayMode;
+  isPlaytest?: boolean;
   latencyReport: LatencyReport;
   onOpenLatencyHarness: () => void;
   onOpenSettings: () => void;
@@ -24,6 +25,7 @@ interface HudProps {
 export const Hud: React.FC<HudProps> = ({
   gameState,
   playMode,
+  isPlaytest = false,
   latencyReport,
   onOpenLatencyHarness,
   gamepadCount,
@@ -96,9 +98,12 @@ export const Hud: React.FC<HudProps> = ({
   const formattedTime = `${minutes}:${seconds < 10 ? '0' : ''}${seconds}`;
   const portraitTimerSeat = viewerSeat ?? 'p1';
   const portraitCountdown = thinkTimeRemaining?.[portraitTimerSeat] ?? null;
+  const isPlaytestHud = isPlaytest || Boolean(gameState.campaignObjectives);
+  const primaryObjective = objectiveList[0] ?? null;
+
   const topStripContent = (
     <div className="top-strip-content h-9 [@media(max-height:540px)]:h-7 flex items-center justify-between gap-2 bg-[#8BAC0F] px-2.5 border-2 border-[#0F380F] text-xs font-bold tracking-wider w-full shadow-[2px_2px_0px_#0F380F] overflow-hidden shrink-0">
-      <div className="flex items-center gap-1.5 flex-nowrap min-w-0 overflow-hidden">
+      <div className="flex items-center gap-1.5 flex-nowrap min-w-0 overflow-hidden shrink-0">
         <span
           className={`shrink-0 whitespace-nowrap px-1.5 py-0.5 [@media(max-height:540px)]:py-0 border border-[#0F380F] text-[10px] leading-tight ${
             isRacing
@@ -119,8 +124,30 @@ export const Hud: React.FC<HudProps> = ({
         </span>
       </div>
 
+      {/* Center Strip: Phase progression, Turn count, Turns left, and Primary Objective in Playtest */}
+      {isPlaytestHud && (
+        <div
+          data-testid="playtest-top-strip-center"
+          className="hidden sm:flex items-center justify-center gap-1.5 min-w-0 flex-1 px-1 overflow-hidden"
+        >
+          <span className="truncate px-2 py-0.5 [@media(max-height:540px)]:py-0 bg-[#9BBC0F] border border-[#0F380F] text-[10px] font-black text-[#0F380F] tabular-nums">
+            {isRacing
+              ? `PHASE 1: TOKEN RACE • TURN ${gameState.tick} • ${gameState.phaseTurnsRemaining} TURNS LEFT → PHASE 2 SHRINK`
+              : isShrinking
+              ? `PHASE 2: SHRINK ARENA • TURN ${gameState.tick} • RING CLOSES IN ${gameState.phaseTurnsRemaining} TURNS`
+              : `MATCH COMPLETE • ${gameState.tick} TURNS`}
+          </span>
+          {primaryObjective && (
+            <span className="hidden md:inline-flex items-center gap-1 shrink-0 px-1.5 py-0.5 [@media(max-height:540px)]:py-0 bg-[#0F380F] text-[#9BBC0F] border border-[#0F380F] text-[9px] font-black">
+              <span>{isCampaignObjectiveComplete(primaryObjective.objective, gameState, primaryObjective.index) ? '✓' : '◎'}</span>
+              <span>{getCampaignObjectiveProgress(primaryObjective.objective, gameState, primaryObjective.index)}</span>
+            </span>
+          )}
+        </div>
+      )}
+
       <div className="flex items-center gap-1.5 shrink-0">
-        {gameState.turnBased && (
+        {gameState.turnBased && !isPlaytestHud && (
           <span className="hidden lg:inline text-[9px] opacity-80 whitespace-nowrap">
             {gameState.phase === 'OVER' ? 'GAME!' : 'BOTH LOCK → BOARD STEPS'}
           </span>
@@ -222,12 +249,135 @@ export const Hud: React.FC<HudProps> = ({
     if (!snake) return null;
     const palette = getPlayerColorPalette(snake, snakeIndex);
     const locked = isLocked(who);
-    const canSeeMoves = replayActive || playMode === 'LOCAL_2P' || viewerSeat === who || gameState.snakes.length > 2;
+    const canSeeMoves = replayActive || playMode === 'LOCAL_2P' || viewerSeat === who;
     const lastTurn = gameState.lastTurnTimes?.[who] ?? null;
     const totalThink = gameState.totalThinkTime?.[who] ?? 0;
     const buffer = moveBuffers?.[who] ?? [];
     const countdown = thinkTimeRemaining?.[who] ?? null;
     const tag = seatTag(who);
+
+    if (isPlaytestHud) {
+      return (
+        <div
+          data-seat={who}
+          data-locked={locked ? 'true' : 'false'}
+          data-planning={gameState.turnBased && gameState.phase !== 'OVER' && snake.isAlive && !locked ? 'true' : 'false'}
+          className={`relative ${getCardContainerClasses(who)} ${
+            isMultiCardSide ? 'p-2' : 'p-2.5'
+          } [@media(max-height:540px)]:p-1.5 flex flex-col h-full min-h-0 overflow-hidden w-full font-mono text-[#0F380F] transition-all`}
+        >
+          {/* Row 1: Identity (Color chip + Name) & Planning Status Badge */}
+          <div className="shrink-0 flex items-center justify-between gap-1 text-xs [@media(max-height:540px)]:text-[11px] font-bold mb-1">
+            <span className="flex items-center gap-1.5 min-w-0">
+              <span
+                className={`w-3 h-3 [@media(max-height:540px)]:w-2.5 [@media(max-height:540px)]:h-2.5 shrink-0 ${palette.chipBg} inline-block border-2 border-[#0F380F] shadow-[1px_1px_0px_#0F380F]`}
+                title={`Snake color ${palette.hex}`}
+              />
+              <span className="truncate font-black">{snake.name}{tag ? ` ${tag}` : ''}</span>
+            </span>
+            <div className="flex items-center gap-1 shrink-0">
+              {renderOutcomeBadge(who)}
+              {renderPlanningStatusBadge(snake.isAlive, locked)}
+            </div>
+          </div>
+
+          {/* Row 2: Primary Score Hierarchy + Secondary Stats Pill Group (LEN & SP) + Corner Skill Tag */}
+          <div className="shrink-0 flex items-end justify-between gap-1.5 mb-1.5 pb-1 border-b border-[#0F380F]/30">
+            <div className="flex items-baseline tabular-nums leading-none">
+              <span className={`${isMultiCardSide ? 'text-xl' : 'text-2xl'} [@media(max-height:540px)]:text-lg leading-none font-black`}>
+                {snake.score}
+              </span>
+              <span className="text-[9px] font-black uppercase tracking-tight ml-1 opacity-80">PTS</span>
+            </div>
+
+            <div className="flex items-center gap-1 flex-wrap justify-end">
+              <span className="text-[9px] px-1 py-0.5 bg-[#8BAC0F]/60 border border-[#0F380F]/60 font-bold tabular-nums leading-none">
+                LEN {snake.body.length}
+              </span>
+              <span
+                className="text-[9px] px-1 py-0.5 bg-[#8BAC0F]/60 border border-[#0F380F]/60 font-bold tabular-nums leading-none"
+                title="Skill points"
+              >
+                ⚡{snake.skillPoints ?? 0} SP
+              </span>
+              {snake.equippedSkill && (
+                <span
+                  data-testid={`skill-badge-${who}`}
+                  className="text-[8px] px-1 py-0.5 bg-[#0F380F] text-[#9BBC0F] border border-[#0F380F] font-black uppercase leading-none tracking-tight"
+                  title={`Equipped Skill: ${snake.equippedSkill.toUpperCase()} (2 SP)`}
+                >
+                  ⚡{snake.equippedSkill}
+                </span>
+              )}
+            </div>
+          </div>
+
+          {/* Row 3: Compact Think Timer Bar */}
+          {gameState.turnBased && (
+            <div className="shrink-0 mb-1 px-1.5 py-0.5 bg-[#8BAC0F]/40 border border-[#0F380F]/70 text-[9px] font-bold flex items-center justify-between gap-1 tabular-nums leading-tight">
+              <span className="truncate">
+                {gameState.phase === 'OVER'
+                  ? gameState.winner === 'DRAW'
+                    ? 'DRAW GAME'
+                    : gameState.winner === who
+                    ? '★ WINNER'
+                    : '✕ DEFEATED'
+                  : !snake.isAlive
+                  ? '✕ ELIMINATED'
+                  : locked
+                  ? `LOCKED ${lastTurn !== null ? `(${lastTurn.toFixed(1)}s)` : ''}`
+                  : 'PLANNING…'}
+              </span>
+              <span className="shrink-0 flex items-center gap-1.5">
+                {!locked && countdown !== null && gameState.phase !== 'OVER' && (
+                  <span className="font-black text-[#0F380F]">{countdown}s</span>
+                )}
+                <span className="opacity-80">TOT {fmtTotal(totalThink)}</span>
+              </span>
+            </div>
+          )}
+
+          {/* Row 4: Move Queue Box (Opponent queues hidden during live play, revealed in replay) */}
+          <div className="flex-1 min-h-0 overflow-y-auto bg-[#8BAC0F]/20 border border-dashed border-[#0F380F]/40 p-1 flex flex-col justify-start">
+            <div className="text-[9px] font-bold opacity-80 mb-0.5 flex justify-between items-center shrink-0 h-3.5 tabular-nums">
+              <span>
+                {canSeeMoves
+                  ? `QUEUE (${buffer.length}/${snake.body.length})`
+                  : 'MOVE QUEUE'}
+              </span>
+              {locked && <span className="text-[8px] px-1 bg-[#0F380F] text-[#9BBC0F]">LOCKED</span>}
+            </div>
+            <div className="flex flex-wrap gap-1 content-start">
+              {!canSeeMoves ? (
+                <span data-testid={`queue-hidden-${who}`} className="text-[10px] opacity-75 italic font-bold">
+                  Hidden
+                </span>
+              ) : buffer.length === 0 ? (
+                <span className="text-[10px] [@media(max-height:540px)]:text-[9px] opacity-50 italic">
+                  {replayActive ? 'No moves queued' : 'Swipe/tap board'}
+                </span>
+              ) : (
+                buffer.map((entry, idx) => {
+                  const dir = entry.direction;
+                  const arrow = dir === 'UP' ? '↑' : dir === 'DOWN' ? '↓' : dir === 'LEFT' ? '←' : '→';
+                  const label = entry.type === 'dart' || entry.type === 'rattle' ? `⚡${arrow}` : arrow;
+                  return (
+                    <span key={idx} className={`px-1 py-0.5 ${palette.badgeBg} text-[10px] leading-tight font-bold border border-[#0F380F] shrink-0`}>
+                      {label}
+                    </span>
+                  );
+                })
+              )}
+              {canSeeMoves && snake.pendingSkill && (
+                <span className={`px-1 py-0.5 ${palette.badgeBg} text-[10px] leading-tight font-bold border border-[#0F380F] shrink-0`}>
+                  ⚡
+                </span>
+              )}
+            </div>
+          </div>
+        </div>
+      );
+    }
 
     return (
       <div
@@ -256,8 +406,8 @@ export const Hud: React.FC<HudProps> = ({
               <span className="text-[10px] font-semibold uppercase tracking-tight ml-1">PTS</span>
             </div>
             {snake.equippedSkill && (
-              <span className="text-[9px] px-1.5 py-0.5 bg-[#0F380F] text-[#9BBC0F] border border-[#0F380F] font-black uppercase">
-                ⚡ {snake.equippedSkill} (2)
+              <span className="text-[8px] px-1 py-0.5 bg-[#0F380F] text-[#9BBC0F] border border-[#0F380F] font-black uppercase leading-none">
+                ⚡{snake.equippedSkill}
               </span>
             )}
             <span className="text-[9px] px-1.5 py-0.5 border border-[#0F380F] font-black uppercase" title="Skill points">
@@ -298,14 +448,14 @@ export const Hud: React.FC<HudProps> = ({
             Chips wrap; never pushes the layout taller. */}
         <div className="flex-1 min-h-0 overflow-y-auto bg-[#8BAC0F]/20 border border-dashed border-[#0F380F]/40 p-1.5 [@media(max-height:540px)]:p-1 flex flex-col justify-start">
           <div className="text-[9px] font-bold opacity-75 mb-1 flex justify-between items-center shrink-0 h-3.5 tabular-nums">
-            <span>QUEUE ({buffer.length}/{snake.body.length})</span>
+            <span>{canSeeMoves ? `QUEUE (${buffer.length}/${snake.body.length})` : 'QUEUE'}</span>
             {locked && <span className="text-[8px] px-1 bg-[#0F380F] text-[#9BBC0F]">LOCKED</span>}
           </div>
           <div className="flex flex-wrap gap-1 content-start">
-            {buffer.length === 0 ? (
-              <span className="text-[10px] [@media(max-height:540px)]:text-[9px] opacity-50 italic">Swipe/tap board</span>
-            ) : !canSeeMoves ? (
+            {!canSeeMoves ? (
               <span className="text-[10px] opacity-60 italic">Hidden</span>
+            ) : buffer.length === 0 ? (
+              <span className="text-[10px] [@media(max-height:540px)]:text-[9px] opacity-50 italic">Swipe/tap board</span>
             ) : (
               buffer.map((entry, idx) => {
                 const dir = entry.direction;
@@ -335,7 +485,7 @@ export const Hud: React.FC<HudProps> = ({
     const palette = getPlayerColorPalette(snake, snakeIndex);
     const locked = isLocked(who);
     const buffer = moveBuffers?.[who] ?? [];
-    const local = replayActive || isLocalSeat(who) || gameState.snakes.length > 2;
+    const local = replayActive || isLocalSeat(who);
     const countdown = thinkTimeRemaining?.[who] ?? null;
     const lastTurn = gameState.lastTurnTimes?.[who] ?? null;
     const totalThink = gameState.totalThinkTime?.[who] ?? 0;
@@ -357,14 +507,19 @@ export const Hud: React.FC<HudProps> = ({
             </span>
             <span className="flex items-center gap-1 shrink-0">
               {renderPlanningStatusBadge(snake.isAlive, locked)}
-              <span className="text-[10px] opacity-80 shrink-0 tabular-nums">LEN: {snake.body.length}</span>
+              {snake.equippedSkill && (
+                <span className="text-[8px] px-1 py-0.5 bg-[#0F380F] text-[#9BBC0F] border border-[#0F380F] font-black uppercase leading-none">
+                  ⚡{snake.equippedSkill}
+                </span>
+              )}
             </span>
           </div>
           <div className="flex items-center justify-between mt-1 h-6 tabular-nums gap-1">
             <div className="flex items-baseline gap-1 shrink-0">
               <span className="text-2xl leading-none font-black">{snake.score}</span>
               <span className="text-[10px] font-semibold uppercase tracking-tight">PTS</span>
-              <span className="text-[10px] font-bold shrink-0" title="Skill points">⚡{snake.skillPoints ?? 0}</span>
+              <span className="text-[9px] font-bold shrink-0 opacity-85">· LEN {snake.body.length}</span>
+              <span className="text-[9px] font-bold shrink-0" title="Skill points">· ⚡{snake.skillPoints ?? 0}</span>
             </div>
             {renderOutcomeBadge(who)}
             {gameState.turnBased && (
@@ -392,7 +547,7 @@ export const Hud: React.FC<HudProps> = ({
           ) : (
             <div className={`mt-1.5 bg-[#8BAC0F]/30 border border-[#0F380F]/60 px-1.5 h-7 flex items-center justify-between gap-1 overflow-hidden ${locked ? 'opacity-90' : 'font-black'}`}>
               <span className="text-[10px] truncate tabular-nums">
-                {thinkLabel(who)} {locked ? '🔒' : countdown === null ? `(${buffer.length})` : ''}
+                QUEUE: <span className="italic opacity-80">Hidden</span>
               </span>
               <span className="shrink-0 w-7 text-right text-base leading-none font-black tabular-nums">
                 {!locked && countdown !== null && gameState.phase !== 'OVER' ? `${countdown}s` : ''}

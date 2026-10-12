@@ -22,6 +22,7 @@ const OBJECTIVE_OPTIONS: Array<{
   hasParam: boolean;
   defaultTarget: number;
 }> = [
+  { kind: 'survival', label: 'SURVIVAL (LAST LIVING PLAYER WINS)', hasParam: false, defaultTarget: 0 },
   { kind: 'collect', label: 'COLLECT N TOKENS', hasParam: true, defaultTarget: 5 },
   { kind: 'first_to', label: 'FIRST TO N TOKENS', hasParam: true, defaultTarget: 10 },
   { kind: 'survive', label: 'SURVIVE N TURNS', hasParam: true, defaultTarget: 30 },
@@ -32,6 +33,7 @@ const OBJECTIVE_OPTIONS: Array<{
 
 function formatObjectiveString(kind: ObjectiveKind, target: number): string {
   if (kind === 'shutout') return 'SHUTOUT';
+  if (kind === 'survival') return 'SURVIVAL';
   const safeTarget = Math.max(1, Math.floor(target) || 1);
   return `${kind.toUpperCase()}:${safeTarget}`;
 }
@@ -41,10 +43,10 @@ function getObjectiveParts(text: string): { kind: ObjectiveKind; target: number 
   if (parsed) {
     return {
       kind: parsed.kind,
-      target: parsed.kind === 'shutout' ? 5 : parsed.target,
+      target: parsed.kind === 'shutout' || parsed.kind === 'survival' ? 5 : parsed.target,
     };
   }
-  return { kind: 'collect', target: 5 };
+  return { kind: 'survival', target: 5 };
 }
 
 const NEXT_DIRECTION: Record<Direction, Direction> = {
@@ -95,8 +97,8 @@ const DEFAULT_LEVEL: CampaignLevel = {
     shrinkEveryTurns: 6,
   },
   objectives: {
-    primary: 'COLLECT:5',
-    bonus: ['FIRST_TO:10', 'SHUTOUT'],
+    primary: 'SURVIVAL',
+    bonus: [],
   },
 };
 
@@ -892,72 +894,107 @@ export const LevelEditor: React.FC = () => {
             </div>
 
             {/* Tokens */}
-            <div>
-              <label className="block font-black mb-1">TOKEN MODE:</label>
-              <select
-                value={level.tokens.mode}
-                onChange={(e) => {
-                  const mode = e.target.value as CampaignLevel['tokens']['mode'];
-                  setLevel({
-                    ...level,
-                    tokens: {
-                      ...level.tokens,
-                      mode,
-                      respawn: mode === 'FIXED_SET' ? false : level.tokens.respawn,
-                    },
-                  });
-                }}
-                className="w-full bg-[#9BBC0F] border-2 border-[#0F380F] px-2 py-1 font-mono font-bold text-[#0F380F] outline-none cursor-pointer"
-              >
-                <option value="ESCALATING">ESCALATING</option>
-                <option value="FIXED">FIXED</option>
-                <option value="FIXED_SET">FIXED SET</option>
-              </select>
-            </div>
-
-            <div className="grid grid-cols-2 gap-2 pt-1 border-t-2 border-[#0F380F]">
+            <div className="space-y-1.5 pt-1 border-t-2 border-[#0F380F]">
               <div>
-                <label className="block font-black mb-1">TOKEN COUNT:</label>
-                <input
-                  type="number"
-                  min="1"
-                  max="20"
-                  value={level.tokens.count}
-                  onChange={(e) =>
+                <label className="block font-black mb-1">TOKEN SPAWN MODE:</label>
+                <select
+                  value={level.tokens.mode}
+                  onChange={(e) => {
+                    const mode = e.target.value as CampaignLevel['tokens']['mode'];
                     setLevel({
                       ...level,
                       tokens: {
                         ...level.tokens,
-                        count: Math.max(1, parseInt(e.target.value) || 1),
+                        mode,
+                        respawn: mode === 'FIXED_SET' ? false : level.tokens.respawn,
                       },
-                    })
-                  }
-                  className="w-full bg-[#9BBC0F] border-2 border-[#0F380F] px-2 py-1 font-mono font-bold text-[#0F380F] outline-none"
-                />
+                    });
+                  }}
+                  className="w-full bg-[#9BBC0F] border-2 border-[#0F380F] px-2 py-1 font-mono font-bold text-[#0F380F] outline-none cursor-pointer"
+                >
+                  <option value="ESCALATING">ESCALATING (+1 TOKEN EACH ROUND)</option>
+                  <option value="FIXED">FIXED (CONSTANT TOKENS EACH ROUND)</option>
+                  <option value="FIXED_SET">FIXED SET (ONE-TIME BOARD TOKENS ONLY)</option>
+                </select>
+                <div className="text-[9px] font-bold text-[#306230] mt-1 leading-snug">
+                  {level.tokens.mode === 'ESCALATING'
+                    ? 'Wave size starts at Round 1 Token Count and grows by +1 each round.'
+                    : level.tokens.mode === 'FIXED'
+                    ? 'Maintains the exact Round 1 Token Count on the board across all rounds.'
+                    : 'No respawns: once the initial tokens are eaten, Phase 2 (Shrink) begins immediately.'}
+                </div>
               </div>
 
-              <div>
-                <label className="block font-black mb-1">TOKEN RESPAWN:</label>
-                <button
-                  type="button"
-                  disabled={level.tokens.mode === 'FIXED_SET'}
-                  onClick={() =>
-                    setLevel({
-                      ...level,
-                      tokens: {
-                        ...level.tokens,
-                        respawn: !level.tokens.respawn,
-                      },
-                    })
-                  }
-                  className={`w-full py-1 font-black border-2 border-[#0F380F] disabled:opacity-50 disabled:cursor-not-allowed ${
-                    level.tokens.respawn
-                      ? 'bg-[#0F380F] text-[#9BBC0F]'
-                      : 'bg-[#9BBC0F] text-[#0F380F]'
-                  }`}
-                >
-                  {level.tokens.respawn ? 'ENABLED [ON]' : 'DISABLED [OFF]'}
-                </button>
+              <div className="grid grid-cols-2 gap-2 pt-1">
+                <div>
+                  <label className="block font-black mb-1">
+                    {level.tokens.positions.length > 0 ? 'MAX INITIAL TOKENS (CAP):' : 'ROUND 1 TOKEN COUNT:'}
+                  </label>
+                  <input
+                    type="number"
+                    min="1"
+                    max="20"
+                    value={level.tokens.count}
+                    onChange={(e) =>
+                      setLevel({
+                        ...level,
+                        tokens: {
+                          ...level.tokens,
+                          count: Math.max(1, parseInt(e.target.value) || 1),
+                        },
+                      })
+                    }
+                    className="w-full bg-[#9BBC0F] border-2 border-[#0F380F] px-2 py-1 font-mono font-bold text-[#0F380F] outline-none"
+                  />
+                </div>
+
+                <div>
+                  <label className="block font-black mb-1">TOKEN RESPAWN:</label>
+                  <button
+                    type="button"
+                    disabled={level.tokens.mode === 'FIXED_SET'}
+                    onClick={() =>
+                      setLevel({
+                        ...level,
+                        tokens: {
+                          ...level.tokens,
+                          respawn: !level.tokens.respawn,
+                        },
+                      })
+                    }
+                    className={`w-full py-1 font-black border-2 border-[#0F380F] disabled:opacity-50 disabled:cursor-not-allowed ${
+                      level.tokens.respawn
+                        ? 'bg-[#0F380F] text-[#9BBC0F]'
+                        : 'bg-[#9BBC0F] text-[#0F380F]'
+                    }`}
+                  >
+                    {level.tokens.respawn ? 'ENABLED [ON]' : 'DISABLED [OFF]'}
+                  </button>
+                </div>
+              </div>
+
+              {/* Placed Tokens vs Token Count Override Explanation Banner */}
+              <div
+                data-testid="editor-token-override-hint"
+                className="bg-[#9BBC0F]/65 border border-[#0F380F] p-1.5 text-[9px] font-bold text-[#0F380F] leading-snug"
+              >
+                {level.tokens.positions.length === 0 ? (
+                  <span>
+                    <strong className="font-black">PLACED TOKENS (0):</strong> None painted on canvas. Match starts by spawning{' '}
+                    <strong className="font-black">{level.tokens.count} random token(s)</strong>.
+                  </span>
+                ) : level.tokens.positions.length > level.tokens.count ? (
+                  <span>
+                    <strong className="font-black">PLACED TOKENS ({level.tokens.positions.length}) OVERRIDDEN BY CAP ({level.tokens.count}):</strong>{' '}
+                    Only the first <strong className="font-black">{level.tokens.count}</strong> painted token(s) will spawn! Increase{' '}
+                    <em>Max Initial Tokens</em> to {level.tokens.positions.length} to use all painted tokens.
+                  </span>
+                ) : (
+                  <span>
+                    <strong className="font-black">PLACED TOKENS ({level.tokens.positions.length} ACTIVE):</strong> Painted board positions override random Round 1 spawns (uses your{' '}
+                    <strong className="font-black">{level.tokens.positions.length}</strong> painted token(s), capped at {level.tokens.count}).
+                  </span>
+                )}
               </div>
             </div>
 
@@ -1018,7 +1055,7 @@ export const LevelEditor: React.FC = () => {
                   onChange={(e) => {
                     const nextKind = e.target.value as ObjectiveKind;
                     const opt = OBJECTIVE_OPTIONS.find(o => o.kind === nextKind);
-                    const nextTarget = primaryParts.kind === 'shutout' && opt?.hasParam
+                    const nextTarget = (primaryParts.kind === 'shutout' || primaryParts.kind === 'survival') && opt?.hasParam
                       ? opt.defaultTarget
                       : primaryParts.target;
                     handlePrimaryObjectiveChange(nextKind, nextTarget);
@@ -1029,7 +1066,7 @@ export const LevelEditor: React.FC = () => {
                     <option key={opt.kind} value={opt.kind}>{opt.label}</option>
                   ))}
                 </select>
-                {primaryParts.kind !== 'shutout' && (
+                {primaryParts.kind !== 'shutout' && primaryParts.kind !== 'survival' && (
                   <input
                     type="number"
                     min="1"
@@ -1045,6 +1082,11 @@ export const LevelEditor: React.FC = () => {
                   />
                 )}
               </div>
+              {primaryParts.kind === 'survival' && (
+                <div className="text-[9px] font-bold text-[#306230] leading-snug">
+                  Last living player wins. If remaining snakes die on the same turn, tiebreak rules (skill points, then length) decide the winner.
+                </div>
+              )}
             </div>
 
             <div className="space-y-2">
@@ -1071,7 +1113,7 @@ export const LevelEditor: React.FC = () => {
                     <option key={opt.kind} value={opt.kind}>{opt.label}</option>
                   ))}
                 </select>
-                {bonusDraftKind !== 'shutout' && (
+                {bonusDraftKind !== 'shutout' && bonusDraftKind !== 'survival' && (
                   <input
                     type="number"
                     min="1"

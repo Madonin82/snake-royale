@@ -191,14 +191,46 @@ export const MatchEndModal: React.FC<MatchEndModalProps> = ({
 
   const defaultFocus = buttons.indexOf('REMATCH') !== -1 ? buttons.indexOf('REMATCH') : 0;
   const [focusIndex, setFocusIndex] = useState<number>(defaultFocus);
+  const [confirmLeaveArmed, setConfirmLeaveArmed] = useState<boolean>(false);
 
   const currentBtn = buttons[focusIndex] || buttons[0];
+
+  useEffect(() => {
+    if (!confirmed || gameState.phase !== 'OVER') {
+      setConfirmLeaveArmed(false);
+    }
+  }, [confirmed, gameState.phase]);
+
+  useEffect(() => {
+    if (currentBtn !== 'LOBBY') {
+      setConfirmLeaveArmed(false);
+    }
+  }, [currentBtn]);
 
   useEffect(() => {
     if (gameState.phase !== 'OVER') {
       onRegisterHandler?.(null);
       return;
     }
+
+    const navigateSpatially = (action: 'UP' | 'DOWN' | 'LEFT' | 'RIGHT', prevIdx: number): number => {
+      const count = buttons.length;
+      if (count <= 1) return 0;
+      const is2x2Grid = count === 4;
+      if (is2x2Grid) {
+        // 2x2 Spatial Grid:
+        // [0: REPLAY]  [1: EXPORT]
+        // [2: REMATCH] [3: LOBBY]
+        if (action === 'UP') return prevIdx >= 2 ? prevIdx - 2 : prevIdx;
+        if (action === 'DOWN') return prevIdx < 2 ? prevIdx + 2 : prevIdx;
+        if (action === 'LEFT') return prevIdx % 2 === 1 ? prevIdx - 1 : prevIdx;
+        if (action === 'RIGHT') return prevIdx % 2 === 0 ? prevIdx + 1 : prevIdx;
+      }
+      if (action === 'UP' || action === 'LEFT') {
+        return prevIdx > 0 ? prevIdx - 1 : count - 1;
+      }
+      return prevIdx < count - 1 ? prevIdx + 1 : 0;
+    };
 
     const handleAction = (action: GamepadMenuAction) => {
       if (!confirmed) {
@@ -213,33 +245,44 @@ export const MatchEndModal: React.FC<MatchEndModalProps> = ({
       }
 
       if (action === 'CANCEL') {
-        soundEngine.playMenuBack();
-        handleReturn();
+        const lobbyIdx = buttons.indexOf('LOBBY');
+        if (currentBtn === 'LOBBY' && confirmLeaveArmed) {
+          soundEngine.playMenuBack();
+          setConfirmLeaveArmed(false);
+          handleReturn();
+        } else {
+          soundEngine.playMenuMove();
+          if (lobbyIdx !== -1) setFocusIndex(lobbyIdx);
+          setConfirmLeaveArmed(true);
+        }
         return;
       }
 
-      if (action === 'UP' || action === 'LEFT') {
+      if (action === 'UP' || action === 'DOWN' || action === 'LEFT' || action === 'RIGHT') {
         soundEngine.playMenuMove();
-        setFocusIndex((prev) => (prev > 0 ? prev - 1 : buttons.length - 1));
-        return;
-      }
-
-      if (action === 'DOWN' || action === 'RIGHT') {
-        soundEngine.playMenuMove();
-        setFocusIndex((prev) => (prev < buttons.length - 1 ? prev + 1 : 0));
+        setConfirmLeaveArmed(false);
+        setFocusIndex((prev) => navigateSpatially(action, prev));
         return;
       }
 
       if (action === 'CONFIRM' || action === 'START') {
         soundEngine.playMenuSelect();
         if (currentBtn === 'REPLAY' && onWatchReplay) {
+          setConfirmLeaveArmed(false);
           onWatchReplay();
         } else if (currentBtn === 'EXPORT' && onExportReplay) {
+          setConfirmLeaveArmed(false);
           onExportReplay();
         } else if (currentBtn === 'REMATCH') {
+          setConfirmLeaveArmed(false);
           onRematch();
         } else if (currentBtn === 'LOBBY') {
-          handleReturn();
+          if (confirmLeaveArmed) {
+            setConfirmLeaveArmed(false);
+            handleReturn();
+          } else {
+            setConfirmLeaveArmed(true);
+          }
         }
       }
     };
@@ -248,22 +291,45 @@ export const MatchEndModal: React.FC<MatchEndModalProps> = ({
     return () => {
       onRegisterHandler?.(null);
     };
-  }, [gameState.phase, confirmed, onConfirm, currentBtn, onWatchReplay, onExportReplay, onRematch, handleReturn, buttons.length, onRegisterHandler]);
+  }, [gameState.phase, confirmed, onConfirm, currentBtn, confirmLeaveArmed, onWatchReplay, onExportReplay, onRematch, handleReturn, buttons, onRegisterHandler]);
 
   if (gameState.phase !== 'OVER') return null;
 
   if (!confirmed) {
     return (
-      <div className="fixed inset-x-0 bottom-3 z-50 flex justify-center px-4 pointer-events-none font-mono select-none">
-        <button
-          onClick={() => {
-            soundEngine.playMenuSelect();
-            onConfirm();
-          }}
-          className="pointer-events-auto px-5 py-2.5 bg-[#9BBC0F] border-4 border-[#0F380F] shadow-[4px_4px_0px_#0F380F] text-[#0F380F] font-black text-sm tracking-wider cursor-pointer hover:bg-[#8BAC0F] focus-visible:outline-4 focus-visible:outline-[#0F380F]"
-        >
-          SHOW RESULTS
-        </button>
+      <div
+        data-testid="match-end-top-banner"
+        className="fixed inset-x-0 top-1.5 z-50 flex justify-center px-3 pointer-events-none font-mono select-none"
+      >
+        <div className="pointer-events-auto flex flex-wrap items-center justify-center gap-2 px-3 py-1.5 bg-[#9BBC0F] border-4 border-[#0F380F] shadow-[4px_4px_0px_#0F380F] text-[#0F380F]">
+          <span className="text-xs font-black tracking-wider uppercase">
+            {titleText}
+          </span>
+          <button
+            type="button"
+            data-testid="show-results-confirm-btn"
+            onClick={() => {
+              soundEngine.playMenuSelect();
+              onConfirm();
+            }}
+            className="px-3 py-1 bg-[#0F380F] text-[#9BBC0F] border-2 border-[#0F380F] font-black text-xs tracking-wider cursor-pointer hover:bg-[#306230] flex items-center gap-1.5"
+          >
+            <span>SHOW RESULTS</span>
+            <span className="text-[9px] bg-[#9BBC0F] text-[#0F380F] px-1 font-bold">[A / CONFIRM]</span>
+          </button>
+          <button
+            type="button"
+            data-testid="show-results-cancel-btn"
+            onClick={() => {
+              soundEngine.playMenuBack();
+              handleReturn();
+            }}
+            className="px-2.5 py-1 bg-[#8BAC0F] text-[#0F380F] border-2 border-[#0F380F] font-black text-xs tracking-wider cursor-pointer hover:bg-[#0F380F] hover:text-[#9BBC0F] flex items-center gap-1"
+          >
+            <span>{onReturnToEditor ? 'EDITOR' : 'LOBBY'}</span>
+            <span className="text-[9px] bg-[#0F380F] text-[#9BBC0F] px-1 font-bold">[B / CANCEL]</span>
+          </button>
+        </div>
       </div>
     );
   }
@@ -437,19 +503,24 @@ export const MatchEndModal: React.FC<MatchEndModalProps> = ({
           </div>
         )}
 
-        {/* Action Buttons — 2x2 Grid in Landscape so all options fit on a single screen */}
-        <div className="flex flex-col [@media(orientation:landscape)]:grid [@media(orientation:landscape)]:grid-cols-2 gap-1.5 [@media(max-height:520px)]:gap-1.5 pt-0.5 shrink-0">
+        {/* Action Buttons — 2x2 Grid so spatial D-pad navigation (UP from PLAY AGAIN -> WATCH REPLAY) matches visual layout */}
+        <div className="grid grid-cols-1 sm:grid-cols-2 [@media(orientation:landscape)]:grid-cols-2 gap-1.5 [@media(max-height:520px)]:gap-1.5 pt-0.5 shrink-0">
           {canReplay && onWatchReplay && (
             <button
+              type="button"
               onClick={() => {
                 soundEngine.playMenuSelect();
+                setConfirmLeaveArmed(false);
                 onWatchReplay();
               }}
-              onMouseEnter={() => setFocusIndex(buttons.indexOf('REPLAY'))}
-              className={`w-full py-2.5 [@media(max-height:520px)]:py-2 px-2 border-2 border-[#0F380F] font-black text-xs sm:text-sm flex items-center justify-center gap-1.5 cursor-pointer transition-all shadow-[2px_2px_0px_#0F380F] ${
+              onMouseEnter={() => {
+                setConfirmLeaveArmed(false);
+                setFocusIndex(buttons.indexOf('REPLAY'));
+              }}
+              className={`w-full py-2.5 [@media(max-height:520px)]:py-2 px-2 border-2 border-[#0F380F] font-black text-xs sm:text-sm flex items-center justify-center gap-1.5 cursor-pointer transition-all ${
                 currentBtn === 'REPLAY'
-                  ? 'bg-[#306230] text-[#9BBC0F] ring-2 ring-[#0F380F]'
-                  : 'bg-[#306230] hover:bg-[#0F380F] text-[#9BBC0F]'
+                  ? 'bg-[#0F380F] text-[#9BBC0F] ring-2 ring-[#E0F8CF] shadow-[3px_3px_0px_#306230]'
+                  : 'bg-[#8BAC0F] hover:bg-[#9BBC0F] text-[#0F380F] shadow-[2px_2px_0px_#0F380F]'
               }`}
             >
               {currentBtn === 'REPLAY' && <span className="animate-pulse">►</span>}
@@ -463,15 +534,20 @@ export const MatchEndModal: React.FC<MatchEndModalProps> = ({
 
           {canReplay && onExportReplay && (
             <button
+              type="button"
               onClick={() => {
                 soundEngine.playMenuSelect();
+                setConfirmLeaveArmed(false);
                 onExportReplay();
               }}
-              onMouseEnter={() => setFocusIndex(buttons.indexOf('EXPORT'))}
-              className={`w-full py-2.5 [@media(max-height:520px)]:py-2 px-2 border-2 border-[#0F380F] font-black text-xs sm:text-sm flex items-center justify-center gap-1.5 cursor-pointer transition-all shadow-[2px_2px_0px_#0F380F] ${
+              onMouseEnter={() => {
+                setConfirmLeaveArmed(false);
+                setFocusIndex(buttons.indexOf('EXPORT'));
+              }}
+              className={`w-full py-2.5 [@media(max-height:520px)]:py-2 px-2 border-2 border-[#0F380F] font-black text-xs sm:text-sm flex items-center justify-center gap-1.5 cursor-pointer transition-all ${
                 currentBtn === 'EXPORT'
-                  ? 'bg-[#306230] text-[#9BBC0F] ring-2 ring-[#0F380F]'
-                  : 'bg-[#8BAC0F] hover:bg-[#306230] hover:text-[#9BBC0F] text-[#0F380F]'
+                  ? 'bg-[#0F380F] text-[#9BBC0F] ring-2 ring-[#E0F8CF] shadow-[3px_3px_0px_#306230]'
+                  : 'bg-[#8BAC0F] hover:bg-[#9BBC0F] text-[#0F380F] shadow-[2px_2px_0px_#0F380F]'
               }`}
             >
               {currentBtn === 'EXPORT' && <span className="animate-pulse">►</span>}
@@ -484,15 +560,20 @@ export const MatchEndModal: React.FC<MatchEndModalProps> = ({
 
           {!isSpectator && (
             <button
+              type="button"
               onClick={() => {
                 soundEngine.playMenuSelect();
+                setConfirmLeaveArmed(false);
                 onRematch();
               }}
-              onMouseEnter={() => setFocusIndex(buttons.indexOf('REMATCH'))}
-              className={`w-full py-2.5 [@media(max-height:520px)]:py-2 px-2 border-2 border-[#0F380F] font-black text-xs sm:text-sm flex items-center justify-center gap-1.5 cursor-pointer transition-all shadow-[2px_2px_0px_#0F380F] ${
+              onMouseEnter={() => {
+                setConfirmLeaveArmed(false);
+                setFocusIndex(buttons.indexOf('REMATCH'));
+              }}
+              className={`w-full py-2.5 [@media(max-height:520px)]:py-2 px-2 border-2 border-[#0F380F] font-black text-xs sm:text-sm flex items-center justify-center gap-1.5 cursor-pointer transition-all ${
                 currentBtn === 'REMATCH'
-                  ? 'bg-[#0F380F] text-[#9BBC0F] ring-2 ring-[#0F380F]'
-                  : 'bg-[#0F380F] hover:bg-[#306230] text-[#9BBC0F]'
+                  ? 'bg-[#0F380F] text-[#9BBC0F] ring-2 ring-[#E0F8CF] shadow-[3px_3px_0px_#306230]'
+                  : 'bg-[#8BAC0F] hover:bg-[#9BBC0F] text-[#0F380F] shadow-[2px_2px_0px_#0F380F]'
               }`}
             >
               {currentBtn === 'REMATCH' && <span className="animate-pulse">►</span>}
@@ -505,33 +586,52 @@ export const MatchEndModal: React.FC<MatchEndModalProps> = ({
           )}
 
           <button
+            type="button"
+            data-testid="match-end-leave-btn"
             onClick={() => {
-              soundEngine.playMenuBack();
-              handleReturn();
+              if (confirmLeaveArmed) {
+                soundEngine.playMenuBack();
+                setConfirmLeaveArmed(false);
+                handleReturn();
+              } else {
+                soundEngine.playMenuMove();
+                setFocusIndex(buttons.indexOf('LOBBY'));
+                setConfirmLeaveArmed(true);
+              }
             }}
             onMouseEnter={() => setFocusIndex(buttons.indexOf('LOBBY'))}
-            className={`w-full py-2.5 [@media(max-height:520px)]:py-2 px-2 border-2 border-[#0F380F] font-bold text-xs sm:text-sm flex items-center justify-center gap-1.5 cursor-pointer transition-colors shadow-[2px_2px_0px_#0F380F] ${
+            className={`w-full py-2.5 [@media(max-height:520px)]:py-2 px-2 border-2 border-[#0F380F] font-black text-xs sm:text-sm flex items-center justify-center gap-1.5 cursor-pointer transition-all ${
               currentBtn === 'LOBBY'
-                ? 'bg-[#0F380F] text-[#9BBC0F] ring-2 ring-[#0F380F]'
-                : 'bg-[#8BAC0F] hover:bg-[#9BBC0F] text-[#0F380F]'
+                ? confirmLeaveArmed
+                  ? 'bg-[#8B1E0F] text-[#9BBC0F] ring-2 ring-[#E0F8CF] shadow-[3px_3px_0px_#0F380F]'
+                  : 'bg-[#0F380F] text-[#9BBC0F] ring-2 ring-[#E0F8CF] shadow-[3px_3px_0px_#306230]'
+                : 'bg-[#8BAC0F] hover:bg-[#9BBC0F] text-[#0F380F] shadow-[2px_2px_0px_#0F380F]'
             }`}
           >
             {currentBtn === 'LOBBY' && <span className="animate-pulse">►</span>}
             {onReturnToEditor
               ? <ArrowLeft className="w-4 h-4 shrink-0" />
               : <Home className="w-4 h-4 shrink-0" />}
-            <span>{onReturnToEditor ? 'RETURN TO EDITOR' : 'RETURN TO LOBBY'}</span>
+            <span>
+              {confirmLeaveArmed
+                ? `CONFIRM ${onReturnToEditor ? 'EXIT TO EDITOR' : 'LEAVE TO LOBBY'}?`
+                : onReturnToEditor
+                ? 'RETURN TO EDITOR'
+                : 'RETURN TO LOBBY'}
+            </span>
             {currentBtn === 'LOBBY' && (
-              <span className="text-[9px] bg-[#9BBC0F] text-[#0F380F] px-1 font-bold">[B]</span>
+              <span className="text-[9px] bg-[#9BBC0F] text-[#0F380F] px-1 font-bold">
+                {confirmLeaveArmed ? '[A / B CONFIRM]' : '[A / B]'}
+              </span>
             )}
           </button>
         </div>
 
         {/* Gamepad Helper Bar */}
         <div className="text-center text-[9px] font-bold bg-[#8BAC0F] border border-[#0F380F] py-0.5 px-1 flex items-center justify-around shrink-0">
-          <span>🎮 [D-PAD] NAVIGATE</span>
+          <span>🎮 [D-PAD] 2D NAVIGATE</span>
           <span>[A / START] SELECT</span>
-          <span>[B] LOBBY</span>
+          <span>{confirmLeaveArmed ? '⚠️ PRESS [A / B] AGAIN TO LEAVE' : '[B] SELECT LEAVE'}</span>
         </div>
       </div>
     </div>

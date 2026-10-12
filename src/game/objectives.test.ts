@@ -20,6 +20,12 @@ test('parses supported objective strings and rejects malformed values', () => {
     kind: 'shutout',
     target: 0,
   });
+  assert.deepEqual(parseCampaignObjective('SURVIVAL'), {
+    text: 'SURVIVAL',
+    kind: 'survival',
+    target: 0,
+  });
+  assert.equal(parseCampaignObjective('survival:5'), null);
   assert.equal(parseCampaignObjective('survive'), null);
   assert.equal(parseCampaignObjective('collect:0'), null);
   assert.equal(parseCampaignObjective('shutout:1'), null);
@@ -74,3 +80,20 @@ test('survive objective remains completed if P1 dies after the required turn', (
 
   assert.equal(isCampaignObjectiveComplete(state.campaignObjectives.primary!, state, 0), true);
 });
+
+test('survival objective completes when P1 is the winner (last living player or simultaneous death tiebreak)', () => {
+  const state = createInitialState();
+  state.campaignObjectives = createCampaignObjectives('SURVIVAL', [], 0, 0);
+  assert.equal(isCampaignObjectiveComplete(state.campaignObjectives.primary!, state, 0), false);
+
+  state.phase = 'OVER';
+  state.winner = 'p1';
+  assert.equal(isCampaignObjectiveComplete(state.campaignObjectives.primary!, state, 0), true);
+
+  state.winner = 'p2';
+  assert.equal(isCampaignObjectiveComplete(state.campaignObjectives.primary!, state, 0), false);
+
+  state.winner = 'DRAW';
+  assert.equal(isCampaignObjectiveComplete(state.campaignObjectives.primary!, state, 0), false);
+});
+
