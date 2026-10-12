@@ -1111,7 +1111,7 @@ const GameApp: React.FC<{ campaignPlaytestLevel: CampaignLevel | null }> = ({ ca
     if (playModeRef.current === 'ONLINE_JOIN') {
       if (buffer.length > 0 && sentTickRef.current !== current.tick) {
         sentTickRef.current = current.tick;
-        networkManager.sendInput(buffer[0].direction, current.tick);
+        networkManager.sendInput(buffer[0], current.tick);
       }
       return;
     }
@@ -1300,7 +1300,7 @@ const GameApp: React.FC<{ campaignPlaytestLevel: CampaignLevel | null }> = ({ ca
     if (playModeRef.current === 'ONLINE_JOIN') {
       if (sentTickRef.current !== current.tick) {
         sentTickRef.current = current.tick;
-        networkManager.sendInput(buf[0].direction, current.tick);
+        networkManager.sendInput(buf[0], current.tick);
       }
       return;
     }
@@ -1415,7 +1415,7 @@ const GameApp: React.FC<{ campaignPlaytestLevel: CampaignLevel | null }> = ({ ca
         if (isOppositeDirection(lastDir, dir)) return false;
         realTimeInputBufferRef.current[targetKey] = [...q, dir];
       }
-      networkManager.sendInput(dir, current.tick);
+      networkManager.sendInput({ type: 'move', direction: dir }, current.tick);
       const snakeCopy = { ...current.snakes.find(snake => snake.id === targetKey)!, queuedDirection: dir };
       setGameState(prev => ({
         ...prev,
@@ -1462,21 +1462,75 @@ const GameApp: React.FC<{ campaignPlaytestLevel: CampaignLevel | null }> = ({ ca
     return 'p1';
   }, []);
 
-  const queueBridgeMoves = useCallback((moves: Direction[]): Direction[] => {
+  const queueBridgeMoves = useCallback((moves: (Direction | BufferEntry)[]): (Direction | BufferEntry)[] => {
     const seat = getBridgeSeat();
     if (!seat) return [];
 
-    const accepted: Direction[] = [];
+    const accepted: (Direction | BufferEntry)[] = [];
     const slot: 1 | 2 = seat === 'p1' ? 1 : 2;
-    for (const direction of moves) {
-      if (!['UP', 'DOWN', 'LEFT', 'RIGHT'].includes(direction)) continue;
+    for (const move of moves) {
       const snake = stateRef.current.snakes.find(candidate => candidate.id === seat);
-      if (!snake) return [];
-      if (
-        settingsRef.current.turnBased &&
-        moveBuffersRef.current[seat].length >= snake.body.length
-      ) break;
-      if (handleDirectionInput(slot, direction, seat)) accepted.push(direction);
+      if (!snake || !snake.isAlive) return accepted;
+
+      const isString = typeof move === 'string';
+      const moveType: 'move' | 'dart' | 'rattle' = isString ? 'move' : move.type;
+      const direction: Direction = isString ? move : move.direction;
+
+      if (!['UP', 'DOWN', 'LEFT', 'RIGHT'].includes(direction)) continue;
+
+      if (moveType === 'move') {
+        if (
+          settingsRef.current.turnBased &&
+          moveBuffersRef.current[seat].length >= snake.body.length
+        ) break;
+        if (handleDirectionInput(slot, direction, seat)) accepted.push(move);
+      } else if (moveType === 'dart' || moveType === 'rattle') {
+        if (settingsRef.current.turnBased) {
+          if (locksRef.current[seat]) break;
+          const buf = [...moveBuffersRef.current[seat]];
+          if (buf.length >= snake.body.length) break;
+
+          const lastEntry = buf.length > 0 ? buf[buf.length - 1] : null;
+          const lastDir = lastEntry && typeof lastEntry !== 'string' ? lastEntry.direction : snake.direction;
+          if (!isValidDartDirection(lastDir, direction)) {
+            continue;
+          }
+
+          const queuedSkills = buf.filter(entry => typeof entry !== 'string' && (entry.type === 'dart' || entry.type === 'rattle')).length;
+          if (moveType === 'dart') {
+            if (!canAffordQueuedDart(snake.skillPoints, queuedSkills)) {
+              continue;
+            }
+          } else {
+            if (!canAffordQueuedRattle(snake.skillPoints, queuedSkills)) {
+              continue;
+            }
+            const queuedRattles = buf.filter(entry => typeof entry !== 'string' && entry.type === 'rattle').length;
+            if (!canQueueRattleWithLength(snake.body.length, queuedRattles)) {
+              continue;
+            }
+          }
+
+          soundEngine.playTick();
+          buf.push({ type: moveType, direction });
+          moveBuffersRef.current = { ...moveBuffersRef.current, [seat]: buf };
+          setMoveBuffers({ ...moveBuffersRef.current });
+          accepted.push(move);
+        } else {
+          if (!isValidDartDirection(snake.direction, direction)) continue;
+          if (moveType === 'rattle' && snake.body.length < 3) continue;
+          const skillsAvail = stateRef.current.skillsAvailable ?? settingsRef.current.skillsAvailable;
+          if (!canActivateSkill(snake, stateRef.current, skillsAvail)) continue;
+          soundEngine.playTick();
+          snake.pendingSkill = { skillId: moveType, direction };
+          const snakeCopy = { ...snake, pendingSkill: { skillId: moveType, direction } };
+          setGameState(prev => ({
+            ...prev,
+            snakes: prev.snakes.map(s => s.id === seat ? snakeCopy : s),
+          }));
+          accepted.push(move);
+        }
+      }
     }
     return accepted;
   }, [getBridgeSeat, handleDirectionInput]);
@@ -1984,7 +2038,7 @@ const GameApp: React.FC<{ campaignPlaytestLevel: CampaignLevel | null }> = ({ ca
                   if (buf.length > 0) {
                     if (sentTickRef.current !== safeState.tick) {
                       sentTickRef.current = safeState.tick;
-                      networkManager.sendInput(buf[0].direction, safeState.tick);
+                      networkManager.sendInput(buf[0], safeState.tick);
                     }
                   }
                 }
@@ -2050,7 +2104,10 @@ const GameApp: React.FC<{ campaignPlaytestLevel: CampaignLevel | null }> = ({ ca
               const lastEntry = buf.length > 0 ? buf[buf.length - 1] : null;
               const lastDir = lastEntry ? lastEntry.direction : snake.direction;
               if (!isOppositeDirection(lastDir, msg.dir)) {
-                buf.push({ type: 'move', direction: msg.dir });
+                const rawType = msg.entryType ?? msg.moveType ?? (msg.entry?.type);
+                const entryType: 'move' | 'dart' | 'rattle' =
+                  (rawType === 'dart' || rawType === 'rattle' || rawType === 'move') ? rawType : 'move';
+                buf.push({ type: entryType, direction: msg.dir });
                 moveBuffersRef.current = { ...moveBuffersRef.current, [key]: buf };
                 setMoveBuffers({ ...moveBuffersRef.current });
               }

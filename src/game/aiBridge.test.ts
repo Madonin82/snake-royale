@@ -80,6 +80,46 @@ test('RTDB bridge command validation rejects malformed commands', () => {
     shouldApplyRtdbBridgeCommand({ seq: 1, lock: 'true', matchId: activeMatchId }, activeMatchId, 0),
     false,
   );
+  assert.equal(
+    shouldApplyRtdbBridgeCommand(
+      { seq: 1, moves: [{ type: 'invalid_skill', direction: 'UP' }], matchId: activeMatchId },
+      activeMatchId,
+      0,
+    ),
+    false,
+  );
+  assert.equal(
+    shouldApplyRtdbBridgeCommand(
+      { seq: 1, moves: [{ type: 'dart', direction: 'DIAGONAL' }], matchId: activeMatchId },
+      activeMatchId,
+      0,
+    ),
+    false,
+  );
+});
+
+test('RTDB bridge commands accept BufferEntry moves and mixed move arrays', () => {
+  const activeMatchId = 'match-current';
+  const dartCommand = {
+    seq: 1,
+    moves: [{ type: 'dart', direction: 'UP' as const }],
+    matchId: activeMatchId,
+  };
+  assert.equal(shouldApplyRtdbBridgeCommand(dartCommand, activeMatchId, 0), true);
+
+  const rattleCommand = {
+    seq: 2,
+    moves: [{ type: 'rattle', direction: 'DOWN' as const }],
+    matchId: activeMatchId,
+  };
+  assert.equal(shouldApplyRtdbBridgeCommand(rattleCommand, activeMatchId, 1), true);
+
+  const mixedCommand = {
+    seq: 3,
+    moves: ['LEFT' as const, { type: 'dart', direction: 'RIGHT' as const }],
+    matchId: activeMatchId,
+  };
+  assert.equal(shouldApplyRtdbBridgeCommand(mixedCommand, activeMatchId, 2), true);
 });
 
 test('equippedSkill and pendingSkill survive compact state', () => {

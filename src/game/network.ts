@@ -1,4 +1,4 @@
-import { Direction, GameState, LatencyReport, LatencySample } from '../types/game';
+import { BufferEntry, Direction, GameState, LatencyReport, LatencySample } from '../types/game';
 import { rtdb, initAuth } from '../firebase';
 import { canAcceptState, canAdoptMatch, isCurrentMatch, isNewerSequence, MatchIdentity, sanitizeSettings } from './networkProtocol';
 import {
@@ -1046,8 +1046,15 @@ export class NetworkManager {
     });
   }
 
-  public sendInput(dir: Direction, currentTick: number) {
+  public sendInput(input: Direction | BufferEntry, currentTick: number) {
     if (!this.isConnected || (this.role !== 'p1' && this.role !== 'p2') || !this.activeMatchId) return;
+
+    const entry: BufferEntry = typeof input === 'string'
+      ? { type: 'move', direction: input }
+      : {
+          type: input.type === 'dart' || input.type === 'rattle' || input.type === 'move' ? input.type : 'move',
+          direction: input.direction,
+        };
 
     const roomId = this.roomId;
     const connectionGeneration = this.connectionGeneration;
@@ -1062,7 +1069,8 @@ export class NetworkManager {
       matchNumber,
       inputSequence,
       role,
-      dir,
+      dir: entry.direction,
+      entryType: entry.type,
       tick: currentTick,
       clientTime,
     };
@@ -1078,7 +1086,8 @@ export class NetworkManager {
         matchId,
         matchNumber,
         inputSequence,
-        dir,
+        dir: entry.direction,
+        entryType: entry.type,
         tick: currentTick,
         clientTime,
       }).catch(error => this.reportTransportError('Writing input to RTDB', error));

@@ -161,6 +161,7 @@ wss.on('connection', (ws) => {
             type: 'INPUT_SYNC',
             role: client.role,
             dir: msg.dir,
+            entryType: msg.entryType,
             tick: msg.tick,
             clientTime: msg.clientTime,
             serverReceiveTime: Date.now()

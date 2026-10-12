@@ -27,7 +27,7 @@
           ".validate": "newData.hasChildren(['seq', 'matchId']) && newData.child('seq').isNumber() && newData.child('seq').val() % 1 == 0 && newData.child('matchId').isString() && (!newData.child('lock').exists() || newData.child('lock').isBoolean()) && (!newData.child('secret').exists() || newData.child('secret').isString())",
           "moves": {
             "$moveIndex": {
-              ".validate": "newData.isString() && (newData.val() == 'UP' || newData.val() == 'DOWN' || newData.val() == 'LEFT' || newData.val() == 'RIGHT')"
+              ".validate": "(newData.isString() && (newData.val() == 'UP' || newData.val() == 'DOWN' || newData.val() == 'LEFT' || newData.val() == 'RIGHT')) || (newData.hasChildren(['type', 'direction']) && (newData.child('type').val() == 'move' || newData.child('type').val() == 'dart' || newData.child('type').val() == 'rattle') && (newData.child('direction').val() == 'UP' || newData.child('direction').val() == 'DOWN' || newData.child('direction').val() == 'LEFT' || newData.child('direction').val() == 'RIGHT'))"
             }
           }
         }

@@ -31,6 +31,7 @@ export interface Snake {
   color: string; // Game Boy shade
   equippedSkill: SkillId | null;
   pendingSkill?: PendingSkill | null;
+  teamId?: string;
   deathReason?: 'WALL' | 'SELF' | 'OPPONENT' | 'SHRINK' | 'HEAD_ON';
   deathPosition?: Position;
   kills?: number;
@@ -106,6 +107,7 @@ export interface GameState {
   readyConfirmed?: Record<string, boolean>;
   skillsAvailable?: SkillsAvailableConfig;
   dartTrail?: Array<{ snakeId: string; cells: Position[] }>;
+  teamProtection?: boolean;
 }
 
 export interface CompactSnakeState {
@@ -140,7 +142,7 @@ export interface CompactGameState {
 export interface SnakeAiBridge {
   getSeat: () => 'p1' | 'p2' | null;
   getState: (opts?: { compact?: boolean }) => GameState | CompactGameState;
-  queueMoves: (moves: Direction[]) => Direction[];
+  queueMoves: (moves: (Direction | BufferEntry)[]) => (Direction | BufferEntry)[];
   activateSkill?: (direction?: Direction) => boolean;
   lock: () => void;
   selectSeat: (seat: 'p1' | 'p2') => void;
@@ -178,6 +180,8 @@ export interface NetworkInputPayload {
   matchNumber: number;
   inputSequence: number;
   dir: Direction;
+  entryType?: 'move' | 'dart' | 'rattle';
+  entry?: BufferEntry;
   skill?: PendingSkill | null;
   tick: number;
   clientTime: number;
