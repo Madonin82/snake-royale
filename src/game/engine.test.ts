@@ -269,7 +269,90 @@ test('dart cannot fire on tokens alone — wallet must afford it', () => {
   assert.equal(after.score, 10);
 });
 
-test('tiebreak on mutual destruction: higher skillPoints wins', () => {
+test('head-on same-cell: higher skillPoints wins, loser dies in place with lunged body minus head', () => {
+  const state = createInitialState();
+  const settings = { ...DEFAULT_SETTINGS };
+  state.tokens = [];
+  const p1 = state.snakes.find(snake => snake.id === 'p1')!;
+  const p2 = state.snakes.find(snake => snake.id === 'p2')!;
+  p1.body = [{ x: 2, y: 3 }, { x: 1, y: 3 }, { x: 0, y: 3 }];
+  p1.direction = 'RIGHT';
+  p1.skillPoints = 4; // higher SP
+
+  p2.body = [{ x: 4, y: 3 }, { x: 5, y: 3 }, { x: 6, y: 3 }];
+  p2.direction = 'LEFT';
+  p2.skillPoints = 2; // lower SP
+
+  const { nextState } = processGameTick(state, settings, 0);
+  const afterP1 = nextState.snakes.find(s => s.id === 'p1')!;
+  const afterP2 = nextState.snakes.find(s => s.id === 'p2')!;
+
+  assert.equal(afterP1.isAlive, true);
+  assert.deepEqual(afterP1.body[0], { x: 3, y: 3 });
+  assert.equal(afterP1.kills, 1);
+
+  assert.equal(afterP2.isAlive, false);
+  assert.equal(afterP2.deathReason, 'HEAD_ON');
+  assert.equal(afterP2.killedBy, 'p1');
+  assert.deepEqual(afterP2.deathPosition, { x: 3, y: 3 });
+  assert.deepEqual(afterP2.body, [{ x: 4, y: 3 }, { x: 5, y: 3 }]);
+});
+
+test('head-on exact tie on SP and length -> mutual kill, both bodies frozen whole', () => {
+  const state = createInitialState();
+  const settings = { ...DEFAULT_SETTINGS };
+  state.tokens = [];
+  const p1 = state.snakes.find(snake => snake.id === 'p1')!;
+  const p2 = state.snakes.find(snake => snake.id === 'p2')!;
+  p1.body = [{ x: 2, y: 3 }, { x: 1, y: 3 }];
+  p1.direction = 'RIGHT';
+  p1.skillPoints = 3;
+  p2.body = [{ x: 4, y: 3 }, { x: 5, y: 3 }];
+  p2.direction = 'LEFT';
+  p2.skillPoints = 3;
+
+  const { nextState } = processGameTick(state, settings, 0);
+  const afterP1 = nextState.snakes.find(s => s.id === 'p1')!;
+  const afterP2 = nextState.snakes.find(s => s.id === 'p2')!;
+
+  assert.equal(afterP1.isAlive, false);
+  assert.equal(afterP1.deathReason, 'HEAD_ON');
+  assert.deepEqual(afterP1.body, [{ x: 2, y: 3 }, { x: 1, y: 3 }]);
+
+  assert.equal(afterP2.isAlive, false);
+  assert.equal(afterP2.deathReason, 'HEAD_ON');
+  assert.deepEqual(afterP2.body, [{ x: 4, y: 3 }, { x: 5, y: 3 }]);
+});
+
+test('head-on crossed head-swap with SP advantage -> winner advances, loser body frozen neck-to-tail without lunge', () => {
+  const state = createInitialState();
+  const settings = { ...DEFAULT_SETTINGS };
+  state.tokens = [];
+  const p1 = state.snakes.find(snake => snake.id === 'p1')!;
+  const p2 = state.snakes.find(snake => snake.id === 'p2')!;
+  p1.body = [{ x: 3, y: 3 }, { x: 2, y: 3 }];
+  p1.direction = 'RIGHT';
+  p1.skillPoints = 5;
+
+  p2.body = [{ x: 4, y: 3 }, { x: 5, y: 3 }];
+  p2.direction = 'LEFT';
+  p2.skillPoints = 2;
+
+  const { nextState } = processGameTick(state, settings, 0);
+  const afterP1 = nextState.snakes.find(s => s.id === 'p1')!;
+  const afterP2 = nextState.snakes.find(s => s.id === 'p2')!;
+
+  assert.equal(afterP1.isAlive, true);
+  assert.deepEqual(afterP1.body[0], { x: 4, y: 3 });
+
+  assert.equal(afterP2.isAlive, false);
+  assert.equal(afterP2.deathReason, 'HEAD_ON');
+  assert.equal(afterP2.killedBy, 'p1');
+  assert.deepEqual(afterP2.deathPosition, { x: 4, y: 3 });
+  assert.deepEqual(afterP2.body, [{ x: 5, y: 3 }]);
+});
+
+test('3-player head-on: A beats B, B/C pair skipped once B is dead', () => {
   const state = createInitialState();
   const settings = { ...DEFAULT_SETTINGS };
   state.tokens = [];
@@ -277,38 +360,30 @@ test('tiebreak on mutual destruction: higher skillPoints wins', () => {
   const p2 = state.snakes.find(snake => snake.id === 'p2')!;
   p1.body = [{ x: 2, y: 3 }];
   p1.direction = 'RIGHT';
-  p1.score = 6; // fewer tokens...
-  p1.skillPoints = 4; // ...but more points left (spent less)
+  p1.skillPoints = 5;
+
   p2.body = [{ x: 4, y: 3 }];
   p2.direction = 'LEFT';
-  p2.score = 10;
   p2.skillPoints = 2;
-  const { nextState } = processGameTick(state, settings, 0);
-  assert.equal(nextState.snakes.find(snake => snake.id === 'p1')?.deathReason, 'HEAD_ON');
-  assert.equal(nextState.snakes.find(snake => snake.id === 'p2')?.deathReason, 'HEAD_ON');
-  assert.equal(nextState.winner, 'p1');
-  assert.ok(nextState.winReason.includes('points'));
-});
 
-test('tiebreak on mutual destruction: tied points fall back to length', () => {
-  const state = createInitialState();
-  const settings = { ...DEFAULT_SETTINGS };
-  state.tokens = [];
-  const p1 = state.snakes.find(snake => snake.id === 'p1')!;
-  const p2 = state.snakes.find(snake => snake.id === 'p2')!;
-  // Annie's clarifying case: 10 tokens/3 darts (4 pts) vs 6 tokens/1 dart (4 pts)
-  p1.body = [{ x: 2, y: 3 }, { x: 1, y: 3 }, { x: 0, y: 3 }, { x: 0, y: 4 }, { x: 0, y: 5 }];
-  p1.direction = 'RIGHT';
-  p1.score = 10;
-  p1.skillPoints = 4;
-  p2.body = [{ x: 4, y: 3 }, { x: 5, y: 3 }, { x: 6, y: 3 }];
-  p2.direction = 'LEFT';
-  p2.score = 6;
-  p2.skillPoints = 4;
+  state.snakes.push({
+    id: 'p3',
+    name: 'BOT 3',
+    body: [{ x: 6, y: 3 }],
+    direction: 'LEFT',
+    score: 0,
+    skillPoints: 1,
+    isAlive: true,
+    color: '#306230',
+    equippedSkill: null,
+    pendingSkill: null,
+    queuedDirection: null,
+  });
+
   const { nextState } = processGameTick(state, settings, 0);
-  assert.equal(nextState.snakes.find(snake => snake.id === 'p1')?.deathReason, 'HEAD_ON');
-  assert.equal(nextState.snakes.find(snake => snake.id === 'p2')?.deathReason, 'HEAD_ON');
-  assert.equal(nextState.winner, 'p1'); // tied on points → longer body wins
+  assert.equal(nextState.snakes.find(s => s.id === 'p1')?.isAlive, true);
+  assert.equal(nextState.snakes.find(s => s.id === 'p2')?.isAlive, false);
+  assert.equal(nextState.snakes.find(s => s.id === 'p3')?.isAlive, true);
 });
 
 test('snipe: darting head meets stationary head, darter wins tiebreak → opponent sniped', () => {

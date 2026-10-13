@@ -567,6 +567,7 @@ export function processGameTick(
       for (let b = a + 1; b < movingIndices.length; b++) {
         const i = movingIndices[a];
         const j = movingIndices[b];
+        if (!snakes[i].isAlive || !snakes[j].isAlive) continue;
         const sameCell = nextHeads[i].x === nextHeads[j].x && nextHeads[i].y === nextHeads[j].y;
         const crossed = nextHeads[i].x === snakes[j].body[0].x && nextHeads[i].y === snakes[j].body[0].y &&
           nextHeads[j].x === snakes[i].body[0].x && nextHeads[j].y === snakes[i].body[0].y;
@@ -585,8 +586,37 @@ export function processGameTick(
               continue;
             }
           }
-          deaths[i].headOn = true;
-          deaths[j].headOn = true;
+
+          const tie = compareTiebreak(snakes[i], snakes[j]);
+          if (tie === 0) {
+            deaths[i].headOn = true;
+            deaths[j].headOn = true;
+          } else {
+            const winnerIdx = tie < 0 ? i : j;
+            const loserIdx = tie < 0 ? j : i;
+            const winner = snakes[winnerIdx];
+            const loser = snakes[loserIdx];
+
+            loser.isAlive = false;
+            loser.deathReason = 'HEAD_ON';
+            loser.killedBy = winner.id;
+            winner.kills = (winner.kills ?? 0) + 1;
+            events.deathOccurred = true;
+
+            deaths[winnerIdx].body = false;
+            deaths[winnerIdx].killerId = undefined;
+
+            if (sameCell) {
+              const lNextHead = nextHeads[loserIdx];
+              loser.body.unshift(lNextHead);
+              loser.body.pop();
+              loser.deathPosition = { ...lNextHead };
+              loser.body.shift();
+            } else {
+              loser.deathPosition = { ...loser.body[0] };
+              loser.body.shift();
+            }
+          }
         }
       }
     }
@@ -761,6 +791,20 @@ export function processGameTick(
   }
 
   return { nextState: state, events };
+}
+
+function compareTiebreak(s1: Snake, s2: Snake): number {
+  const p1 = s1.skillPoints ?? 0;
+  const p2 = s2.skillPoints ?? 0;
+  if (p1 !== p2) {
+    return p2 - p1;
+  }
+  const l1 = s1.body.length;
+  const l2 = s2.body.length;
+  if (l1 !== l2) {
+    return l2 - l1;
+  }
+  return 0;
 }
 
 function resolveMatchByTiebreakers(state: GameState, contextReason: string) {
