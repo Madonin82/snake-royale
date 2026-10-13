@@ -1010,7 +1010,7 @@ const GameApp: React.FC<{ campaignPlaytestLevel: CampaignLevel | null }> = ({ ca
       networkManager.broadcastState(nextState, nextLocks);
     }
 
-    const openNextLockPhase = () => {
+    const openNextLockPhase = (beatFired: boolean) => {
       const mergedLocks = Object.fromEntries(stateRef.current.snakes.map(snake => [
         snake.id,
         snake.isAlive && (moveBuffersRef.current[snake.id]?.length ?? 0) > 0 && Boolean(nextLocks[snake.id] || locksRef.current[snake.id]),
@@ -1027,6 +1027,11 @@ const GameApp: React.FC<{ campaignPlaytestLevel: CampaignLevel | null }> = ({ ca
           );
 
       if (canProgress && aiMode) {
+        queueMicrotask(() => {
+          turnTimeoutRef.current = null;
+          maybeAdvanceTurn();
+        });
+      } else if (canProgress && beatFired) {
         queueMicrotask(() => {
           turnTimeoutRef.current = null;
           maybeAdvanceTurn();
@@ -1053,9 +1058,9 @@ const GameApp: React.FC<{ campaignPlaytestLevel: CampaignLevel | null }> = ({ ca
         // want the beat. When there IS a hitstop, the callback fires later
         // via timer, hitstopMs > 0, and we skip the extra beat.
         if (!aiMode && hitstopMs === 0) {
-          setTimeout(openNextLockPhase, 550);
+          setTimeout(() => openNextLockPhase(true), 550);
         } else {
-          openNextLockPhase();
+          openNextLockPhase(false);
         }
       };
       hitstopMs = triggerHitstop(prevState, nextState, openNextLockPhaseWithBeat);
