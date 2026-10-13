@@ -1040,13 +1040,10 @@ const GameApp: React.FC<{ campaignPlaytestLevel: CampaignLevel | null }> = ({ ca
     };
 
     const freezeMs = (() => {
-      // In online mode, every turn resolution gets the visible playback beat,
+      // Every turn resolution gets the visible playback beat unless ?ai=1,
       // not just multi-move buffer drains or hitstop events. Without this,
       // single-move turns teleport with no pause (canProgress is false when
       // buffers are empty after a single move).
-      const isOnlineMode = playModeRef.current === 'ONLINE_HOST' ||
-                           playModeRef.current === 'ONLINE_JOIN' ||
-                           playModeRef.current === 'ONLINE_SERVER';
       let hitstopMs = 0;
       const openNextLockPhaseWithBeat = () => {
         // Only add the beat if triggerHitstop didn't already pause.
@@ -1055,7 +1052,7 @@ const GameApp: React.FC<{ campaignPlaytestLevel: CampaignLevel | null }> = ({ ca
         // (assignment below hasn't run yet) — which is exactly when we
         // want the beat. When there IS a hitstop, the callback fires later
         // via timer, hitstopMs > 0, and we skip the extra beat.
-        if (isOnlineMode && hitstopMs === 0) {
+        if (!aiMode && hitstopMs === 0) {
           setTimeout(openNextLockPhase, 550);
         } else {
           openNextLockPhase();
