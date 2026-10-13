@@ -281,10 +281,12 @@ function calculateHuntMoveTowardTarget(
     );
     if (hitsOpponentBody) continue;
 
+    const area = floodFillArea(nextPos, gameState, gridSize, me);
+    if (area < me.body.length) continue;
+
     const dist = Math.abs(nextPos.x - targetPos.x) + Math.abs(nextPos.y - targetPos.y);
     let score = (gridSize * 2 - dist) * 20;
-    const openNeighbors = countOpenNeighbors(nextPos, gameState, gridSize);
-    score += openNeighbors * 3;
+    score += area * 1;
     if (dir === currentDir) score += 2;
     ratedMoves.push({ dir, score });
   }
@@ -361,6 +363,12 @@ export function calculateAIMove(
       getOpponentBodyThreat(teammate, gameState.tokens).has(posKey(nextPos)),
     );
     if (hitsTeammateBody) {
+      continue;
+    }
+
+    // 3c. HARD RULE / DEAD-END VETO: skip if reachable area < body length
+    const area = floodFillArea(nextPos, gameState, gridSize, me);
+    if (area < me.body.length) {
       continue;
     }
 
@@ -445,10 +453,9 @@ export function calculateAIMove(
       score += (gridSize - distToCenter) * 8;
     }
 
-    // 6. Lookahead flood-fill / open space heuristic (for Medium and Hard)
+    // 6. Lookahead reachable area heuristic (for Medium and Hard)
     if (difficulty !== 'EASY') {
-      const openNeighbors = countOpenNeighbors(nextPos, gameState, gridSize);
-      score += openNeighbors * 5;
+      score += area * 1;
     }
 
     // Small inertia preference (avoid erratic zigzagging if scores are tied)
@@ -475,14 +482,48 @@ export function calculateAIMove(
   return ratedMoves[0].dir;
 }
 
-function countOpenNeighbors(pos: Position, state: GameState, gridSize: number): number {
-  let count = 0;
-  for (const d of ALL_DIRECTIONS) {
-    const p = getNextHeadPosition(pos, d);
-    if (!isCellInArena(p, gridSize, state.ringInset)) continue;
-    if (state.walls?.some(wall => wall.x === p.x && wall.y === p.y)) continue;
-    if (state.snakes.some(snake => snake.body.some(segment => segment.x === p.x && segment.y === p.y))) continue;
-    count++;
+function floodFillArea(pos: Position, state: GameState, gridSize: number, me: Snake): number {
+  const visited = new Set<string>();
+  const queue: Position[] = [pos];
+  visited.add(posKey(pos));
+
+  const eatsToken = state.tokens.some(t => t.x === pos.x && t.y === pos.y);
+  const ownBody = eatsToken ? me.body : me.body.slice(0, -1);
+
+  const blocked = new Set<string>();
+  for (const seg of ownBody) {
+    blocked.add(posKey(seg));
   }
+
+  for (const snake of state.snakes) {
+    if (snake.id === me.id) continue;
+    for (const key of getOpponentBodyThreat(snake, state.tokens)) {
+      blocked.add(key);
+    }
+  }
+
+  if (state.walls) {
+    for (const wall of state.walls) {
+      blocked.add(posKey(wall));
+    }
+  }
+
+  let count = 0;
+  while (queue.length > 0) {
+    const curr = queue.shift()!;
+    count++;
+
+    for (const d of ALL_DIRECTIONS) {
+      const next = getNextHeadPosition(curr, d);
+      const key = posKey(next);
+      if (!visited.has(key)) {
+        if (isCellInArena(next, gridSize, state.ringInset) && !blocked.has(key)) {
+          visited.add(key);
+          queue.push(next);
+        }
+      }
+    }
+  }
+
   return count;
 }

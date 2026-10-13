@@ -177,3 +177,17 @@ test('greedy vetos a losing head-on even when the token sits on the collision ce
   // DOWN is p1's neck (hard skip), LEFT is the vetoed losing trade → RIGHT.
   assert.equal(calculateAIMove(state, 8, 'p2', 'HARD', 'GREEDY'), 'RIGHT');
 });
+
+test('dead-end veto rejects moves leading to a reachable area smaller than snake body length', () => {
+  const state = makeState(
+    { body: [{ x: 3, y: 3 }, { x: 3, y: 4 }, { x: 3, y: 5 }, { x: 3, y: 6 }], direction: 'UP' },
+    { body: [{ x: 7, y: 7 }, { x: 7, y: 6 }], direction: 'DOWN' },
+  );
+  state.walls = [
+    { x: 2, y: 2 }, { x: 3, y: 2 }, { x: 4, y: 2 },
+    { x: 2, y: 3 }, { x: 4, y: 3 }
+  ];
+  state.tokens = [{ x: 0, y: 0 }];
+  const move = calculateAIMove(state, 8, 'p2', 'HARD', 'GREEDY');
+  assert.notEqual(move, 'UP');
+});
