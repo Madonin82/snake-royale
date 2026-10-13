@@ -6,6 +6,7 @@ interface GameBoardProps {
   gameState: GameState;
   settings: GameSettings;
   lockedPaths?: Record<string, Position[] | undefined>;
+  plannedPaths?: Record<string, Position[] | undefined>;
   controlSeat: 'p1' | 'p2';
   onDirection: (direction: Direction, touchSeat?: 'p1' | 'p2') => void;
   interactionEnabled: boolean;
@@ -20,7 +21,7 @@ interface GameBoardProps {
 }
 
 export const GameBoard: React.FC<GameBoardProps> = ({
-  gameState, settings, lockedPaths, controlSeat, onDirection, interactionEnabled,
+  gameState, settings, lockedPaths, plannedPaths, controlSeat, onDirection, interactionEnabled,
   splitTouchSeats = false,
   animationsDisabled = false,
   hitstop = null,
@@ -123,7 +124,101 @@ export const GameBoard: React.FC<GameBoardProps> = ({
       renderToken(ctx, token.x * cellSize, token.y * cellSize, cellSize, tokenBlink);
     }
 
-    // 6. Render Stamped Locked Paths (Subtle planned path shading)
+    // 6. Render Planned Paths (Hatched pattern during planning) and Locked Paths (Solid committed shading)
+    if (plannedPaths) {
+      for (const snake of gameState.snakes) {
+        if (lockedPaths?.[snake.id]) continue;
+        const path = plannedPaths[snake.id];
+        if (!path || path.length === 0) continue;
+
+        const isP1 = snake.id === 'p1';
+        const washColor = isP1 ? 'rgba(15, 56, 15, 0.08)' : 'rgba(48, 98, 48, 0.10)';
+        const hatchColor = isP1 ? 'rgba(15, 56, 15, 0.40)' : 'rgba(48, 98, 48, 0.45)';
+        const outlineColor = isP1 ? 'rgba(15, 56, 15, 0.45)' : 'rgba(48, 98, 48, 0.50)';
+
+        // Draw planned cells (lighter + diagonal hatch lines)
+        for (const pos of path) {
+          const rx = pos.x * cellSize + 6;
+          const ry = pos.y * cellSize + 6;
+          const rw = cellSize - 12;
+          const rh = cellSize - 12;
+
+          // Lighter background wash
+          ctx.fillStyle = washColor;
+          ctx.fillRect(rx, ry, rw, rh);
+
+          // Diagonal hatch lines
+          ctx.save();
+          ctx.beginPath();
+          ctx.rect(rx, ry, rw, rh);
+          ctx.clip();
+
+          ctx.strokeStyle = hatchColor;
+          ctx.lineWidth = 1.5;
+          const step = 5;
+          for (let offset = -rh; offset <= rw + rh; offset += step) {
+            ctx.beginPath();
+            ctx.moveTo(rx + offset, ry);
+            ctx.lineTo(rx + offset + rh, ry + rh);
+            ctx.stroke();
+          }
+
+          // Subtle light border around the planned path cell
+          ctx.strokeStyle = outlineColor;
+          ctx.lineWidth = 1;
+          ctx.strokeRect(rx + 0.5, ry + 0.5, rw - 1, rh - 1);
+          ctx.restore();
+        }
+
+        // Distinct marker on the virtual head cell (the endpoint / click-to-lock target)
+        const endpoint = path[path.length - 1];
+        if (endpoint) {
+          const epX = endpoint.x * cellSize;
+          const epY = endpoint.y * cellSize;
+
+          ctx.save();
+          const targetColor = isP1 ? GAMEBOY_COLORS.DARKEST : GAMEBOY_COLORS.DARK;
+
+          // Subtle wash inside endpoint cell
+          const pulseAlpha = animationsDisabled ? 0.25 : 0.18 + 0.12 * Math.sin(Date.now() / 200);
+          ctx.fillStyle = isP1 ? `rgba(15, 56, 15, ${pulseAlpha})` : `rgba(48, 98, 48, ${pulseAlpha})`;
+          ctx.fillRect(epX + 3, epY + 3, cellSize - 6, cellSize - 6);
+
+          // Distinct crisp outline around endpoint
+          ctx.strokeStyle = targetColor;
+          ctx.lineWidth = 2;
+          ctx.strokeRect(epX + 3, epY + 3, cellSize - 6, cellSize - 6);
+
+          // Corner bracket reticles
+          const cornerLen = 5;
+          ctx.beginPath();
+          // Top-left
+          ctx.moveTo(epX + 3, epY + 3 + cornerLen);
+          ctx.lineTo(epX + 3, epY + 3);
+          ctx.lineTo(epX + 3 + cornerLen, epY + 3);
+          // Top-right
+          ctx.moveTo(epX + cellSize - 3 - cornerLen, epY + 3);
+          ctx.lineTo(epX + cellSize - 3, epY + 3);
+          ctx.lineTo(epX + cellSize - 3, epY + 3 + cornerLen);
+          // Bottom-left
+          ctx.moveTo(epX + 3, epY + cellSize - 3 - cornerLen);
+          ctx.lineTo(epX + 3, epY + cellSize - 3);
+          ctx.lineTo(epX + 3 + cornerLen, epY + cellSize - 3);
+          // Bottom-right
+          ctx.moveTo(epX + cellSize - 3 - cornerLen, epY + cellSize - 3);
+          ctx.lineTo(epX + cellSize - 3, epY + cellSize - 3);
+          ctx.lineTo(epX + cellSize - 3, epY + cellSize - 3 - cornerLen);
+          ctx.stroke();
+
+          // Small center target pip
+          ctx.fillStyle = targetColor;
+          ctx.fillRect(epX + cellSize / 2 - 2, epY + cellSize / 2 - 2, 4, 4);
+
+          ctx.restore();
+        }
+      }
+    }
+
     if (lockedPaths) {
       for (const snake of gameState.snakes) {
         const path = lockedPaths[snake.id];
@@ -252,7 +347,7 @@ export const GameBoard: React.FC<GameBoardProps> = ({
     ctx.lineWidth = 4;
     ctx.strokeRect(2, 2, boardPixelSize - 4, boardPixelSize - 4);
 
-  }, [gameState, settings, lockedPaths, animationsDisabled, hitstop, fatalMoveAnimating, deniedCells]);
+  }, [gameState, settings, lockedPaths, plannedPaths, animationsDisabled, hitstop, fatalMoveAnimating, deniedCells]);
 
   const handlePointerDown = (event: ReactPointerEvent<HTMLCanvasElement>) => {
     lastPointerTypeRef.current = event.pointerType;

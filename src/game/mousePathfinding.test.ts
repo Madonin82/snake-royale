@@ -163,3 +163,30 @@ test('findBfsPath: returns null when target is blocked by obstacles or out of bo
   const pathBoxed = findBfsPath(vHead, { x: 5, y: 4 }, boxedState, 8);
   assert.equal(pathBoxed, null);
 });
+
+test('getObstacleSet: excludes ignoredCell if specified', () => {
+  const state = createMockGameState();
+  const withoutIgnored = getObstacleSet(state);
+  assert.equal(withoutIgnored.has('2,2'), true);
+
+  const withIgnored = getObstacleSet(state, { x: 2, y: 2 });
+  assert.equal(withIgnored.has('2,2'), false);
+  // Other segments remain
+  assert.equal(withIgnored.has('1,2'), true);
+});
+
+test('findBfsPath: loops back to vacated starting head when ignoredCell is passed', () => {
+  const state = createMockGameState();
+  // Virtual head has moved around to (2, 3) facing LEFT
+  const vHead = { pos: { x: 2, y: 3 }, dir: 'LEFT' as const };
+  const targetActualHead = { x: 2, y: 2 };
+
+  // Without ignoring starting head, (2,2) is an obstacle -> null
+  const blockedPath = findBfsPath(vHead, targetActualHead, state, 8);
+  assert.equal(blockedPath, null);
+
+  // With starting head ignored (vacated), BFS paths loop back
+  const loopBackPath = findBfsPath(vHead, targetActualHead, state, 8, targetActualHead);
+  assert.ok(loopBackPath !== null);
+  assert.deepEqual(loopBackPath, ['UP']);
+});

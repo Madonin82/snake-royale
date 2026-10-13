@@ -39,8 +39,13 @@ export function computeVirtualHead(
 
 /**
  * Builds a static snapshot set of all obstacle coordinates (walls, rattle walls, and snake bodies).
+ * An optional ignoredCell (such as the active snake's starting head when moves are already queued)
+ * will be excluded from the obstacle set.
  */
-export function getObstacleSet(gameState: GameState): Set<string> {
+export function getObstacleSet(
+  gameState: GameState,
+  ignoredCell?: Position | null,
+): Set<string> {
   const obstacles = new Set<string>();
 
   for (const w of gameState.walls ?? []) {
@@ -51,6 +56,9 @@ export function getObstacleSet(gameState: GameState): Set<string> {
   }
   for (const s of gameState.snakes) {
     for (const b of s.body) {
+      if (ignoredCell && b.x === ignoredCell.x && b.y === ignoredCell.y) {
+        continue;
+      }
       obstacles.add(`${b.x},${b.y}`);
     }
   }
@@ -67,6 +75,7 @@ export function findBfsPath(
   target: Position,
   gameState: GameState,
   gridSize: number,
+  ignoredCell?: Position | null,
 ): Direction[] | null {
   const ringInset = gameState.ringInset ?? 0;
 
@@ -81,7 +90,7 @@ export function findBfsPath(
   }
 
   // 3. Target cannot be an obstacle
-  const obstacles = getObstacleSet(gameState);
+  const obstacles = getObstacleSet(gameState, ignoredCell);
   if (obstacles.has(`${target.x},${target.y}`)) {
     return null;
   }

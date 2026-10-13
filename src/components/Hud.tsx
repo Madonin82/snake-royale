@@ -270,8 +270,10 @@ export const Hud: React.FC<HudProps> = ({
     return {
       badge,
       caption: (
-        <span className="text-[8px] font-mono font-bold opacity-75 leading-none block">
-          right-click: undo
+        <span className="text-[8px] font-mono font-bold opacity-75 leading-none flex items-center gap-1.5 flex-wrap">
+          <span>right-click: undo</span>
+          <span className="opacity-40">•</span>
+          <span>click endpoint: lock</span>
         </span>
       ),
     };

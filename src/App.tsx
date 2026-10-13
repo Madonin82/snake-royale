@@ -559,6 +559,27 @@ const GameApp: React.FC<{ campaignPlaytestLevel: CampaignLevel | null }> = ({ ca
     };
   }, [settings.turnBased, replayActive, locks, moveBuffers, gameState, playMode, viewerSeat, onlineRole]);
 
+  const plannedPaths = useMemo(() => {
+    if (!settings.turnBased || replayActive || gameState.phase === 'OVER') return undefined;
+
+    const showP1 = playMode === 'LOCAL_2P' || viewerSeat === 'p1';
+    const showP2 = playMode === 'LOCAL_2P' || viewerSeat === 'p2';
+
+    const getPlanned = (seatId: 'p1' | 'p2', show: boolean): Position[] | undefined => {
+      if (!show || locks[seatId]) return undefined;
+      const buf = moveBuffers[seatId];
+      if (!buf || buf.length === 0) return undefined;
+      const snake = gameState.snakes.find(s => s.id === seatId);
+      if (!snake || !snake.isAlive) return undefined;
+      return computeCommittedPath(snake, buf);
+    };
+
+    return {
+      p1: getPlanned('p1', showP1),
+      p2: getPlanned('p2', showP2),
+    };
+  }, [settings.turnBased, replayActive, gameState.phase, gameState.snakes, playMode, viewerSeat, locks, moveBuffers]);
+
   const bridgeSeatRef = useRef<'p1' | 'p2'>('p1');
   const soloAiP2OverriddenRef = useRef(false);
   const dispatchAiState = useCallback((state: GameState = stateRef.current) => {
@@ -1693,6 +1714,19 @@ const GameApp: React.FC<{ campaignPlaytestLevel: CampaignLevel | null }> = ({ ca
       return;
     }
 
+    const buf = moveBuffersRef.current[targetSeat] ?? [];
+    const vHead = computeVirtualHead(snake, buf);
+
+    // Clicking the cell that contains the virtual head locks the buffer, whenever the buffer is non-empty.
+    // Empty buffer: do nothing.
+    if (cell.x === vHead.pos.x && cell.y === vHead.pos.y) {
+      if (buf.length > 0) {
+        lastClickInfoRef.current = null;
+        handleBufferLock(targetSlot, targetSeat);
+      }
+      return;
+    }
+
     const now = Date.now();
     const last = lastClickInfoRef.current;
     const isDoubleClick =
@@ -1713,16 +1747,15 @@ const GameApp: React.FC<{ campaignPlaytestLevel: CampaignLevel | null }> = ({ ca
       return;
     }
 
-    const buf = moveBuffersRef.current[targetSeat] ?? [];
     const remainingRoom = snake.body.length - buf.length;
     if (remainingRoom <= 0) {
       flashDeniedCell(cell);
       return;
     }
 
-    const vHead = computeVirtualHead(snake, buf);
     const gridSize = stateRef.current.gridSize ?? settingsRef.current.gridSize;
-    const path = findBfsPath(vHead, cell, stateRef.current, gridSize);
+    const ignoredObstacle = buf.length > 0 ? snake.body[0] : null;
+    const path = findBfsPath(vHead, cell, stateRef.current, gridSize, ignoredObstacle);
 
     if (!path || path.length === 0 || path.length > remainingRoom) {
       flashDeniedCell(cell);
@@ -2997,6 +3030,7 @@ const GameApp: React.FC<{ campaignPlaytestLevel: CampaignLevel | null }> = ({ ca
                   gameState={displayState}
                   settings={settings}
                   lockedPaths={lockedPaths}
+                  plannedPaths={plannedPaths}
                   controlSeat={playMode === 'ONLINE_JOIN' && onlineRole === 'p2' ? 'p2' : 'p1'}
                   onDirection={(dir, touchSeat) => handleDirectionInput(touchSeat === 'p2' ? 2 : 1, dir)}
                   interactionEnabled={!replayActive}
