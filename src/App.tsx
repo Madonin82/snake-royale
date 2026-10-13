@@ -18,7 +18,7 @@ import { canActivateSkill, canAffordQueuedDart, canAffordQueuedRattle, canQueueR
 import { calculateAIAction, calculateAIMove } from './game/ai';
 import { cloneGameState, toCompactGameState } from './game/aiBridge';
 import { shouldApplyRtdbBridgeCommand } from './game/aiBridgeRtdb';
-import { computeVirtualHead, findBfsPath } from './game/mousePathfinding';
+import { computeVirtualHead, findBfsPath, findFallbackBfsPath } from './game/mousePathfinding';
 import { gamepadController, GamepadMenuAction } from './game/gamepad';
 import { networkManager } from './game/network';
 import { ADMIN_UIDS, auth, rtdb } from './firebase';
@@ -1755,7 +1755,11 @@ const GameApp: React.FC<{ campaignPlaytestLevel: CampaignLevel | null }> = ({ ca
 
     const gridSize = stateRef.current.gridSize ?? settingsRef.current.gridSize;
     const ignoredObstacle = buf.length > 0 ? snake.body[0] : null;
-    const path = findBfsPath(vHead, cell, stateRef.current, gridSize, ignoredObstacle);
+    let path = findBfsPath(vHead, cell, stateRef.current, gridSize, ignoredObstacle);
+    if (!path) {
+      // Fallback BFS with empty obstacle set (walls and bodies passable)
+      path = findFallbackBfsPath(vHead, cell, stateRef.current, gridSize);
+    }
 
     if (!path || path.length === 0 || path.length > remainingRoom) {
       flashDeniedCell(cell);

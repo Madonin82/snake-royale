@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { computeVirtualHead, findBfsPath, getObstacleSet } from './mousePathfinding';
+import { computeVirtualHead, findBfsPath, findFallbackBfsPath, getObstacleSet } from './mousePathfinding';
 import { GameState, Snake } from '../types/game';
 
 function createMockSnake(overrides: Partial<Snake> = {}): Snake {
@@ -189,4 +189,59 @@ test('findBfsPath: loops back to vacated starting head when ignoredCell is passe
   const loopBackPath = findBfsPath(vHead, targetActualHead, state, 8, targetActualHead);
   assert.ok(loopBackPath !== null);
   assert.deepEqual(loopBackPath, ['UP']);
+});
+
+test('findFallbackBfsPath: finds path straight into obstacle when legal BFS fails', () => {
+  const state = createMockGameState({
+    walls: [{ x: 3, y: 2 }],
+  });
+  const vHead = { pos: { x: 2, y: 2 }, dir: 'RIGHT' as const };
+
+  // Legal BFS returns null because (3, 2) is a wall
+  const legalPath = findBfsPath(vHead, { x: 3, y: 2 }, state, 8);
+  assert.equal(legalPath, null);
+
+  // Fallback BFS passes through obstacles and returns single step into wall
+  const fallbackPath = findFallbackBfsPath(vHead, { x: 3, y: 2 }, state, 8);
+  assert.ok(fallbackPath !== null);
+  assert.deepEqual(fallbackPath, ['RIGHT']);
+});
+
+test('findFallbackBfsPath: allows trapped snake to queue death path into surrounding obstacle', () => {
+  const boxedState = createMockGameState({
+    walls: [
+      { x: 3, y: 2 }, // right
+      { x: 2, y: 1 }, // up
+      { x: 2, y: 3 }, // down
+      { x: 1, y: 2 }, // left
+    ],
+  });
+  const vHead = { pos: { x: 2, y: 2 }, dir: 'RIGHT' as const };
+
+  // Legal BFS fails for every neighbor
+  assert.equal(findBfsPath(vHead, { x: 3, y: 2 }, boxedState, 8), null);
+  assert.equal(findBfsPath(vHead, { x: 2, y: 1 }, boxedState, 8), null);
+  assert.equal(findBfsPath(vHead, { x: 2, y: 3 }, boxedState, 8), null);
+
+  // Fallback BFS succeeds for neighbors
+  assert.deepEqual(findFallbackBfsPath(vHead, { x: 3, y: 2 }, boxedState, 8), ['RIGHT']);
+  assert.deepEqual(findFallbackBfsPath(vHead, { x: 2, y: 1 }, boxedState, 8), ['UP']);
+  assert.deepEqual(findFallbackBfsPath(vHead, { x: 2, y: 3 }, boxedState, 8), ['DOWN']);
+
+  // Target directly behind virtual head (180 reverse) respects no-180 rule
+  const behindPath = findFallbackBfsPath(vHead, { x: 1, y: 2 }, boxedState, 8);
+  assert.ok(behindPath !== null);
+  assert.notEqual(behindPath[0], 'LEFT');
+});
+
+test('findFallbackBfsPath: enforces arena bounds and rejects out of bounds or virtual head', () => {
+  const state = createMockGameState();
+  const vHead = { pos: { x: 2, y: 2 }, dir: 'RIGHT' as const };
+
+  // Out of bounds returns null
+  assert.equal(findFallbackBfsPath(vHead, { x: -1, y: 2 }, state, 8), null);
+  assert.equal(findFallbackBfsPath(vHead, { x: 8, y: 2 }, state, 8), null);
+
+  // Target is virtual head returns null
+  assert.equal(findFallbackBfsPath(vHead, { x: 2, y: 2 }, state, 8), null);
 });

@@ -69,6 +69,7 @@ export function getObstacleSet(
 /**
  * BFS shortest path from virtual head to target cell.
  * Returns Direction[] on success, or null if unreachable or invalid.
+ * If ignoreObstacles is true, walls and bodies are passable (fallback death path).
  */
 export function findBfsPath(
   virtualHead: { pos: Position; dir: Direction },
@@ -76,6 +77,7 @@ export function findBfsPath(
   gameState: GameState,
   gridSize: number,
   ignoredCell?: Position | null,
+  ignoreObstacles: boolean = false,
 ): Direction[] | null {
   const ringInset = gameState.ringInset ?? 0;
 
@@ -89,9 +91,9 @@ export function findBfsPath(
     return null;
   }
 
-  // 3. Target cannot be an obstacle
-  const obstacles = getObstacleSet(gameState, ignoredCell);
-  if (obstacles.has(`${target.x},${target.y}`)) {
+  // 3. Target cannot be an obstacle (skipped if ignoreObstacles is true)
+  const obstacles = ignoreObstacles ? null : getObstacleSet(gameState, ignoredCell);
+  if (obstacles && obstacles.has(`${target.x},${target.y}`)) {
     return null;
   }
 
@@ -115,8 +117,8 @@ export function findBfsPath(
       // Arena bounds check
       if (!isCellInArena(nextPos, gridSize, ringInset)) continue;
 
-      // Obstacle check
-      if (obstacles.has(`${nextPos.x},${nextPos.y}`)) continue;
+      // Obstacle check (skipped if ignoreObstacles is true)
+      if (obstacles && obstacles.has(`${nextPos.x},${nextPos.y}`)) continue;
 
       // Target reached!
       if (nextPos.x === target.x && nextPos.y === target.y) {
@@ -132,4 +134,18 @@ export function findBfsPath(
   }
 
   return null;
+}
+
+/**
+ * Fallback "death path" BFS with an empty obstacle set (walls and bodies passable).
+ * Retains arena-bounds check, no-180 rule, and target-not-on-virtual-head check.
+ * Skips target-is-obstacle rejection.
+ */
+export function findFallbackBfsPath(
+  virtualHead: { pos: Position; dir: Direction },
+  target: Position,
+  gameState: GameState,
+  gridSize: number,
+): Direction[] | null {
+  return findBfsPath(virtualHead, target, gameState, gridSize, null, true);
 }
