@@ -3022,7 +3022,7 @@ const GameApp: React.FC<{ campaignPlaytestLevel: CampaignLevel | null }> = ({ ca
                 replayActive={replayActive}
                 onP2Undo={() => handleBufferUndo(2)}
                 onP2Lock={() => handleBufferLock(2)}
-                mouseSeat={!inLobby && !inOnlineLobby && settings.turnBased ? mouseEffectiveSeat : undefined}
+                mouseSeat={!inLobby && !inOnlineLobby && settings.turnBased ? (hasClaimedMouseRef.current ? mouseEffectiveSeat : undefined) : undefined}
                 onToggleMouseSeat={playMode === 'LOCAL_2P' ? () => setMouseSeat(prev => prev === 'p1' ? 'p2' : 'p1') : undefined}
               />
               <div className="gameboard-area relative">
