@@ -13,6 +13,10 @@ interface GameBoardProps {
   animationsDisabled?: boolean;
   hitstop?: HitstopInfo | null;
   fatalMoveAnimating?: string[];
+  deniedCells?: { x: number; y: number }[];
+  onCellClick?: (cell: Position, event: React.MouseEvent<HTMLCanvasElement>) => void;
+  onCellDoubleClick?: (cell: Position, event: React.MouseEvent<HTMLCanvasElement>) => void;
+  onCellContextMenu?: (event: React.MouseEvent<HTMLCanvasElement>) => void;
 }
 
 export const GameBoard: React.FC<GameBoardProps> = ({
@@ -21,9 +25,14 @@ export const GameBoard: React.FC<GameBoardProps> = ({
   animationsDisabled = false,
   hitstop = null,
   fatalMoveAnimating = [],
+  deniedCells = [],
+  onCellClick,
+  onCellDoubleClick,
+  onCellContextMenu,
 }) => {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const pointerStartRef = useRef<{ id: number; x: number; y: number } | null>(null);
+  const lastPointerTypeRef = useRef<string>('mouse');
 
   useEffect(() => {
     const canvas = canvasRef.current;
@@ -218,14 +227,35 @@ export const GameBoard: React.FC<GameBoardProps> = ({
       ctx.restore();
     }
 
-    // 9. Outer Frame Border
+    // 10. Render Denied Cell X Flashes
+    if (deniedCells && deniedCells.length > 0) {
+      ctx.save();
+      ctx.strokeStyle = '#5A6E5A'; // Retro Game Boy LCD gray
+      ctx.lineWidth = 3;
+      ctx.lineCap = 'round';
+      for (const cell of deniedCells) {
+        const px = cell.x * cellSize;
+        const py = cell.y * cellSize;
+        const pad = Math.floor(cellSize * 0.22);
+        ctx.beginPath();
+        ctx.moveTo(px + pad, py + pad);
+        ctx.lineTo(px + cellSize - pad, py + cellSize - pad);
+        ctx.moveTo(px + cellSize - pad, py + pad);
+        ctx.lineTo(px + pad, py + cellSize - pad);
+        ctx.stroke();
+      }
+      ctx.restore();
+    }
+
+    // 11. Outer Frame Border
     ctx.strokeStyle = GAMEBOY_COLORS.DARKEST;
     ctx.lineWidth = 4;
     ctx.strokeRect(2, 2, boardPixelSize - 4, boardPixelSize - 4);
 
-  }, [gameState, settings, lockedPaths, animationsDisabled, hitstop, fatalMoveAnimating]);
+  }, [gameState, settings, lockedPaths, animationsDisabled, hitstop, fatalMoveAnimating, deniedCells]);
 
   const handlePointerDown = (event: ReactPointerEvent<HTMLCanvasElement>) => {
+    lastPointerTypeRef.current = event.pointerType;
     if (!interactionEnabled || event.pointerType !== 'touch') return;
     pointerStartRef.current = { id: event.pointerId, x: event.clientX, y: event.clientY };
     event.currentTarget.setPointerCapture(event.pointerId);
@@ -279,6 +309,25 @@ export const GameBoard: React.FC<GameBoardProps> = ({
     if (!isReverseDirection(snake.direction, direction)) onDirection(direction, touchSeat);
   };
 
+  const getCellFromMouseEvent = (event: React.MouseEvent<HTMLCanvasElement>): Position | null => {
+    const canvas = canvasRef.current;
+    if (!canvas) return null;
+    const rect = canvas.getBoundingClientRect();
+    if (!rect || rect.width === 0 || rect.height === 0) return null;
+    const contentLeft = rect.left + canvas.clientLeft;
+    const contentTop = rect.top + canvas.clientTop;
+    if (
+      event.clientX < contentLeft || event.clientX >= contentLeft + canvas.clientWidth ||
+      event.clientY < contentTop || event.clientY >= contentTop + canvas.clientHeight
+    ) return null;
+
+    const gridSize = gameState.gridSize ?? settings.gridSize;
+    const cellX = Math.floor(((event.clientX - contentLeft) / canvas.clientWidth) * gridSize);
+    const cellY = Math.floor(((event.clientY - contentTop) / canvas.clientHeight) * gridSize);
+    if (cellX < 0 || cellX >= gridSize || cellY < 0 || cellY >= gridSize) return null;
+    return { x: cellX, y: cellY };
+  };
+
   return (
     <div className="match-board relative flex flex-col items-center justify-center p-2 bg-[#9BBC0F] border-4 border-[#0F380F] shadow-[inset_0_0_12px_rgba(15,56,15,0.4)]">
       <canvas
@@ -288,6 +337,23 @@ export const GameBoard: React.FC<GameBoardProps> = ({
         onPointerDown={handlePointerDown}
         onPointerUp={handlePointerUp}
         onPointerCancel={() => { pointerStartRef.current = null; }}
+        onClick={(e) => {
+          if (lastPointerTypeRef.current === 'touch') return;
+          if (e.button !== 0) return;
+          const cell = getCellFromMouseEvent(e);
+          if (cell && onCellClick) onCellClick(cell, e);
+        }}
+        onDoubleClick={(e) => {
+          if (lastPointerTypeRef.current === 'touch') return;
+          if (e.button !== 0) return;
+          const cell = getCellFromMouseEvent(e);
+          if (cell && onCellDoubleClick) onCellDoubleClick(cell, e);
+        }}
+        onContextMenu={(e) => {
+          e.preventDefault();
+          if (lastPointerTypeRef.current === 'touch') return;
+          if (onCellContextMenu) onCellContextMenu(e);
+        }}
       />
       {splitTouchSeats && (
         <div aria-hidden="true" className="pointer-events-none absolute inset-3">

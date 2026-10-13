@@ -20,6 +20,8 @@ interface HudProps {
   replayActive?: boolean;
   onP2Undo?: () => void;
   onP2Lock?: () => void;
+  mouseSeat?: 'p1' | 'p2';
+  onToggleMouseSeat?: () => void;
 }
 
 export const Hud: React.FC<HudProps> = ({
@@ -37,6 +39,8 @@ export const Hud: React.FC<HudProps> = ({
   replayActive = false,
   onP2Undo,
   onP2Lock,
+  mouseSeat,
+  onToggleMouseSeat,
 }) => {
   // Who is "you" on this screen, per seat — drives the (YOU) tags without redundant (BOT N) tags.
   const seatTag = (seat: string): string => getSeatDisplayTag(seat, playMode, viewerSeat);
@@ -243,6 +247,36 @@ export const Hud: React.FC<HudProps> = ({
     return `bg-[#9BBC0F] opacity-100 border-4 ${palette.borderColor} ${palette.defaultShadow}`;
   };
 
+  const renderMouseHints = (who: string) => {
+    if (!mouseSeat || mouseSeat !== who) return null;
+    if (!gameState.turnBased || gameState.phase === 'OVER' || replayActive) return null;
+
+    const label = `🖱 ${who.toUpperCase()}`;
+    const badge = playMode === 'LOCAL_2P' && onToggleMouseSeat ? (
+      <button
+        type="button"
+        onClick={onToggleMouseSeat}
+        title="Click to switch mouse control between P1 and P2"
+        className="flex items-center gap-0.5 px-1 py-0.5 bg-[#8BAC0F] hover:bg-[#306230] hover:text-[#9BBC0F] border border-[#0F380F] shadow-[1px_1px_0px_#0F380F] active:translate-y-0.5 cursor-pointer text-[8px] leading-none shrink-0 font-bold"
+      >
+        <span>{label}</span>
+      </button>
+    ) : (
+      <span className="flex items-center gap-0.5 px-1 py-0.5 bg-[#8BAC0F]/70 border border-[#0F380F]/50 text-[8px] leading-none shrink-0 font-bold">
+        {label}
+      </span>
+    );
+
+    return {
+      badge,
+      caption: (
+        <span className="text-[8px] font-mono font-bold opacity-75 leading-none block">
+          right-click: undo
+        </span>
+      ),
+    };
+  };
+
   const renderDesktopPlayerPanel = (who: string) => {
     const snakeIndex = gameState.snakes.findIndex(candidate => candidate.id === who);
     const snake = gameState.snakes[snakeIndex];
@@ -255,6 +289,7 @@ export const Hud: React.FC<HudProps> = ({
     const buffer = moveBuffers?.[who] ?? [];
     const countdown = thinkTimeRemaining?.[who] ?? null;
     const tag = seatTag(who);
+    const mouseHints = renderMouseHints(who);
 
     if (isPlaytestHud) {
       return (
@@ -339,14 +374,22 @@ export const Hud: React.FC<HudProps> = ({
 
           {/* Row 4: Move Queue Box (Opponent queues hidden during live play, revealed in replay) */}
           <div className="flex-1 min-h-0 overflow-y-auto bg-[#8BAC0F]/20 border border-dashed border-[#0F380F]/40 p-1 flex flex-col justify-start">
-            <div className="text-[9px] font-bold opacity-80 mb-0.5 flex justify-between items-center shrink-0 h-3.5 tabular-nums">
-              <span>
-                {canSeeMoves
-                  ? `QUEUE (${buffer.length}/${snake.body.length})`
-                  : 'MOVE QUEUE'}
-              </span>
-              {locked && <span className="text-[8px] px-1 bg-[#0F380F] text-[#9BBC0F]">LOCKED</span>}
+            <div className="text-[9px] font-bold opacity-80 mb-0.5 flex justify-between items-center shrink-0 min-h-[16px] tabular-nums">
+              <div className="flex items-center gap-1.5 min-w-0">
+                <span className="truncate">
+                  {canSeeMoves
+                    ? `QUEUE (${buffer.length}/${snake.body.length})`
+                    : 'MOVE QUEUE'}
+                </span>
+                {mouseHints?.badge}
+              </div>
+              {locked && <span className="text-[8px] px-1 bg-[#0F380F] text-[#9BBC0F] shrink-0">LOCKED</span>}
             </div>
+            {mouseHints && (
+              <div className="mb-0.5">
+                {mouseHints.caption}
+              </div>
+            )}
             <div className="flex flex-wrap gap-1 content-start">
               {!canSeeMoves ? (
                 <span data-testid={`queue-hidden-${who}`} className="text-[10px] opacity-75 italic font-bold">
@@ -447,10 +490,18 @@ export const Hud: React.FC<HudProps> = ({
             region: fixed header rows above stay put, this absorbs the rest.
             Chips wrap; never pushes the layout taller. */}
         <div className="flex-1 min-h-0 overflow-y-auto bg-[#8BAC0F]/20 border border-dashed border-[#0F380F]/40 p-1.5 [@media(max-height:540px)]:p-1 flex flex-col justify-start">
-          <div className="text-[9px] font-bold opacity-75 mb-1 flex justify-between items-center shrink-0 h-3.5 tabular-nums">
-            <span>{canSeeMoves ? `QUEUE (${buffer.length}/${snake.body.length})` : 'QUEUE'}</span>
-            {locked && <span className="text-[8px] px-1 bg-[#0F380F] text-[#9BBC0F]">LOCKED</span>}
+          <div className="text-[9px] font-bold opacity-75 mb-1 flex justify-between items-center shrink-0 min-h-[16px] tabular-nums">
+            <div className="flex items-center gap-1.5 min-w-0">
+              <span className="truncate">{canSeeMoves ? `QUEUE (${buffer.length}/${snake.body.length})` : 'QUEUE'}</span>
+              {mouseHints?.badge}
+            </div>
+            {locked && <span className="text-[8px] px-1 bg-[#0F380F] text-[#9BBC0F] shrink-0">LOCKED</span>}
           </div>
+          {mouseHints && (
+            <div className="mb-1">
+              {mouseHints.caption}
+            </div>
+          )}
           <div className="flex flex-wrap gap-1 content-start">
             {!canSeeMoves ? (
               <span className="text-[10px] opacity-60 italic">Hidden</span>
@@ -490,6 +541,7 @@ export const Hud: React.FC<HudProps> = ({
     const lastTurn = gameState.lastTurnTimes?.[who] ?? null;
     const totalThink = gameState.totalThinkTime?.[who] ?? 0;
     const tag = seatTag(who);
+    const mouseHints = renderMouseHints(who);
 
     return (
       <div
@@ -531,17 +583,27 @@ export const Hud: React.FC<HudProps> = ({
         </div>
         {gameState.turnBased && (
           local ? (
-            <div className="mt-1.5 bg-[#8BAC0F]/40 border border-[#0F380F] px-1.5 h-7 flex items-center justify-between gap-1 text-[9px] font-bold">
-              <span className="shrink-0 tabular-nums">{locked ? '🔒 ' : '✏️ '}QUEUE {buffer.length}/{snake.body.length}</span>
+            <div className="mt-1.5 bg-[#8BAC0F]/40 border border-[#0F380F] px-1.5 min-h-7 py-0.5 flex flex-col justify-center gap-0.5 text-[9px] font-bold">
+              <div className="flex items-center justify-between gap-1">
+                <div className="flex items-center gap-1 min-w-0">
+                  <span className="shrink-0 tabular-nums">{locked ? '🔒 ' : '✏️ '}QUEUE {buffer.length}/{snake.body.length}</span>
+                  {mouseHints?.badge}
+                </div>
+                <span className="shrink-0 w-7 text-right text-base leading-none font-black tabular-nums">
+                  {!locked && countdown !== null && gameState.phase !== 'OVER' ? `${countdown}s` : ''}
+                </span>
+              </div>
+              {mouseHints && (
+                <div>
+                  {mouseHints.caption}
+                </div>
+              )}
               <span className="min-w-0 flex-1 truncate text-right opacity-80">
                 {buffer.map(entry => {
                   const dir = entry.direction;
                   const arrow = dir === 'UP' ? '↑' : dir === 'DOWN' ? '↓' : dir === 'LEFT' ? '←' : '→';
                   return entry.type === 'dart' || entry.type === 'rattle' ? `⚡${arrow}` : arrow;
                 }).join('')}
-              </span>
-              <span className="shrink-0 w-7 text-right text-base leading-none font-black tabular-nums">
-                {!locked && countdown !== null && gameState.phase !== 'OVER' ? `${countdown}s` : ''}
               </span>
             </div>
           ) : (

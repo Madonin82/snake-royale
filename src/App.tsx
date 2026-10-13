@@ -18,6 +18,7 @@ import { canActivateSkill, canAffordQueuedDart, canAffordQueuedRattle, canQueueR
 import { calculateAIAction, calculateAIMove } from './game/ai';
 import { cloneGameState, toCompactGameState } from './game/aiBridge';
 import { shouldApplyRtdbBridgeCommand } from './game/aiBridgeRtdb';
+import { computeVirtualHead, findBfsPath } from './game/mousePathfinding';
 import { gamepadController, GamepadMenuAction } from './game/gamepad';
 import { networkManager } from './game/network';
 import { ADMIN_UIDS, auth, rtdb } from './firebase';
@@ -344,6 +345,15 @@ const GameApp: React.FC<{ campaignPlaytestLevel: CampaignLevel | null }> = ({ ca
   const [choosingSkillMap, setChoosingSkillMap] = useState<Record<string, boolean>>({});
   const choosingSkillMapRef = useRef(choosingSkillMap);
   choosingSkillMapRef.current = choosingSkillMap;
+
+  // Mouse seat binding & desktop mouse controls
+  const [mouseSeat, setMouseSeat] = useState<'p1' | 'p2'>('p1');
+  const mouseSeatRef = useRef<'p1' | 'p2'>('p1');
+  mouseSeatRef.current = mouseSeat;
+  const lastMenuDeviceRef = useRef<'mouse' | 'keyboard' | 'gamepad' | null>(null);
+  const hasClaimedMouseRef = useRef<boolean>(false);
+  const [deniedCells, setDeniedCells] = useState<{ x: number; y: number; id: number }[]>([]);
+  const lastClickInfoRef = useRef<{ cell: Position; time: number; targetSeat: string } | null>(null);
 
   useEffect(() => {
     if (gameState.phase !== 'OVER' || inLobby || inOnlineLobby) {
@@ -1608,6 +1618,155 @@ const GameApp: React.FC<{ campaignPlaytestLevel: CampaignLevel | null }> = ({ ca
     handleBufferLock(seat === 'p1' ? 1 : 2, seat);
   }, [getBridgeSeat, handleBufferLock]);
 
+  // Track last used input device in menus (pointerdown for mouse)
+  useEffect(() => {
+    const handleWindowPointerDown = (e: PointerEvent) => {
+      const isInMenu =
+        inLobby ||
+        inOnlineLobby ||
+        settingsModalOpen ||
+        latencyModalOpen ||
+        stateRef.current.phase === 'OVER';
+      if (isInMenu && e.pointerType === 'mouse') {
+        lastMenuDeviceRef.current = 'mouse';
+      }
+    };
+    window.addEventListener('pointerdown', handleWindowPointerDown, { capture: true });
+    return () => window.removeEventListener('pointerdown', handleWindowPointerDown, { capture: true });
+  }, [inLobby, inOnlineLobby, settingsModalOpen, latencyModalOpen]);
+
+  // When a match starts, if mouse was last used in menus, assign to P1; otherwise first board click claims P1
+  useEffect(() => {
+    if (!inLobby && !inOnlineLobby && gameState.phase !== 'OVER') {
+      hasClaimedMouseRef.current = false;
+      if (lastMenuDeviceRef.current === 'mouse') {
+        setMouseSeat('p1');
+        hasClaimedMouseRef.current = true;
+      }
+    }
+  }, [inLobby, inOnlineLobby, gameState.phase]);
+
+  const getMouseTarget = useCallback((): { slot: 1 | 2; seat: 'p1' | 'p2' } => {
+    if (playModeRef.current === 'LOCAL_2P') {
+      return {
+        slot: mouseSeatRef.current === 'p2' ? 2 : 1,
+        seat: mouseSeatRef.current,
+      };
+    }
+    if (playModeRef.current === 'ONLINE_JOIN') {
+      const mySeat = onlineRoleRef.current === 'p2' ? 'p2' : 'p1';
+      return {
+        slot: mySeat === 'p2' ? 2 : 1,
+        seat: mySeat,
+      };
+    }
+    return { slot: 1, seat: 'p1' };
+  }, []);
+
+  const flashDeniedCell = useCallback((cell: Position) => {
+    soundEngine.playDenied();
+    const id = Date.now() + Math.random();
+    setDeniedCells(prev => [...prev, { x: cell.x, y: cell.y, id }]);
+    setTimeout(() => {
+      setDeniedCells(prev => prev.filter(c => c.id !== id));
+    }, 1000);
+  }, []);
+
+  const handleBoardCellClick = useCallback((cell: Position, _event: React.MouseEvent<HTMLCanvasElement>) => {
+    if (!settingsRef.current.turnBased) return;
+    if (inLobby || inOnlineLobby || replayActive || stateRef.current.phase === 'OVER') return;
+    if (playModeRef.current === 'ONLINE_SERVER' || playModeRef.current === 'ONLINE_SPECTATOR') return;
+
+    // Mouse seat binding: if mouse was never used in menus, the first board click during planning claims it for P1
+    if (!hasClaimedMouseRef.current) {
+      hasClaimedMouseRef.current = true;
+      setMouseSeat('p1');
+    }
+
+    const { slot: targetSlot, seat: targetSeat } = getMouseTarget();
+    const snake = stateRef.current.snakes.find(s => s.id === targetSeat);
+    if (!snake || !snake.isAlive) return;
+
+    // Clicking while the buffer is already locked: denied sound, no X flash
+    if (locksRef.current[targetSeat]) {
+      soundEngine.playDenied();
+      return;
+    }
+
+    const now = Date.now();
+    const last = lastClickInfoRef.current;
+    const isDoubleClick =
+      last !== null &&
+      last.targetSeat === targetSeat &&
+      last.cell.x === cell.x &&
+      last.cell.y === cell.y &&
+      now - last.time < 400;
+
+    if (isDoubleClick) {
+      lastClickInfoRef.current = null;
+      // Discard any entries the second click event added (they belong to same gesture)
+      // Then lock if the buffer is non-empty
+      const currentBuf = moveBuffersRef.current[targetSeat] ?? [];
+      if (currentBuf.length > 0) {
+        handleBufferLock(targetSlot, targetSeat);
+      }
+      return;
+    }
+
+    const buf = moveBuffersRef.current[targetSeat] ?? [];
+    const remainingRoom = snake.body.length - buf.length;
+    if (remainingRoom <= 0) {
+      flashDeniedCell(cell);
+      return;
+    }
+
+    const vHead = computeVirtualHead(snake, buf);
+    const gridSize = stateRef.current.gridSize ?? settingsRef.current.gridSize;
+    const path = findBfsPath(vHead, cell, stateRef.current, gridSize);
+
+    if (!path || path.length === 0 || path.length > remainingRoom) {
+      flashDeniedCell(cell);
+      return;
+    }
+
+    let anyQueued = false;
+    for (const dir of path) {
+      const ok = handleDirectionInput(targetSlot, dir, targetSeat);
+      if (ok) anyQueued = true;
+    }
+
+    if (anyQueued) {
+      lastClickInfoRef.current = { cell, time: now, targetSeat };
+    }
+  }, [flashDeniedCell, getMouseTarget, handleBufferLock, handleDirectionInput, inLobby, inOnlineLobby, replayActive]);
+
+  const handleBoardCellDoubleClick = useCallback((_cell: Position) => {
+    if (!settingsRef.current.turnBased || inLobby || inOnlineLobby || replayActive || stateRef.current.phase === 'OVER') return;
+    if (playModeRef.current === 'ONLINE_SERVER' || playModeRef.current === 'ONLINE_SPECTATOR') return;
+
+    const { slot: targetSlot, seat: targetSeat } = getMouseTarget();
+    if (locksRef.current[targetSeat]) return;
+    const buf = moveBuffersRef.current[targetSeat] ?? [];
+    if (buf.length > 0) {
+      handleBufferLock(targetSlot, targetSeat);
+    }
+  }, [getMouseTarget, handleBufferLock, inLobby, inOnlineLobby, replayActive]);
+
+  const handleBoardCellContextMenu = useCallback((event: React.MouseEvent<HTMLCanvasElement>) => {
+    event.preventDefault();
+    if (!settingsRef.current.turnBased || inLobby || inOnlineLobby || replayActive || stateRef.current.phase === 'OVER') return;
+    if (playModeRef.current === 'ONLINE_SERVER' || playModeRef.current === 'ONLINE_SPECTATOR') return;
+
+    const { slot: targetSlot } = getMouseTarget();
+    handleBufferUndo(targetSlot);
+  }, [getMouseTarget, handleBufferUndo, inLobby, inOnlineLobby, replayActive]);
+
+  const mouseEffectiveSeat: 'p1' | 'p2' = useMemo(() => {
+    if (playMode === 'LOCAL_2P') return mouseSeat;
+    if (playMode === 'ONLINE_JOIN') return onlineRole === 'p2' ? 'p2' : 'p1';
+    return 'p1';
+  }, [playMode, mouseSeat, onlineRole]);
+
   useEffect(() => {
     if (
       !onlineRoomId ||
@@ -1729,6 +1888,7 @@ const GameApp: React.FC<{ campaignPlaytestLevel: CampaignLevel | null }> = ({ ca
   }, [campaignPlaytestLevel]);
 
   const handleMenuAction = useCallback((action: GamepadMenuAction, _slot: 1 | 2) => {
+    lastMenuDeviceRef.current = 'gamepad';
     const isUiActive =
       inLobby ||
       inOnlineLobby ||
@@ -1801,6 +1961,7 @@ const GameApp: React.FC<{ campaignPlaytestLevel: CampaignLevel | null }> = ({ ca
         replayActive;
 
       if (isInMenuOrModal) {
+        lastMenuDeviceRef.current = 'keyboard';
         if (e.key === 'Escape') {
           handleMenuAction('CANCEL', 1);
           return;
@@ -2828,6 +2989,8 @@ const GameApp: React.FC<{ campaignPlaytestLevel: CampaignLevel | null }> = ({ ca
                 replayActive={replayActive}
                 onP2Undo={() => handleBufferUndo(2)}
                 onP2Lock={() => handleBufferLock(2)}
+                mouseSeat={!inLobby && !inOnlineLobby && settings.turnBased ? mouseEffectiveSeat : undefined}
+                onToggleMouseSeat={playMode === 'LOCAL_2P' ? () => setMouseSeat(prev => prev === 'p1' ? 'p2' : 'p1') : undefined}
               />
               <div className="gameboard-area relative">
                 <GameBoard
@@ -2841,6 +3004,10 @@ const GameApp: React.FC<{ campaignPlaytestLevel: CampaignLevel | null }> = ({ ca
                   animationsDisabled={aiMode}
                   hitstop={activeHitstop}
                   fatalMoveAnimating={fatalMoveSnakes}
+                  deniedCells={deniedCells}
+                  onCellClick={handleBoardCellClick}
+                  onCellDoubleClick={handleBoardCellDoubleClick}
+                  onCellContextMenu={handleBoardCellContextMenu}
                 />
                 {!replayActive &&
                   (playMode === 'ONLINE_HOST' || playMode === 'ONLINE_SERVER') &&
