@@ -1095,7 +1095,7 @@ const GameApp: React.FC<{ campaignPlaytestLevel: CampaignLevel | null }> = ({ ca
       networkManager.broadcastState(nextState, nextLocks);
     }
 
-    const openNextLockPhase = (beatFired: boolean) => {
+    const openNextLockPhase = () => {
       const mergedLocks = Object.fromEntries(stateRef.current.snakes.map(snake => [
         snake.id,
         snake.isAlive && (moveBuffersRef.current[snake.id]?.length ?? 0) > 0 && Boolean(nextLocks[snake.id] || locksRef.current[snake.id]),
@@ -1111,41 +1111,21 @@ const GameApp: React.FC<{ campaignPlaytestLevel: CampaignLevel | null }> = ({ ca
             (isBuiltInAiActive() && snake.id !== 'p1')
           );
 
-      if (canProgress && aiMode) {
+      if (canProgress) {
         queueMicrotask(() => {
           turnTimeoutRef.current = null;
           maybeAdvanceTurn();
         });
-      } else if (canProgress && beatFired) {
-        queueMicrotask(() => {
-          turnTimeoutRef.current = null;
-          maybeAdvanceTurn();
-        });
-      } else if (canProgress) {
-        turnTimeoutRef.current = setTimeout(() => {
-          turnTimeoutRef.current = null;
-          maybeAdvanceTurn();
-        }, 550);
       }
     };
 
     const freezeMs = (() => {
-      // Every turn resolution gets the visible playback beat unless ?ai=1,
-      // not just multi-move buffer drains or hitstop events. Without this,
-      // single-move turns teleport with no pause (canProgress is false when
-      // buffers are empty after a single move).
       let hitstopMs = 0;
       const openNextLockPhaseWithBeat = () => {
-        // Only add the beat if triggerHitstop didn't already pause.
-        // Note: triggerHitstop invokes this callback synchronously when
-        // there's no hitstop, at which point hitstopMs is still 0
-        // (assignment below hasn't run yet) — which is exactly when we
-        // want the beat. When there IS a hitstop, the callback fires later
-        // via timer, hitstopMs > 0, and we skip the extra beat.
-        if (!aiMode && hitstopMs === 0) {
-          setTimeout(() => openNextLockPhase(true), 550);
+        if (aiMode) {
+          openNextLockPhase();
         } else {
-          openNextLockPhase(false);
+          setTimeout(() => openNextLockPhase(), 550);
         }
       };
       hitstopMs = triggerHitstop(prevState, nextState, openNextLockPhaseWithBeat);
