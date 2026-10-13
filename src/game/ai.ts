@@ -372,6 +372,7 @@ export function calculateAIMove(
     // worth a losing trade. (The -10000 keeps the doomed-anyway fallback
     // working: if every move is vetoed, the least-bad still gets picked.)
     let headOnPenalty = 0;
+    let twoTickPenalty = 0;
     for (const opponent of livingOpponents) {
       const oppHead = opponent.body[0];
       const inReach = ALL_DIRECTIONS
@@ -380,18 +381,29 @@ export function calculateAIMove(
           const c = getNextHeadPosition(oppHead, d);
           return c.x === nextPos.x && c.y === nextPos.y;
         });
-      if (!inReach) continue;
-      // Post-split, the trade is decided by the POINTS tiebreak (then length).
       const iWinTrade = winsTiebreak(me, opponent);
-      if (difficulty === 'EASY') {
-        headOnPenalty = Math.max(headOnPenalty, 5);
-      } else if (difficulty === 'MEDIUM') {
-        headOnPenalty = Math.max(headOnPenalty, 15);
+      if (inReach) {
+        // Post-split, the trade is decided by the POINTS tiebreak (then length).
+        if (difficulty === 'EASY') {
+          headOnPenalty = Math.max(headOnPenalty, 5);
+        } else if (difficulty === 'MEDIUM') {
+          headOnPenalty = Math.max(headOnPenalty, 15);
+        } else {
+          headOnPenalty = Math.max(headOnPenalty, iWinTrade ? 10 : 10000);
+        }
       } else {
-        headOnPenalty = Math.max(headOnPenalty, iWinTrade ? 10 : 10000);
+        // 2-tick projection: Manhattan distance <= 2 from current head position
+        const manDist = Math.abs(nextPos.x - oppHead.x) + Math.abs(nextPos.y - oppHead.y);
+        if (manDist <= 2) {
+          let baseNudge = 0;
+          if (difficulty === 'MEDIUM') baseNudge = 8;
+          else if (difficulty === 'HARD') baseNudge = 25;
+          if (iWinTrade) baseNudge = Math.floor(baseNudge / 2);
+          twoTickPenalty = Math.max(twoTickPenalty, baseNudge);
+        }
       }
     }
-    score -= headOnPenalty;
+    score -= (headOnPenalty + twoTickPenalty);
 
     // 4b. Multiplayer Head Proximity / Spacing Penalty (prevent clumping and mutual crashes in 3-4 player games)
     let proximityPenalty = 0;
