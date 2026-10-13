@@ -129,6 +129,83 @@ function computeCommittedPath(snake: any, buffer: BufferEntry[]): Position[] {
   return path;
 }
 
+function spawnTokenFlyEffect(snakeId: string, state: GameState, defaultGridSize: number) {
+  if (typeof window === 'undefined' || typeof document === 'undefined') return;
+  const snake = state.snakes.find(s => s.id === snakeId);
+  if (!snake || snake.body.length === 0) return;
+  const head = snake.body[0];
+
+  const canvas = document.querySelector('.match-board canvas') as HTMLCanvasElement | null;
+  if (!canvas) return;
+
+  const rect = canvas.getBoundingClientRect();
+  if (rect.width === 0 || rect.height === 0) return;
+
+  const gridSize = state.gridSize ?? defaultGridSize ?? 8;
+  const cellWidth = rect.width / gridSize;
+  const cellHeight = rect.height / gridSize;
+
+  const startX = rect.left + (head.x + 0.5) * cellWidth;
+  const startY = rect.top + (head.y + 0.5) * cellHeight;
+
+  // Target card's score element in the HUD
+  let targetEl: HTMLElement | null = null;
+  const targets = document.querySelectorAll(`[data-score-card="${snakeId}"]`);
+  for (let i = 0; i < targets.length; i++) {
+    const el = targets[i] as HTMLElement;
+    const tRect = el.getBoundingClientRect();
+    if (tRect.width > 0 && tRect.height > 0 && el.offsetParent !== null) {
+      targetEl = el;
+      break;
+    }
+  }
+  if (!targetEl && targets.length > 0) {
+    targetEl = targets[0] as HTMLElement;
+  }
+
+  let targetX = startX;
+  let targetY = startY - 80;
+  if (targetEl) {
+    const tRect = targetEl.getBoundingClientRect();
+    targetX = tRect.left + tRect.width / 2;
+    targetY = tRect.top + tRect.height / 2;
+  }
+
+  const el = document.createElement('div');
+  el.textContent = '+1';
+  el.className = 'token-fly-plus-one';
+  el.style.left = `${startX}px`;
+  el.style.top = `${startY}px`;
+  el.style.transform = 'translate(-50%, -50%) scale(0.6)';
+  el.style.opacity = '1';
+
+  document.body.appendChild(el);
+  void el.offsetWidth; // Force synchronous reflow
+
+  const dx = targetX - startX;
+  const dy = targetY - startY;
+  el.style.transition = 'transform 600ms cubic-bezier(0.16, 1, 0.3, 1), opacity 600ms cubic-bezier(0.16, 1, 0.3, 1)';
+  el.style.transform = `translate(calc(-50% + ${dx}px), calc(-50% + ${dy}px)) scale(1.2)`;
+
+  let cleanedUp = false;
+  const onDone = () => {
+    if (cleanedUp) return;
+    cleanedUp = true;
+    el.remove();
+    if (targetEl) {
+      targetEl.classList.remove('score-pulse');
+      void targetEl.offsetWidth; // Force reflow to re-trigger CSS keyframes
+      targetEl.classList.add('score-pulse');
+      setTimeout(() => {
+        targetEl?.classList.remove('score-pulse');
+      }, 400);
+    }
+  };
+
+  el.addEventListener('transitionend', onDone, { once: true });
+  setTimeout(onDone, 650);
+}
+
 function createLobbyState(settings: GameSettings): GameState {
   return { ...createInitialState(settings), phase: 'LOBBY' };
 }
@@ -988,6 +1065,14 @@ const GameApp: React.FC<{ campaignPlaytestLevel: CampaignLevel | null }> = ({ ca
     const prevState = stateRef.current;
     const { nextState, events } = processGameTick(prevState, s, 0);
     playTickEvents(events);
+
+    if (!aiMode && events.tokenEaten) {
+      for (const [snakeId, ate] of Object.entries(events.tokenEaten)) {
+        if (ate) {
+          spawnTokenFlyEffect(snakeId, nextState, s.gridSize);
+        }
+      }
+    }
 
     const nextBuffers = Object.fromEntries(nextState.snakes.map(snake => [
       snake.id,
@@ -2282,6 +2367,13 @@ const GameApp: React.FC<{ campaignPlaytestLevel: CampaignLevel | null }> = ({ ca
 
       const { nextState, events } = processGameTick(current, settingsRef.current, tickIntervalMs);
       triggerHitstop(current, nextState);
+      if (!aiMode && events.tokenEaten) {
+        for (const [snakeId, ate] of Object.entries(events.tokenEaten)) {
+          if (ate) {
+            spawnTokenFlyEffect(snakeId, nextState, settingsRef.current.gridSize);
+          }
+        }
+      }
       for (const snake of nextState.snakes) {
         const buffered = realTimeInputBufferRef.current[snake.id];
         if (buffered && buffered.length > 0 && !snake.queuedDirection) {

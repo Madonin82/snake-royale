@@ -283,7 +283,7 @@ export const Hud: React.FC<HudProps> = ({
 
           {/* Row 2: Primary Score Hierarchy + Secondary Stats Pill Group (LEN & SP) + Corner Skill Tag */}
           <div className="shrink-0 flex items-end justify-between gap-1.5 mb-1.5 pb-1 border-b border-[#0F380F]/30">
-            <div className="flex items-baseline tabular-nums leading-none">
+            <div data-score-card={who} className="flex items-baseline tabular-nums leading-none">
               <span className={`${isMultiCardSide ? 'text-xl' : 'text-2xl'} [@media(max-height:540px)]:text-lg leading-none font-black`}>
                 {snake.score}
               </span>
@@ -401,7 +401,7 @@ export const Hud: React.FC<HudProps> = ({
           </div>
 
           <div className={`flex items-center justify-between ${isMultiCardSide ? 'mb-1 h-6' : 'mb-2 h-8'} [@media(max-height:540px)]:mb-1 [@media(max-height:540px)]:h-6`}>
-            <div className="flex items-baseline tabular-nums">
+            <div data-score-card={who} className="flex items-baseline tabular-nums">
               <span className={`${isMultiCardSide ? 'text-2xl' : 'text-3xl'} [@media(max-height:540px)]:text-xl leading-none font-black`}>{snake.score}</span>
               <span className="text-[10px] font-semibold uppercase tracking-tight ml-1">PTS</span>
             </div>
@@ -515,7 +515,7 @@ export const Hud: React.FC<HudProps> = ({
             </span>
           </div>
           <div className="flex items-center justify-between mt-1 h-6 tabular-nums gap-1">
-            <div className="flex items-baseline gap-1 shrink-0">
+            <div data-score-card={who} className="flex items-baseline gap-1 shrink-0">
               <span className="text-2xl leading-none font-black">{snake.score}</span>
               <span className="text-[10px] font-semibold uppercase tracking-tight">PTS</span>
               <span className="text-[9px] font-bold shrink-0 opacity-85">· LEN {snake.body.length}</span>
@@ -627,7 +627,7 @@ export const Hud: React.FC<HudProps> = ({
             <div key={who} className={`flex min-w-0 flex-1 items-center gap-1 ${isLocked(who) ? 'opacity-60' : 'opacity-100'}`}>
               <span className={`h-2.5 w-2.5 shrink-0 border border-[#0F380F] ${palette.chipBg}`} />
               <span className="min-w-0 flex-1 truncate">{snake.name}</span>
-              <span className="shrink-0">{snake.score}</span>
+              <span data-score-card={who} className="shrink-0">{snake.score}</span>
               <span className="shrink-0 opacity-80">L{snake.body.length}</span>
               <span className="shrink-0">{isLocked(who) ? 'LOCK' : 'PLAN'}</span>
             </div>

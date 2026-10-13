@@ -299,3 +299,38 @@
     height: min(100cqw, 100cqh);
   }
 }
+
+/* Floating +1 token eat animation and score pulse */
+.token-fly-plus-one {
+  position: fixed;
+  pointer-events: none;
+  z-index: 9999;
+  user-select: none;
+  font-family: 'VT323', monospace;
+  font-weight: 900;
+  font-size: 18px;
+  line-height: 1;
+  padding: 1px 5px;
+  background-color: #0F380F;
+  color: #9BBC0F;
+  border: 2px solid #9BBC0F;
+  box-shadow: 2px 2px 0px #0F380F;
+  will-change: transform, opacity;
+}
+
+@keyframes scorePulse {
+  0% {
+    transform: scale(1);
+  }
+  40% {
+    transform: scale(1.4);
+    filter: drop-shadow(0 0 6px rgba(15, 56, 15, 0.8));
+  }
+  100% {
+    transform: scale(1);
+  }
+}
+
+.score-pulse {
+  animation: scorePulse 380ms ease-out forwards;
+}
