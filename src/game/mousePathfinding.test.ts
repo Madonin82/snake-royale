@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { computeVirtualHead, findBfsPath, findFallbackBfsPath, getObstacleSet } from './mousePathfinding';
+import { computeVirtualHead, findBfsPath, findFallbackBfsPath, getObstacleSet, resolveDominantDirection } from './mousePathfinding';
 import { GameState, Snake } from '../types/game';
 
 function createMockSnake(overrides: Partial<Snake> = {}): Snake {
@@ -244,4 +244,30 @@ test('findFallbackBfsPath: enforces arena bounds and rejects out of bounds or vi
 
   // Target is virtual head returns null
   assert.equal(findFallbackBfsPath(vHead, { x: 2, y: 2 }, state, 8), null);
+});
+
+test('resolveDominantDirection: resolves clicked cell to single cardinal direction via dominant axis', () => {
+  const from = { x: 3, y: 3 };
+
+  // Pure cardinal directions (far and near)
+  assert.equal(resolveDominantDirection(from, { x: 7, y: 3 }), 'RIGHT');
+  assert.equal(resolveDominantDirection(from, { x: 4, y: 3 }), 'RIGHT');
+  assert.equal(resolveDominantDirection(from, { x: 0, y: 3 }), 'LEFT');
+  assert.equal(resolveDominantDirection(from, { x: 2, y: 3 }), 'LEFT');
+  assert.equal(resolveDominantDirection(from, { x: 3, y: 0 }), 'UP');
+  assert.equal(resolveDominantDirection(from, { x: 3, y: 2 }), 'UP');
+  assert.equal(resolveDominantDirection(from, { x: 3, y: 7 }), 'DOWN');
+  assert.equal(resolveDominantDirection(from, { x: 3, y: 4 }), 'DOWN');
+
+  // Dominant X axis (|dx| > |dy|)
+  assert.equal(resolveDominantDirection(from, { x: 6, y: 4 }), 'RIGHT'); // dx=3, dy=1
+  assert.equal(resolveDominantDirection(from, { x: 6, y: 2 }), 'RIGHT'); // dx=3, dy=-1
+  assert.equal(resolveDominantDirection(from, { x: 0, y: 4 }), 'LEFT');  // dx=-3, dy=1
+  assert.equal(resolveDominantDirection(from, { x: 0, y: 2 }), 'LEFT');  // dx=-3, dy=-1
+
+  // Dominant Y axis (|dy| > |dx|)
+  assert.equal(resolveDominantDirection(from, { x: 4, y: 7 }), 'DOWN');  // dx=1, dy=4
+  assert.equal(resolveDominantDirection(from, { x: 2, y: 7 }), 'DOWN');  // dx=-1, dy=4
+  assert.equal(resolveDominantDirection(from, { x: 4, y: 0 }), 'UP');    // dx=1, dy=-3
+  assert.equal(resolveDominantDirection(from, { x: 2, y: 0 }), 'UP');    // dx=-1, dy=-3
 });

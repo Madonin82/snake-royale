@@ -18,7 +18,7 @@ import { canActivateSkill, canAffordQueuedDart, canAffordQueuedRattle, canQueueR
 import { calculateAIAction, calculateAIMove } from './game/ai';
 import { cloneGameState, toCompactGameState } from './game/aiBridge';
 import { shouldApplyRtdbBridgeCommand } from './game/aiBridgeRtdb';
-import { computeVirtualHead, findBfsPath, findFallbackBfsPath } from './game/mousePathfinding';
+import { computeVirtualHead, findBfsPath, findFallbackBfsPath, resolveDominantDirection } from './game/mousePathfinding';
 import { gamepadController, GamepadMenuAction } from './game/gamepad';
 import { networkManager } from './game/network';
 import { ADMIN_UIDS, auth, rtdb } from './firebase';
@@ -737,6 +737,31 @@ const GameApp: React.FC<{ campaignPlaytestLevel: CampaignLevel | null }> = ({ ca
       return updated;
     });
   }, [getTargetKey, inLobby, inOnlineLobby]);
+
+  const canUseSkillForSeat = useCallback((seat: string): boolean => {
+    if (!settings.turnBased) return false;
+    if (gameState.phase === 'OVER' || inLobby || inOnlineLobby || replayActive) return false;
+    if (playMode === 'SOLO_AI' && seat !== 'p1') return false;
+    if ((playMode === 'ONLINE_HOST' || playMode === 'ONLINE_SERVER') && seat !== 'p1') return false;
+    if (playMode === 'ONLINE_JOIN' && seat !== (onlineRole ?? 'p2')) return false;
+    if (playMode === 'ONLINE_SPECTATOR') return false;
+    if (locks[seat]) return false;
+    if (choosingSkillMap[seat]) return false;
+    const snake = gameState.snakes.find(s => s.id === seat);
+    if (!snake || !snake.isAlive || !snake.equippedSkill) return false;
+    if (!canActivateSkill(snake, gameState, gameState.skillsAvailable ?? settings.skillsAvailable)) {
+      return false;
+    }
+    const buf = moveBuffers[seat] ?? [];
+    if (buf.length >= snake.body.length) return false;
+    const queuedSkills = buf.filter(e => typeof e !== 'string' && (e.type === 'dart' || e.type === 'rattle')).length;
+    if (!canAffordQueuedDart(snake.skillPoints, queuedSkills)) return false;
+    if (snake.equippedSkill === 'rattle') {
+      const queuedRattles = buf.filter(e => typeof e !== 'string' && e.type === 'rattle').length;
+      if (!canQueueRattleWithLength(snake.body.length, queuedRattles)) return false;
+    }
+    return true;
+  }, [settings.turnBased, settings.skillsAvailable, gameState, inLobby, inOnlineLobby, replayActive, playMode, onlineRole, locks, choosingSkillMap, moveBuffers]);
 
   const setLock = useCallback((who: string, isAuto = false) => {
     const mode = playModeRef.current;
@@ -1717,6 +1742,20 @@ const GameApp: React.FC<{ campaignPlaytestLevel: CampaignLevel | null }> = ({ ca
     const buf = moveBuffersRef.current[targetSeat] ?? [];
     const vHead = computeVirtualHead(snake, buf);
 
+    if (choosingSkillMapRef.current[targetSeat]) {
+      // Clicking virtual head's own cell while choosing: denied sound, no X flash
+      if (cell.x === vHead.pos.x && cell.y === vHead.pos.y) {
+        soundEngine.playDenied();
+        return;
+      }
+      // Resolve clicked cell to dominant cardinal direction relative to virtual head
+      const dir = resolveDominantDirection(vHead.pos, cell);
+
+      lastClickInfoRef.current = null;
+      handleDirectionInput(targetSlot, dir, targetSeat);
+      return;
+    }
+
     // Clicking the cell that contains the virtual head locks the buffer, whenever the buffer is non-empty.
     // Empty buffer: do nothing.
     if (cell.x === vHead.pos.x && cell.y === vHead.pos.y) {
@@ -1783,6 +1822,7 @@ const GameApp: React.FC<{ campaignPlaytestLevel: CampaignLevel | null }> = ({ ca
 
     const { slot: targetSlot, seat: targetSeat } = getMouseTarget();
     if (locksRef.current[targetSeat]) return;
+    if (choosingSkillMapRef.current[targetSeat]) return;
     const buf = moveBuffersRef.current[targetSeat] ?? [];
     if (buf.length > 0) {
       handleBufferLock(targetSlot, targetSeat);
@@ -3028,6 +3068,15 @@ const GameApp: React.FC<{ campaignPlaytestLevel: CampaignLevel | null }> = ({ ca
                 onP2Lock={() => handleBufferLock(2)}
                 mouseSeat={!inLobby && !inOnlineLobby && settings.turnBased ? (hasClaimedMouseRef.current ? mouseEffectiveSeat : undefined) : undefined}
                 onToggleMouseSeat={playMode === 'LOCAL_2P' ? () => setMouseSeat(prev => prev === 'p1' ? 'p2' : 'p1') : undefined}
+                onSkill={(seat) => {
+                  if (playMode === 'LOCAL_2P') {
+                    handleSkillButton(seat === 'p2' ? 2 : 1);
+                  } else {
+                    handleSkillButton(1);
+                  }
+                }}
+                choosingSkillMap={choosingSkillMap}
+                canUseSkill={canUseSkillForSeat}
               />
               <div className="gameboard-area relative">
                 <GameBoard

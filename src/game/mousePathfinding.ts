@@ -149,3 +149,15 @@ export function findFallbackBfsPath(
 ): Direction[] | null {
   return findBfsPath(virtualHead, target, gameState, gridSize, null, true);
 }
+
+/**
+ * Resolves a target cell to a single cardinal direction relative to the virtual head
+ * using dominant axis (|dx| vs |dy|).
+ */
+export function resolveDominantDirection(from: Position, to: Position): Direction {
+  const dx = to.x - from.x;
+  const dy = to.y - from.y;
+  return Math.abs(dx) > Math.abs(dy)
+    ? (dx < 0 ? 'LEFT' : 'RIGHT')
+    : (dy < 0 ? 'UP' : 'DOWN');
+}

@@ -4,6 +4,8 @@ import { Activity, Gamepad, Wifi } from 'lucide-react';
 import { getCampaignObjectiveProgress, isCampaignObjectiveComplete } from '../game/objectives';
 import { getPlayerColorPalette, getSeatDisplayTag, splitPlayersTwoPerSide } from '../game/playerColors';
 
+import { canActivateSkill, canAffordQueuedDart, canQueueRattleWithLength } from '../game/skills';
+
 interface HudProps {
   gameState: GameState;
   playMode: PlayMode;
@@ -22,6 +24,9 @@ interface HudProps {
   onP2Lock?: () => void;
   mouseSeat?: 'p1' | 'p2';
   onToggleMouseSeat?: () => void;
+  onSkill?: (seat: string) => void;
+  choosingSkillMap?: Record<string, boolean>;
+  canUseSkill?: (seat: string) => boolean;
 }
 
 export const Hud: React.FC<HudProps> = ({
@@ -41,6 +46,9 @@ export const Hud: React.FC<HudProps> = ({
   onP2Lock,
   mouseSeat,
   onToggleMouseSeat,
+  onSkill,
+  choosingSkillMap,
+  canUseSkill: canUseSkillProp,
 }) => {
   // Who is "you" on this screen, per seat — drives the (YOU) tags without redundant (BOT N) tags.
   const seatTag = (seat: string): string => getSeatDisplayTag(seat, playMode, viewerSeat);
@@ -93,6 +101,51 @@ export const Hud: React.FC<HudProps> = ({
     if (playMode === 'ONLINE_HOST' || playMode === 'ONLINE_SERVER') return seat === 'p1';
     if (playMode === 'ONLINE_JOIN') return viewerSeat ? viewerSeat === seat : seat === 'p1';
     return seat === 'p1';
+  };
+
+  const isSkillUsable = (who: string): boolean => {
+    if (canUseSkillProp) return canUseSkillProp(who);
+
+    if (!onSkill) return false;
+    if (!gameState.turnBased) return false;
+    if (gameState.phase === 'OVER' || replayActive) return false;
+    if (!isLocalSeat(who)) return false;
+    if (isLocked(who)) return false;
+    if (choosingSkillMap?.[who]) return false;
+
+    const snake = gameState.snakes.find(s => s.id === who);
+    if (!snake || !snake.isAlive || !snake.equippedSkill) return false;
+    if (!canActivateSkill(snake, gameState, gameState.skillsAvailable)) return false;
+
+    const buf = moveBuffers?.[who] ?? [];
+    if (buf.length >= snake.body.length) return false;
+    const queuedSkills = buf.filter(e => typeof e !== 'string' && (e.type === 'dart' || e.type === 'rattle')).length;
+    if (!canAffordQueuedDart(snake.skillPoints, queuedSkills)) return false;
+    if (snake.equippedSkill === 'rattle') {
+      const queuedRattles = buf.filter(e => typeof e !== 'string' && e.type === 'rattle').length;
+      if (!canQueueRattleWithLength(snake.body.length, queuedRattles)) return false;
+    }
+    return true;
+  };
+
+  const renderSkillBadge = (who: string, skill: string) => {
+    const usable = isSkillUsable(who);
+    return (
+      <button
+        type="button"
+        data-testid={`skill-badge-${who}`}
+        disabled={!usable}
+        onClick={() => onSkill?.(who)}
+        className={`text-[8px] px-1 py-0.5 border font-black uppercase leading-none tracking-tight transition-colors ${
+          usable
+            ? 'bg-[#0F380F] text-[#9BBC0F] border-[#0F380F] cursor-pointer hover:bg-[#306230] active:translate-y-0.5 shadow-[1px_1px_0px_#0F380F]'
+            : 'bg-[#306230]/50 text-[#9BBC0F]/60 border-[#0F380F]/50 cursor-not-allowed opacity-60'
+        }`}
+        title={`Equipped Skill: ${skill.toUpperCase()} (2 SP)`}
+      >
+        ⚡{skill}
+      </button>
+    );
   };
 
   // Format seconds mm:ss
@@ -337,15 +390,7 @@ export const Hud: React.FC<HudProps> = ({
               >
                 ⚡{snake.skillPoints ?? 0} SP
               </span>
-              {snake.equippedSkill && (
-                <span
-                  data-testid={`skill-badge-${who}`}
-                  className="text-[8px] px-1 py-0.5 bg-[#0F380F] text-[#9BBC0F] border border-[#0F380F] font-black uppercase leading-none tracking-tight"
-                  title={`Equipped Skill: ${snake.equippedSkill.toUpperCase()} (2 SP)`}
-                >
-                  ⚡{snake.equippedSkill}
-                </span>
-              )}
+              {snake.equippedSkill && renderSkillBadge(who, snake.equippedSkill)}
             </div>
           </div>
 
@@ -450,11 +495,7 @@ export const Hud: React.FC<HudProps> = ({
               <span className={`${isMultiCardSide ? 'text-2xl' : 'text-3xl'} [@media(max-height:540px)]:text-xl leading-none font-black`}>{snake.score}</span>
               <span className="text-[10px] font-semibold uppercase tracking-tight ml-1">PTS</span>
             </div>
-            {snake.equippedSkill && (
-              <span className="text-[8px] px-1 py-0.5 bg-[#0F380F] text-[#9BBC0F] border border-[#0F380F] font-black uppercase leading-none">
-                ⚡{snake.equippedSkill}
-              </span>
-            )}
+            {snake.equippedSkill && renderSkillBadge(who, snake.equippedSkill)}
             <span className="text-[9px] px-1.5 py-0.5 border border-[#0F380F] font-black uppercase" title="Skill points">
               ⚡{snake.skillPoints ?? 0}
             </span>
@@ -561,11 +602,7 @@ export const Hud: React.FC<HudProps> = ({
             </span>
             <span className="flex items-center gap-1 shrink-0">
               {renderPlanningStatusBadge(snake.isAlive, locked)}
-              {snake.equippedSkill && (
-                <span className="text-[8px] px-1 py-0.5 bg-[#0F380F] text-[#9BBC0F] border border-[#0F380F] font-black uppercase leading-none">
-                  ⚡{snake.equippedSkill}
-                </span>
-              )}
+              {snake.equippedSkill && renderSkillBadge(who, snake.equippedSkill)}
             </span>
           </div>
           <div className="flex items-center justify-between mt-1 h-6 tabular-nums gap-1">
