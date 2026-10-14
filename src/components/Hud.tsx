@@ -289,10 +289,10 @@ export const Hud: React.FC<HudProps> = ({
     const isTurnActive = gameState.turnBased && gameState.phase !== 'OVER';
 
     if (!isAlive) {
-      return `bg-[#8BAC0F]/50 opacity-45 border-2 border-dashed ${palette.borderColor}`;
+      return `bg-[#8BAC0F]/50 opacity-45 border-4 border-dashed ${palette.borderColor}`;
     }
     if (isTurnActive && locked) {
-      return `bg-[#8BAC0F]/75 opacity-60 border-2 border-dashed ${palette.borderColor} ${palette.lockedShadow}`;
+      return `bg-[#8BAC0F]/75 opacity-60 border-4 border-dashed ${palette.borderColor} ${palette.lockedShadow}`;
     }
     if (isTurnActive && !locked) {
       return `bg-[#9BBC0F] opacity-100 border-4 ${palette.borderColor} ${palette.activeHighlight}`;
