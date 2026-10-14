@@ -438,7 +438,7 @@ export const Hud: React.FC<HudProps> = ({
                 {mouseHints.caption}
               </div>
             )}
-            <div className="flex items-center gap-1 overflow-x-auto whitespace-nowrap shrink-0">
+            <div className="flex flex-wrap gap-1 content-start shrink-0 portrait:overflow-y-auto portrait:max-h-[52px]">
               {!canSeeMoves ? (
                 <span data-testid={`queue-hidden-${who}`} className="text-[10px] opacity-75 italic font-bold">
                   Hidden
@@ -449,6 +449,10 @@ export const Hud: React.FC<HudProps> = ({
                   <span
                     aria-hidden="true"
                     className="px-1 py-0.5 text-[10px] leading-tight font-bold border border-[#0F380F] shrink-0 invisible"
+                  >↑</span>
+                  <span
+                    aria-hidden="true"
+                    className="px-1 py-0.5 text-[10px] leading-tight font-bold border border-[#0F380F] shrink-0 invisible portrait:inline hidden"
                   >↑</span>
                 </>
               ) : (
@@ -550,7 +554,7 @@ export const Hud: React.FC<HudProps> = ({
               {mouseHints.caption}
             </div>
           )}
-          <div className="flex items-center gap-1 overflow-x-auto whitespace-nowrap shrink-0">
+          <div className="flex flex-wrap gap-1 content-start shrink-0 portrait:overflow-y-auto portrait:max-h-[52px]">
             {!canSeeMoves ? (
               <span className="text-[10px] opacity-60 italic">Hidden</span>
             ) : buffer.length === 0 ? (
@@ -559,6 +563,10 @@ export const Hud: React.FC<HudProps> = ({
                 <span
                   aria-hidden="true"
                   className="px-1 py-0.5 text-[10px] leading-tight font-bold border border-[#0F380F] shrink-0 invisible"
+                >↑</span>
+                <span
+                  aria-hidden="true"
+                  className="px-1 py-0.5 text-[10px] leading-tight font-bold border border-[#0F380F] shrink-0 invisible portrait:inline hidden"
                 >↑</span>
               </>
             ) : (
@@ -633,11 +641,15 @@ export const Hud: React.FC<HudProps> = ({
         </div>
         {gameState.turnBased && (
           local ? (
-            <div className="mt-1.5 bg-[#8BAC0F]/40 border border-[#0F380F] px-1.5 h-7 flex items-center justify-between gap-1 text-[9px] font-bold overflow-hidden">
-              <div className="flex items-center gap-1 min-w-0 overflow-x-auto whitespace-nowrap">
+            <div className="mt-1.5 bg-[#8BAC0F]/40 border border-[#0F380F] px-1.5 h-7 portrait:h-auto portrait:min-h-7 portrait:max-h-[52px] portrait:overflow-y-auto flex items-center portrait:items-start justify-between gap-1 text-[9px] font-bold overflow-hidden">
+              <div className="flex flex-wrap gap-1 content-start min-w-0">
                 <span className="shrink-0">{locked ? '🔒 ' : '✏️ '}</span>
                 {buffer.length === 0 ? (
-                  <span className="opacity-60 italic">Swipe/tap board</span>
+                  <>
+                    <span className="opacity-60 italic">Swipe/tap board</span>
+                    <span aria-hidden="true" className="px-1 py-0.5 bg-[#0F380F] text-[#9BBC0F] text-[10px] font-black shrink-0 invisible">↑</span>
+                    <span aria-hidden="true" className="px-1 py-0.5 bg-[#0F380F] text-[#9BBC0F] text-[10px] font-black shrink-0 invisible portrait:inline hidden">↑</span>
+                  </>
                 ) : (
                   buffer.map((entry, idx) => {
                     const dir = entry.direction;
@@ -773,7 +785,7 @@ export const Hud: React.FC<HudProps> = ({
           </button>
           <div className="flex min-w-0 min-h-9 [@media(max-height:540px)]:min-h-7 flex-1 items-center gap-1 border-2 border-dashed border-[#0F380F] bg-[#8BAC0F] px-2 py-1 text-[10px] font-bold text-[#0F380F] tabular-nums">
             <span className="shrink-0">P2 {moveBuffers?.p2?.length ?? 0}/{gameState.snakes.find(snake => snake.id === 'p2')?.body.length ?? 0}</span>
-            <span className="flex min-w-0 flex-1 items-center gap-0.5 overflow-x-auto whitespace-nowrap">
+            <span className="flex min-w-0 flex-1 flex-wrap gap-0.5 content-start portrait:overflow-y-auto portrait:max-h-[44px]">
               {(moveBuffers?.p2 ?? []).map((entry, index) => {
                 const dir = entry.direction;
                 const arrow = dir === 'UP' ? '↑' : dir === 'DOWN' ? '↓' : dir === 'LEFT' ? '←' : '→';
@@ -785,10 +797,16 @@ export const Hud: React.FC<HudProps> = ({
                 );
               })}
               {(moveBuffers?.p2?.length ?? 0) === 0 && (
+                <>
                 <span
                   aria-hidden="true"
                   className="shrink-0 bg-[#0F380F] px-1 py-0.5 leading-none text-[#9BBC0F] invisible"
                 >↑</span>
+                <span
+                  aria-hidden="true"
+                  className="shrink-0 bg-[#0F380F] px-1 py-0.5 leading-none text-[#9BBC0F] invisible portrait:inline hidden"
+                >↑</span>
+                </>
               )}
             </span>
             {isLocked('p2') && <span className="shrink-0 bg-[#0F380F] text-[#9BBC0F] px-1 py-0.5 text-[9px] leading-none">LOCKED</span>}
