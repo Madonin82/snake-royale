@@ -443,9 +443,16 @@ export const Hud: React.FC<HudProps> = ({
                   Hidden
                 </span>
               ) : buffer.length === 0 ? (
-                <span className="text-[10px] [@media(max-height:540px)]:text-[9px] opacity-50 italic">
-                  {replayActive ? 'No moves queued' : 'Swipe/tap board'}
-                </span>
+                <>
+                  <span className="text-[10px] [@media(max-height:540px)]:text-[9px] opacity-50 italic">
+                    {replayActive ? 'No moves queued' : 'Swipe/tap board'}
+                  </span>
+                  {/* Invisible chip: pixel-identical to a real chip to hold the row height */}
+                  <span
+                    aria-hidden="true"
+                    className="px-1 py-0.5 text-[10px] leading-tight font-bold border border-[#0F380F] shrink-0 invisible"
+                  >↑</span>
+                </>
               ) : (
                 buffer.map((entry, idx) => {
                   const dir = entry.direction;
@@ -549,7 +556,14 @@ export const Hud: React.FC<HudProps> = ({
             {!canSeeMoves ? (
               <span className="text-[10px] opacity-60 italic">Hidden</span>
             ) : buffer.length === 0 ? (
-              <span className="text-[10px] [@media(max-height:540px)]:text-[9px] opacity-50 italic">Swipe/tap board</span>
+              <>
+                <span className="text-[10px] [@media(max-height:540px)]:text-[9px] opacity-50 italic">Swipe/tap board</span>
+                {/* Invisible chip: pixel-identical to a real chip to hold the row height */}
+                <span
+                  aria-hidden="true"
+                  className="px-1 py-0.5 text-[10px] leading-tight font-bold border border-[#0F380F] shrink-0 invisible"
+                >↑</span>
+              </>
             ) : (
               buffer.map((entry, idx) => {
                 const dir = entry.direction;

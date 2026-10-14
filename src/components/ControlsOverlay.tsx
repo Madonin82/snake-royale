@@ -156,7 +156,16 @@ export const ControlsOverlay: React.FC<ControlsOverlayProps> = ({
               </span>
             );
           })}
-          {queue.length === 0 && <span className="opacity-75 truncate">SWIPE / TAP BOARD</span>}
+          {queue.length === 0 && (
+            <>
+              <span className="opacity-75 truncate">SWIPE / TAP BOARD</span>
+              {/* Invisible chip: pixel-identical to a real chip to hold the row height */}
+              <span
+                aria-hidden="true"
+                className="shrink-0 bg-[#0F380F] px-1 py-0.5 leading-none text-[#9BBC0F] invisible"
+              >↑</span>
+            </>
+          )}
         </span>
         {locked && <span className="shrink-0 bg-[#0F380F] text-[#9BBC0F] px-1 py-0.5 text-[9px] leading-none">LOCKED</span>}
       </div>
