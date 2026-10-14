@@ -143,9 +143,9 @@ export const ControlsOverlay: React.FC<ControlsOverlayProps> = ({
           {choosingSkill ? '🎯 CHOOSE DIR' : `⚡ ${skillLabel}`}
         </button>
       )}
-      <div className="flex min-w-0 min-h-9 [@media(max-height:540px)]:min-h-7 flex-1 flex-wrap items-center gap-1 border-2 border-dashed border-[#0F380F] bg-[#8BAC0F] px-2 py-1 text-[10px] font-bold text-[#0F380F] tabular-nums">
-        <span className="shrink-0">{localTwoPlayer ? 'P1 ' : ''}QUEUE {queue.length}/{queueLimit}</span>
-        <span className="flex min-w-0 flex-wrap items-center gap-0.5">
+      <div className="flex min-w-0 min-h-9 [@media(max-height:540px)]:min-h-7 flex-1 items-center gap-1 border-2 border-dashed border-[#0F380F] bg-[#8BAC0F] px-2 py-1 text-[10px] font-bold text-[#0F380F] tabular-nums">
+        <span className="shrink-0">{localTwoPlayer ? 'P1 ' : ''}{queue.length}/{queueLimit}</span>
+        <span className="flex min-w-0 flex-1 items-center gap-0.5 overflow-x-auto whitespace-nowrap">
           {queue.map((entry, index) => {
             const dir = entry.direction;
             const arrow = dir === 'UP' ? '↑' : dir === 'DOWN' ? '↓' : dir === 'LEFT' ? '←' : '→';
@@ -157,14 +157,10 @@ export const ControlsOverlay: React.FC<ControlsOverlayProps> = ({
             );
           })}
           {queue.length === 0 && (
-            <>
-              <span className="opacity-75 truncate">SWIPE / TAP BOARD</span>
-              {/* Invisible chip: pixel-identical to a real chip to hold the row height */}
-              <span
-                aria-hidden="true"
-                className="shrink-0 bg-[#0F380F] px-1 py-0.5 leading-none text-[#9BBC0F] invisible"
-              >↑</span>
-            </>
+            <span
+              aria-hidden="true"
+              className="shrink-0 bg-[#0F380F] px-1 py-0.5 leading-none text-[#9BBC0F] invisible"
+            >↑</span>
           )}
         </span>
         {locked && <span className="shrink-0 bg-[#0F380F] text-[#9BBC0F] px-1 py-0.5 text-[9px] leading-none">LOCKED</span>}
