@@ -36,6 +36,7 @@ export interface Snake {
   deathPosition?: Position;
   kills?: number;
   killedBy?: string;
+  tokensSinceLock?: number;
 }
 
 export type GamePhase = 'LOBBY' | 'RACING' | 'SHRINKING' | 'OVER';

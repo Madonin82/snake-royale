@@ -70,6 +70,7 @@ export function createInitialState(
     color: GAMEBOY_COLORS.DARKEST,
     equippedSkill: null,
     pendingSkill: null,
+    tokensSinceLock: 0,
   };
 
   const p2: Snake = {
@@ -88,6 +89,7 @@ export function createInitialState(
     color: GAMEBOY_COLORS.DARK,
     equippedSkill: null,
     pendingSkill: null,
+    tokensSinceLock: 0,
   };
 
   // Spawn initial 1 token for round 1
@@ -283,7 +285,7 @@ export function getHitstopForTransition(
 export interface TickResult {
   nextState: GameState;
   events: {
-    tokenEaten: Record<string, boolean>;
+    tokenEaten: Record<string, number>;
     ringShrunk: boolean;
     shrinkTelegraphStarted: boolean;
     deathOccurred: boolean;
@@ -672,9 +674,16 @@ export function processGameTick(
       let ateThisStep = false;
       if (tokenIndex !== -1) {
         snakes[i].score += 1;
-        snakes[i].skillPoints = (snakes[i].skillPoints ?? 0) + 1;
+        let spAwarded = 1;
+        if (state.turnBased) {
+          snakes[i].tokensSinceLock = (snakes[i].tokensSinceLock ?? 0) + 1;
+          spAwarded = snakes[i].tokensSinceLock;
+        } else {
+          snakes[i].tokensSinceLock = 0;
+        }
+        snakes[i].skillPoints = (snakes[i].skillPoints ?? 0) + spAwarded;
         ateThisStep = true;
-        events.tokenEaten[snakes[i].id] = true;
+        events.tokenEaten[snakes[i].id] = spAwarded;
         if (snakes[i].id === 'p1' && state.campaignObjectives) {
           state.campaignObjectives.p1TokensCollected += 1;
         }

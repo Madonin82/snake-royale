@@ -385,6 +385,7 @@ export const Hud: React.FC<HudProps> = ({
                 LEN {snake.body.length}
               </span>
               <span
+                data-sp-card={who}
                 className="text-[9px] px-1 py-0.5 bg-[#8BAC0F]/60 border border-[#0F380F]/60 font-bold tabular-nums leading-none"
                 title="Skill points"
               >
@@ -500,7 +501,7 @@ export const Hud: React.FC<HudProps> = ({
               <span className="text-[10px] font-semibold uppercase tracking-tight ml-1">PTS</span>
             </div>
             {snake.equippedSkill && renderSkillBadge(who, snake.equippedSkill)}
-            <span className="text-[9px] px-1.5 py-0.5 border border-[#0F380F] font-black uppercase" title="Skill points">
+            <span data-sp-card={who} className="text-[9px] px-1.5 py-0.5 border border-[#0F380F] font-black uppercase" title="Skill points">
               ⚡{snake.skillPoints ?? 0}
             </span>
             {renderOutcomeBadge(who)}
@@ -620,7 +621,7 @@ export const Hud: React.FC<HudProps> = ({
               <span className="text-2xl leading-none font-black">{snake.score}</span>
               <span className="text-[10px] font-semibold uppercase tracking-tight">PTS</span>
               <span className="text-[9px] font-bold shrink-0 opacity-85">· LEN {snake.body.length}</span>
-              <span className="text-[9px] font-bold shrink-0" title="Skill points">· ⚡{snake.skillPoints ?? 0}</span>
+              <span data-sp-card={who} className="text-[9px] font-bold shrink-0" title="Skill points">· ⚡{snake.skillPoints ?? 0}</span>
             </div>
             {renderOutcomeBadge(who)}
             {gameState.turnBased && (

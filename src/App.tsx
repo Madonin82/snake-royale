@@ -207,6 +207,83 @@ function spawnTokenFlyEffect(snakeId: string, state: GameState, defaultGridSize:
   setTimeout(onDone, 650);
 }
 
+function spawnSpFlyEffect(snakeId: string, state: GameState, defaultGridSize: number, spAwarded: number) {
+  if (spAwarded < 2) return;
+  if (typeof window === 'undefined' || typeof document === 'undefined') return;
+  const snake = state.snakes.find(s => s.id === snakeId);
+  if (!snake || snake.body.length === 0) return;
+  const head = snake.body[0];
+
+  const canvas = document.querySelector('.match-board canvas') as HTMLCanvasElement | null;
+  if (!canvas) return;
+
+  const rect = canvas.getBoundingClientRect();
+  if (rect.width === 0 || rect.height === 0) return;
+
+  const gridSize = state.gridSize ?? defaultGridSize ?? 8;
+  const cellWidth = rect.width / gridSize;
+  const cellHeight = rect.height / gridSize;
+
+  const startX = rect.left + (head.x + 0.5) * cellWidth;
+  const startY = rect.top + (head.y + 0.5) * cellHeight;
+
+  let targetEl: HTMLElement | null = null;
+  const targets = document.querySelectorAll(`[data-sp-card="${snakeId}"]`);
+  for (let i = 0; i < targets.length; i++) {
+    const el = targets[i] as HTMLElement;
+    const tRect = el.getBoundingClientRect();
+    if (tRect.width > 0 && tRect.height > 0 && el.offsetParent !== null) {
+      targetEl = el;
+      break;
+    }
+  }
+  if (!targetEl && targets.length > 0) {
+    targetEl = targets[0] as HTMLElement;
+  }
+
+  let targetX = startX;
+  let targetY = startY - 80;
+  if (targetEl) {
+    const tRect = targetEl.getBoundingClientRect();
+    targetX = tRect.left + tRect.width / 2;
+    targetY = tRect.top + tRect.height / 2;
+  }
+
+  const el = document.createElement('div');
+  el.textContent = `+${spAwarded} SP`;
+  el.className = 'token-fly-plus-one';
+  el.style.left = `${startX}px`;
+  el.style.top = `${startY}px`;
+  el.style.transform = 'translate(-50%, -50%) scale(0.6)';
+  el.style.opacity = '1';
+
+  document.body.appendChild(el);
+  void el.offsetWidth;
+
+  const dx = targetX - startX;
+  const dy = targetY - startY;
+  el.style.transition = 'transform 600ms cubic-bezier(0.16, 1, 0.3, 1), opacity 600ms cubic-bezier(0.16, 1, 0.3, 1)';
+  el.style.transform = `translate(calc(-50% + ${dx}px), calc(-50% + ${dy}px)) scale(1.2)`;
+
+  let cleanedUp = false;
+  const onDone = () => {
+    if (cleanedUp) return;
+    cleanedUp = true;
+    el.remove();
+    if (targetEl) {
+      targetEl.classList.remove('score-pulse');
+      void targetEl.offsetWidth;
+      targetEl.classList.add('score-pulse');
+      setTimeout(() => {
+        targetEl?.classList.remove('score-pulse');
+      }, 400);
+    }
+  };
+
+  el.addEventListener('transitionend', onDone, { once: true });
+  setTimeout(onDone, 650);
+}
+
 function createLobbyState(settings: GameSettings): GameState {
   return { ...createInitialState(settings), phase: 'LOBBY' };
 }
@@ -644,6 +721,15 @@ const GameApp: React.FC<{ campaignPlaytestLevel: CampaignLevel | null }> = ({ ca
     locksRef.current = nextLocks;
     setLocks(nextLocks);
 
+    const state = stateRef.current;
+    if (state && state.snakes) {
+      for (const snake of state.snakes) {
+        if (!previousLocks[snake.id] && nextLocks[snake.id]) {
+          snake.tokensSinceLock = 0;
+        }
+      }
+    }
+
     const mode = playModeRef.current;
     const events = getThinkTimeLockEvents(previousLocks, nextLocks, Date.now());
     if (mode === 'ONLINE_JOIN') {
@@ -824,13 +910,13 @@ const GameApp: React.FC<{ campaignPlaytestLevel: CampaignLevel | null }> = ({ ca
   }, [applyThinkTransition, clearMoveBuffers]);
 
   const playTickEvents = useCallback((events: {
-    tokenEaten: Record<string, boolean>;
+    tokenEaten: Record<string, number>;
     shrinkTelegraphStarted: boolean;
     ringShrunk: boolean;
     deathOccurred: boolean;
     matchEnded: boolean;
   }) => {
-    if (Object.values(events.tokenEaten).some(Boolean)) soundEngine.playTokenEat();
+    if (Object.values(events.tokenEaten).some(v => v > 0)) soundEngine.playTokenEat();
     if (events.shrinkTelegraphStarted) soundEngine.playShrinkWarning();
     if (events.ringShrunk) soundEngine.playRingShrunk();
     if (events.deathOccurred) soundEngine.playCrash();
@@ -1123,9 +1209,12 @@ const GameApp: React.FC<{ campaignPlaytestLevel: CampaignLevel | null }> = ({ ca
     playTickEvents(events);
 
     if (!aiMode && events.tokenEaten) {
-      for (const [snakeId, ate] of Object.entries(events.tokenEaten)) {
-        if (ate) {
+      for (const [snakeId, spAwarded] of Object.entries(events.tokenEaten)) {
+        if (spAwarded && spAwarded > 0) {
           spawnTokenFlyEffect(snakeId, nextState, s.gridSize);
+          if (spAwarded >= 2) {
+            spawnSpFlyEffect(snakeId, nextState, s.gridSize, spAwarded);
+          }
         }
       }
     }
@@ -2586,9 +2675,12 @@ const GameApp: React.FC<{ campaignPlaytestLevel: CampaignLevel | null }> = ({ ca
       const { nextState, events } = processGameTick(current, settingsRef.current, tickIntervalMs);
       triggerHitstop(current, nextState);
       if (!aiMode && events.tokenEaten) {
-        for (const [snakeId, ate] of Object.entries(events.tokenEaten)) {
-          if (ate) {
+        for (const [snakeId, spAwarded] of Object.entries(events.tokenEaten)) {
+          if (spAwarded && spAwarded > 0) {
             spawnTokenFlyEffect(snakeId, nextState, settingsRef.current.gridSize);
+            if (spAwarded >= 2) {
+              spawnSpFlyEffect(snakeId, nextState, settingsRef.current.gridSize, spAwarded);
+            }
           }
         }
       }
@@ -2600,7 +2692,7 @@ const GameApp: React.FC<{ campaignPlaytestLevel: CampaignLevel | null }> = ({ ca
         }
       }
 
-      if (Object.values(events.tokenEaten).some(Boolean)) soundEngine.playTokenEat();
+      if (Object.values(events.tokenEaten).some(v => v > 0)) soundEngine.playTokenEat();
       if (events.shrinkTelegraphStarted) soundEngine.playShrinkWarning();
       if (events.ringShrunk) soundEngine.playRingShrunk();
       if (events.deathOccurred) soundEngine.playCrash();
