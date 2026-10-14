@@ -71,6 +71,7 @@ export function createInitialState(
     equippedSkill: null,
     pendingSkill: null,
     tokensSinceLock: 0,
+    spEarned: 0,
   };
 
   const p2: Snake = {
@@ -90,6 +91,7 @@ export function createInitialState(
     equippedSkill: null,
     pendingSkill: null,
     tokensSinceLock: 0,
+    spEarned: 0,
   };
 
   // Spawn initial 1 token for round 1
@@ -682,6 +684,7 @@ export function processGameTick(
           snakes[i].tokensSinceLock = 0;
         }
         snakes[i].skillPoints = (snakes[i].skillPoints ?? 0) + spAwarded;
+        snakes[i].spEarned = (snakes[i].spEarned ?? 0) + spAwarded;
         ateThisStep = true;
         events.tokenEaten[snakes[i].id] = spAwarded;
         if (snakes[i].id === 'p1' && state.campaignObjectives) {

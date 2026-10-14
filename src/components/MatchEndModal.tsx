@@ -401,6 +401,7 @@ export const MatchEndModal: React.FC<MatchEndModalProps> = ({
             <div className="flex justify-between"><span>Fast / Slow:</span><span className="tabular-nums">{stats.fastestLock} / {stats.slowestLock}</span></div>
             <div className="flex justify-between"><span>Auto-Locks:</span><span className="tabular-nums">{stats.autoLockPct}</span></div>
             <div className="flex justify-between"><span>Avg Queue:</span><span className="tabular-nums">{stats.avgQueueLen}</span></div>
+            <div className="flex justify-between"><span>SP:</span><span className="tabular-nums">{snake.skillPoints ?? 0} / {snake.spEarned ?? 0}</span></div>
             <div className="flex justify-between"><span>Outcome:</span><span className="truncate max-w-[110px]">{stats.causeOfDeath}</span></div>
           </div>
         )}
