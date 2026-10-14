@@ -144,6 +144,74 @@ test('getHitstopForTransition returns 100ms for token pickup, 300ms for regular 
   });
 });
 
+test('getHitstopForTransition adds durations per event: 2 tokens -> 200, token + death -> 400, dart + token -> 250, quiet -> null', () => {
+  const settings = { ...DEFAULT_SETTINGS };
+
+  // 2 tokens same turn (both snakes grab one) -> 200ms TOKEN
+  const twoTokenState = createInitialState(settings);
+  twoTokenState.tokens = [{ x: 3, y: 2 }, { x: 4, y: 5 }];
+  const p1Two = twoTokenState.snakes.find(s => s.id === 'p1')!;
+  p1Two.body = [{ x: 2, y: 2 }, { x: 1, y: 2 }];
+  p1Two.direction = 'RIGHT';
+  const p2Two = twoTokenState.snakes.find(s => s.id === 'p2')!;
+  p2Two.body = [{ x: 5, y: 5 }, { x: 6, y: 5 }];
+  p2Two.direction = 'LEFT';
+  const afterTwoTokens = processGameTick(twoTokenState, settings, 0).nextState;
+  assert.deepEqual(getHitstopForTransition(twoTokenState, afterTwoTokens, false), {
+    durationMs: 200,
+    kind: 'TOKEN',
+    flashCells: [],
+  });
+
+  // Token + death same turn -> 400ms DEATH (token 100 + death 300)
+  const mixedState = createInitialState(settings);
+  mixedState.tokens = [{ x: 3, y: 2 }];
+  const p1Mixed = mixedState.snakes.find(s => s.id === 'p1')!;
+  p1Mixed.body = [{ x: 2, y: 2 }, { x: 1, y: 2 }];
+  p1Mixed.direction = 'RIGHT';
+  const p2Mixed = mixedState.snakes.find(s => s.id === 'p2')!;
+  p2Mixed.body = [{ x: 7, y: 2 }, { x: 6, y: 2 }];
+  p2Mixed.direction = 'RIGHT';
+  const afterMixed = processGameTick(mixedState, settings, 0).nextState;
+  assert.deepEqual(getHitstopForTransition(mixedState, afterMixed, false), {
+    durationMs: 400,
+    kind: 'DEATH',
+    flashCells: [{ x: 8, y: 2 }],
+  });
+
+  // Dart + token same turn -> 250ms DART (dart 150 + token 100)
+  const dartState = createInitialState(settings);
+  dartState.skillsAvailable = 'immediate';
+  dartState.tokens = [{ x: 3, y: 2 }];
+  const p1Dart = dartState.snakes.find(s => s.id === 'p1')!;
+  p1Dart.body = [{ x: 2, y: 2 }, { x: 1, y: 2 }];
+  p1Dart.direction = 'RIGHT';
+  p1Dart.equippedSkill = 'dart';
+  p1Dart.skillPoints = 5;
+  const p2Dart = dartState.snakes.find(s => s.id === 'p2')!;
+  p2Dart.body = [{ x: 5, y: 5 }, { x: 6, y: 5 }];
+  p2Dart.direction = 'LEFT';
+  p2Dart.equippedSkill = 'dart';
+  p2Dart.skillPoints = 5;
+  // p2 darts away from the token; p1 grabs it. Dart trail + token pickup.
+  queueSnakeSkill(p2Dart, { skillId: 'dart', direction: 'LEFT' });
+  const afterDart = processGameTick(dartState, { ...settings, skillsAvailable: 'immediate' as const }, 0).nextState;
+  assert.deepEqual(getHitstopForTransition(dartState, afterDart, false), {
+    durationMs: 250,
+    kind: 'DART',
+    flashCells: [],
+  });
+
+  // Quiet turn (no events) -> null
+  const quietState = createInitialState(settings);
+  quietState.tokens = [];
+  const p1Quiet = quietState.snakes.find(s => s.id === 'p1')!;
+  p1Quiet.body = [{ x: 2, y: 2 }, { x: 1, y: 2 }];
+  p1Quiet.direction = 'RIGHT';
+  const afterQuiet = processGameTick(quietState, settings, 0).nextState;
+  assert.equal(getHitstopForTransition(quietState, afterQuiet, false), null);
+});
+
 
 test('dart moves 3 total cells (1 normal + 2 dart)', () => {
   const state = createInitialState();
