@@ -420,7 +420,7 @@ export const Hud: React.FC<HudProps> = ({
           )}
 
           {/* Row 4: Move Queue Box (Opponent queues hidden during live play, revealed in replay) */}
-          <div className="flex-1 min-h-0 overflow-y-auto bg-[#8BAC0F]/20 border border-dashed border-[#0F380F]/40 p-1 flex flex-col justify-start">
+          <div className="flex-1 min-h-0 overflow-hidden bg-[#8BAC0F]/20 border border-dashed border-[#0F380F]/40 p-1 flex flex-col justify-start">
             <div className="text-[9px] font-bold opacity-80 mb-0.5 flex justify-between items-center shrink-0 min-h-[16px] tabular-nums">
               <div className="flex items-center gap-1.5 min-w-0">
                 <span className="truncate">
@@ -437,14 +437,14 @@ export const Hud: React.FC<HudProps> = ({
                 {mouseHints.caption}
               </div>
             )}
-            <div className="flex flex-wrap gap-1 content-start">
+            <div className="flex items-center gap-1 overflow-x-auto whitespace-nowrap shrink-0">
               {!canSeeMoves ? (
                 <span data-testid={`queue-hidden-${who}`} className="text-[10px] opacity-75 italic font-bold">
                   Hidden
                 </span>
               ) : buffer.length === 0 ? (
                 <>
-                  <span className="text-[10px] [@media(max-height:540px)]:text-[9px] opacity-50 italic">
+                  <span className="text-[10px] [@media(max-height:540px)]:text-[9px] opacity-50 italic shrink-0">
                     {replayActive ? 'No moves queued' : 'Swipe/tap board'}
                   </span>
                   {/* Invisible chip: pixel-identical to a real chip to hold the row height */}
@@ -539,7 +539,7 @@ export const Hud: React.FC<HudProps> = ({
         {/* Queued move arrows list in the reserved bottom slot — the flexible
             region: fixed header rows above stay put, this absorbs the rest.
             Chips wrap; never pushes the layout taller. */}
-        <div className="flex-1 min-h-0 overflow-y-auto bg-[#8BAC0F]/20 border border-dashed border-[#0F380F]/40 p-1.5 [@media(max-height:540px)]:p-1 flex flex-col justify-start">
+        <div className="flex-1 min-h-0 overflow-hidden bg-[#8BAC0F]/20 border border-dashed border-[#0F380F]/40 p-1.5 [@media(max-height:540px)]:p-1 flex flex-col justify-start">
           <div className="text-[9px] font-bold opacity-75 mb-1 flex justify-between items-center shrink-0 min-h-[16px] tabular-nums">
             <div className="flex items-center gap-1.5 min-w-0">
               <span className="truncate">{canSeeMoves ? `QUEUE (${buffer.length}/${snake.body.length})` : 'QUEUE'}</span>
@@ -552,12 +552,12 @@ export const Hud: React.FC<HudProps> = ({
               {mouseHints.caption}
             </div>
           )}
-          <div className="flex flex-wrap gap-1 content-start">
+          <div className="flex items-center gap-1 overflow-x-auto whitespace-nowrap shrink-0">
             {!canSeeMoves ? (
               <span className="text-[10px] opacity-60 italic">Hidden</span>
             ) : buffer.length === 0 ? (
               <>
-                <span className="text-[10px] [@media(max-height:540px)]:text-[9px] opacity-50 italic">Swipe/tap board</span>
+                <span className="text-[10px] [@media(max-height:540px)]:text-[9px] opacity-50 italic shrink-0">Swipe/tap board</span>
                 {/* Invisible chip: pixel-identical to a real chip to hold the row height */}
                 <span
                   aria-hidden="true"
@@ -636,33 +636,33 @@ export const Hud: React.FC<HudProps> = ({
         </div>
         {gameState.turnBased && (
           local ? (
-            <div className="mt-1.5 bg-[#8BAC0F]/40 border border-[#0F380F] px-1.5 min-h-7 py-0.5 flex flex-col justify-center gap-0.5 text-[9px] font-bold">
-              <div className="flex items-center justify-between gap-1">
-                <div className="flex items-center gap-1 min-w-0">
-                  <span className="shrink-0 tabular-nums">{locked ? '🔒 ' : '✏️ '}QUEUE {buffer.length}/{snake.body.length}</span>
-                  {mouseHints?.badge}
-                </div>
-                <span className="shrink-0 w-7 text-right text-base leading-none font-black tabular-nums">
-                  {!locked && countdown !== null && gameState.phase !== 'OVER' ? `${countdown}s` : ''}
-                </span>
+            <div className="mt-1.5 bg-[#8BAC0F]/40 border border-[#0F380F] px-1.5 h-7 flex items-center justify-between gap-1 text-[9px] font-bold overflow-hidden">
+              <div className="flex items-center gap-1 min-w-0 overflow-x-auto whitespace-nowrap">
+                <span className="shrink-0">{locked ? '🔒 ' : '✏️ '}</span>
+                {buffer.length === 0 ? (
+                  <span className="opacity-60 italic">Swipe/tap board</span>
+                ) : (
+                  buffer.map((entry, idx) => {
+                    const dir = entry.direction;
+                    const arrow = dir === 'UP' ? '↑' : dir === 'DOWN' ? '↓' : dir === 'LEFT' ? '←' : '→';
+                    const label = entry.type === 'dart' || entry.type === 'rattle' ? `⚡${arrow}` : arrow;
+                    return (
+                      <span key={idx} className="px-1 py-0.5 bg-[#0F380F] text-[#9BBC0F] text-[10px] font-black shrink-0">
+                        {label}
+                      </span>
+                    );
+                  })
+                )}
+                {mouseHints?.badge}
               </div>
-              {mouseHints && (
-                <div>
-                  {mouseHints.caption}
-                </div>
-              )}
-              <span className="min-w-0 flex-1 truncate text-right opacity-80">
-                {buffer.map(entry => {
-                  const dir = entry.direction;
-                  const arrow = dir === 'UP' ? '↑' : dir === 'DOWN' ? '↓' : dir === 'LEFT' ? '←' : '→';
-                  return entry.type === 'dart' || entry.type === 'rattle' ? `⚡${arrow}` : arrow;
-                }).join('')}
+              <span className="shrink-0 w-7 text-right text-base leading-none font-black tabular-nums">
+                {!locked && countdown !== null && gameState.phase !== 'OVER' ? `${countdown}s` : ''}
               </span>
             </div>
           ) : (
             <div className={`mt-1.5 bg-[#8BAC0F]/30 border border-[#0F380F]/60 px-1.5 h-7 flex items-center justify-between gap-1 overflow-hidden ${locked ? 'opacity-90' : 'font-black'}`}>
               <span className="text-[10px] truncate tabular-nums">
-                QUEUE: <span className="italic opacity-80">Hidden</span>
+                <span className="italic opacity-80">Hidden</span>
               </span>
               <span className="shrink-0 w-7 text-right text-base leading-none font-black tabular-nums">
                 {!locked && countdown !== null && gameState.phase !== 'OVER' ? `${countdown}s` : ''}
