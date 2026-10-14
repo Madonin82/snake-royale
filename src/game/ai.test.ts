@@ -217,6 +217,41 @@ test('MEDIUM chain multiplier caps at 2x with tsl=5 (no breakage)', () => {
   assert.equal(calculateAIMove(state, 8, 'p2', 'MEDIUM', 'GREEDY'), 'UP');
 });
 
+test('trapped fallback picks largest survivable flood area, not blind validDirs[0]', () => {
+  // Replay 20261014-1628, tick 59: bot head (1,0) facing RIGHT, 18-coil body
+  // top-left, opponent walling the right side. UP (wall) and DOWN (own body)
+  // vetoed correctly; RIGHT vetoed by flood-fill (area 15 < length 18).
+  // Old fallback returned 'UP' (wall suicide). New fallback excludes
+  // certain-death moves and picks RIGHT (15 cells of survivable room).
+  const state = makeState(
+    {
+      body: [
+        { x: 6, y: 3 }, { x: 5, y: 3 }, { x: 4, y: 3 }, { x: 4, y: 4 },
+        { x: 4, y: 5 }, { x: 4, y: 6 }, { x: 4, y: 7 }, { x: 5, y: 7 },
+        { x: 6, y: 7 }, { x: 7, y: 7 }, { x: 7, y: 6 }, { x: 7, y: 5 },
+        { x: 7, y: 4 }, { x: 6, y: 4 }, { x: 6, y: 5 }, { x: 6, y: 6 },
+        { x: 5, y: 6 }, { x: 5, y: 5 },
+      ],
+      direction: 'RIGHT', skillPoints: 21, score: 15,
+    },
+    {
+      body: [
+        { x: 1, y: 0 }, { x: 0, y: 0 }, { x: 0, y: 1 }, { x: 1, y: 1 },
+        { x: 2, y: 1 }, { x: 3, y: 1 }, { x: 3, y: 2 }, { x: 2, y: 2 },
+        { x: 2, y: 3 }, { x: 2, y: 4 }, { x: 2, y: 5 }, { x: 2, y: 6 },
+        { x: 1, y: 6 }, { x: 0, y: 6 }, { x: 0, y: 5 }, { x: 0, y: 4 },
+        { x: 0, y: 3 }, { x: 0, y: 2 },
+      ],
+      direction: 'RIGHT', skillPoints: 16, score: 15, tokensSinceLock: 1,
+    },
+  );
+  state.tokens = [
+    { x: 7, y: 2 }, { x: 0, y: 7 }, { x: 7, y: 3 },
+    { x: 3, y: 0 }, { x: 3, y: 5 }, { x: 2, y: 0 },
+  ];
+  assert.equal(calculateAIMove(state, 8, 'p2', 'HARD', 'GREEDY'), 'RIGHT');
+});
+
 test('EASY chain multiplier is 1x — token seeking unchanged', () => {
   // EASY ignores tokensSinceLock (1x). The bot still seeks the token, and
   // the deliberate (non-random) move is UP. Run multiple times to average

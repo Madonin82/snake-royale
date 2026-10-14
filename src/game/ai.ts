@@ -475,8 +475,26 @@ export function calculateAIMove(
   }
 
   if (ratedMoves.length === 0) {
-    // Trapped: fallback to any valid non-180 direction even if fatal
-    return validDirs[0] || currentDir;
+    // Trapped: all moves vetoed. Don't return validDirs[0] blind — that's
+    // 'UP' by list order, which can be an instant wall crash. Exclude
+    // certain-death moves (wall, own body) and pick the largest surviving
+    // flood area. Opponent-body cells are NOT excluded — they can be
+    // winning trades, not certain death. If every dir is certain death,
+    // keep the old behavior (truly doomed, just don't crash).
+    let bestDir: Direction | null = null;
+    let bestArea = -1;
+    for (const dir of validDirs) {
+      const nextPos = getNextHeadPosition(head, dir);
+      if (!isCellInArena(nextPos, gridSize, gameState.ringInset)) continue;
+      if (gameState.walls?.some(wall => wall.x === nextPos.x && wall.y === nextPos.y)) continue;
+      if (me.body.slice(0, -1).some(s => s.x === nextPos.x && s.y === nextPos.y)) continue;
+      const area = floodFillArea(nextPos, gameState, gridSize, me);
+      if (area > bestArea) {
+        bestArea = area;
+        bestDir = dir;
+      }
+    }
+    return bestDir ?? validDirs[0] ?? currentDir;
   }
 
   // Sort descending by score
