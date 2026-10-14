@@ -37,6 +37,7 @@ export interface Snake {
   kills?: number;
   killedBy?: string;
   tokensSinceLock?: number;
+  spEarned?: number; // gross SP income this match — never decreases
 }
 
 export type GamePhase = 'LOBBY' | 'RACING' | 'SHRINKING' | 'OVER';
