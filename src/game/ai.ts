@@ -432,6 +432,14 @@ export function calculateAIMove(
 
     // 5. Token Seeking (Manhattan Distance to nearest token)
     if (gameState.tokens.length > 0) {
+      // Chain bonus: the next token eaten this lock pays tsl+1 SP (engine.ts).
+      // Multiply the token score so the bot WANTS the next token in a chain.
+      // Caps are tuning knobs — the bot must not imitate the greediest human
+      // 5-chains that end in a crash.
+      const tsl = me.tokensSinceLock ?? 0;
+      const chainMult = difficulty === 'EASY' ? 1
+        : difficulty === 'MEDIUM' ? Math.min(tsl + 1, 2)
+        : Math.min(tsl + 1, 3);
       let bestTokenScore = 0;
       for (const token of gameState.tokens) {
         const d = Math.abs(nextPos.x - token.x) + Math.abs(nextPos.y - token.y);
@@ -442,7 +450,7 @@ export function calculateAIMove(
           const oppDist = Math.abs(opponent.body[0].x - token.x) + Math.abs(opponent.body[0].y - token.y);
           return oppDist <= d;
         });
-        const tokenScore = (gridSize * 2 - d) * 10 * (contested ? 0.15 : 1);
+        const tokenScore = (gridSize * 2 - d) * 10 * (contested ? 0.15 : 1) * chainMult;
         if (tokenScore > bestTokenScore) bestTokenScore = tokenScore;
       }
       score += bestTokenScore;
