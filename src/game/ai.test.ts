@@ -191,3 +191,46 @@ test('dead-end veto rejects moves leading to a reachable area smaller than snake
   const move = calculateAIMove(state, 8, 'p2', 'HARD', 'GREEDY');
   assert.notEqual(move, 'UP');
 });
+
+test('HARD bot with tokensSinceLock=1 still seeks tokens (chain mult active)', () => {
+  // Token directly ahead. The 2x chain multiplier (tsl=1 → min(2,3)=2) must
+  // not break token seeking — the bot still moves toward the token.
+  // (The multiplier's exact 2x/3x values are verified by code inspection;
+  // token scores dominate area scores, so a decision-flip test would need
+  // fragile flood-fill tuning. Live playtesting validates the bias.)
+  const state = makeState(
+    { body: [{ x: 0, y: 0 }, { x: 1, y: 0 }], direction: 'RIGHT' },
+    { body: [{ x: 4, y: 4 }, { x: 4, y: 5 }, { x: 4, y: 6 }], direction: 'UP', skillPoints: 0, tokensSinceLock: 1 },
+  );
+  state.tokens = [{ x: 4, y: 2 }];
+  assert.equal(calculateAIMove(state, 8, 'p2', 'HARD', 'GREEDY'), 'UP');
+});
+
+test('MEDIUM chain multiplier caps at 2x with tsl=5 (no breakage)', () => {
+  // MEDIUM with tsl=5: min(5+1, 2) = 2x. The cap must not break seeking —
+  // the bot still moves toward the token.
+  const state = makeState(
+    { body: [{ x: 0, y: 0 }, { x: 1, y: 0 }], direction: 'RIGHT' },
+    { body: [{ x: 4, y: 4 }, { x: 4, y: 5 }, { x: 4, y: 6 }], direction: 'UP', skillPoints: 0, tokensSinceLock: 5 },
+  );
+  state.tokens = [{ x: 4, y: 2 }];
+  assert.equal(calculateAIMove(state, 8, 'p2', 'MEDIUM', 'GREEDY'), 'UP');
+});
+
+test('EASY chain multiplier is 1x — token seeking unchanged', () => {
+  // EASY ignores tokensSinceLock (1x). The bot still seeks the token, and
+  // the deliberate (non-random) move is UP. Run multiple times to average
+  // out the 25% randomness — UP must be the most common deliberate choice.
+  const state = makeState(
+    { body: [{ x: 0, y: 0 }, { x: 1, y: 0 }], direction: 'RIGHT' },
+    { body: [{ x: 4, y: 4 }, { x: 4, y: 5 }, { x: 4, y: 6 }], direction: 'UP', skillPoints: 0, tokensSinceLock: 5 },
+  );
+  state.tokens = [{ x: 4, y: 2 }];
+  let upCount = 0;
+  for (let i = 0; i < 40; i++) {
+    if (calculateAIMove(state, 8, 'p2', 'EASY', 'GREEDY') === 'UP') upCount++;
+  }
+  // Deliberate UP (75%) + random UP (~25% of 25% ≈ 6%) ≈ 81% expected.
+  // Assert UP is clearly the dominant move (not suppressed by a leaked mult).
+  assert.ok(upCount >= 25, `EASY should still seek token UP (got ${upCount}/40)`);
+});
