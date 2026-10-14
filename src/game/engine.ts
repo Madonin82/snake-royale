@@ -234,8 +234,26 @@ export function getHitstopForTransition(
     return prevSnake?.isAlive && !snake.isAlive;
   });
 
+  // Hitstop durations are purely additive: every event on the turn adds
+  // its ms on top of the base beat, so packed turns play in slow-mo.
+  let durationMs = 0;
+
+  // Tokens: 100ms each. Score only increases via tokens (dart deducts
+  // skillPoints, not score), so the score delta is the token count.
+  const tokensEaten = nextState.snakes.reduce((total, snake) => {
+    const prevSnake = prevState.snakes.find(candidate => candidate.id === snake.id);
+    return total + Math.max(0, snake.score - (prevSnake?.score ?? snake.score));
+  }, 0);
+  durationMs += tokensEaten * 100;
+
+  // Dart: 150ms.
+  const darted = nextState.dartTrail && nextState.dartTrail.length > 0;
+  if (darted) durationMs += 150;
+
+  // Death: 300ms, or 500ms if a boss died in campaign.
+  let flashCells: Position[] = [];
   if (newlyDead.length > 0) {
-    const flashCells = newlyDead
+    flashCells = newlyDead
       .map(snake => {
         const pos = snake.deathPosition;
         if (pos && pos.x >= 0 && pos.y >= 0) return pos;
@@ -243,45 +261,27 @@ export function getHitstopForTransition(
       })
       .filter((pos): pos is Position => Boolean(pos));
     const bossDead = isCampaign && newlyDead.some(snake => snake.id !== 'p1');
-    if (bossDead) {
-      return {
-        durationMs: 500,
-        kind: 'BOSS_DEATH',
-        flashCells,
-      };
-    }
-    return {
-      durationMs: 300,
-      kind: 'DEATH',
-      flashCells,
-    };
+    durationMs += bossDead ? 500 : 300;
   }
 
-  const tokenEaten = nextState.snakes.some(snake => {
-    const prevSnake = prevState.snakes.find(candidate => candidate.id === snake.id);
-    return prevSnake && snake.score > prevSnake.score;
-  });
+  if (durationMs === 0) return null;
 
-  // Dart hitstop: 150ms, between token (100ms) and death (300ms)
-  // Check before token since dart also changes score (deduction)
-  if (nextState.dartTrail && nextState.dartTrail.length > 0) {
-    const flashCells = nextState.dartTrail.flatMap(trail => trail.cells);
-    return {
-      durationMs: 150,
-      kind: 'DART',
-      flashCells,
-    };
+  // kind is the dominant kind for visuals only — precedence matches the
+  // old early-return order, so GameBoard death-flash and dart-trail
+  // rendering behave exactly as before.
+  let kind: HitstopInfo['kind'] = 'TOKEN';
+  if (newlyDead.length > 0) {
+    const bossDead = isCampaign && newlyDead.some(snake => snake.id !== 'p1');
+    kind = bossDead ? 'BOSS_DEATH' : 'DEATH';
+  } else if (darted) {
+    kind = 'DART';
   }
 
-  if (tokenEaten) {
-    return {
-      durationMs: 100,
-      kind: 'TOKEN',
-      flashCells: [],
-    };
-  }
+  // Dart trail visuals read gameState.dartTrail directly; flashCells only
+  // matter for DEATH/BOSS_DEATH.
+  if (kind !== 'DEATH' && kind !== 'BOSS_DEATH') flashCells = [];
 
-  return null;
+  return { durationMs, kind, flashCells };
 }
 
 export interface TickResult {
