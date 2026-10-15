@@ -159,7 +159,7 @@ export const MatchEndModal: React.FC<MatchEndModalProps> = ({
     : null;
 
   const [expandedBySeat, setExpandedBySeat] = useState<Record<string, boolean>>(() =>
-    Object.fromEntries(gameState.snakes.map(snake => [snake.id, true]))
+    Object.fromEntries(gameState.snakes.map(snake => [snake.id, false]))
   );
 
   const history = matchHistory.length > 0 ? matchHistory : [gameState];
