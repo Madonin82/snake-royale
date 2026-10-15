@@ -244,6 +244,12 @@ function spawnTokenFlyEffect(snakeId: string, state: GameState, defaultGridSize:
     const dy = targetY - startY;
     el.style.transition = 'transform 600ms cubic-bezier(0.16, 1, 0.3, 1), opacity 600ms cubic-bezier(0.16, 1, 0.3, 1)';
     el.style.transform = `translate(calc(-50% + ${dx}px), calc(-50% + ${dy}px)) scale(1.2)`;
+    // Shrink in the final 200ms as the graphic settles into the card.
+    setTimeout(() => {
+      if (cleanedUp) return;
+      el.style.transition = 'transform 200ms cubic-bezier(0.16, 1, 0.3, 1), opacity 200ms cubic-bezier(0.16, 1, 0.3, 1)';
+      el.style.transform = `translate(calc(-50% + ${dx}px), calc(-50% + ${dy}px)) scale(0.6)`;
+    }, 400);
   }, FLY_LINGER_MS);
   effect.lingerTimer = lingerTimer;
 
@@ -341,6 +347,12 @@ function spawnSpFlyEffect(snakeId: string, state: GameState, defaultGridSize: nu
     const dy = targetY - startY;
     el.style.transition = 'transform 600ms cubic-bezier(0.16, 1, 0.3, 1), opacity 600ms cubic-bezier(0.16, 1, 0.3, 1)';
     el.style.transform = `translate(calc(-50% + ${dx}px), calc(-50% + ${dy}px)) scale(1.2)`;
+    // Shrink in the final 200ms as the graphic settles into the card.
+    setTimeout(() => {
+      if (cleanedUp) return;
+      el.style.transition = 'transform 200ms cubic-bezier(0.16, 1, 0.3, 1), opacity 200ms cubic-bezier(0.16, 1, 0.3, 1)';
+      el.style.transform = `translate(calc(-50% + ${dx}px), calc(-50% + ${dy}px)) scale(0.6)`;
+    }, 400);
   }, FLY_LINGER_MS);
   effect.lingerTimer = lingerTimer;
 
