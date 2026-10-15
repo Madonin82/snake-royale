@@ -74,7 +74,7 @@ export interface GameSettings {
   skillsAvailable?: SkillsAvailableConfig;
 }
 
-export type CampaignObjectiveKind = 'survival' | 'collect' | 'first_to' | 'survive' | 'win_under' | 'shutout' | 'outscore';
+export type CampaignObjectiveKind = 'survival' | 'collect' | 'first_to' | 'first_to_sp' | 'survive' | 'win_under' | 'shutout' | 'outscore';
 
 export interface CampaignObjective {
   text: string;
