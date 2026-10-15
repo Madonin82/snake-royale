@@ -340,7 +340,7 @@ export const MatchEndModal: React.FC<MatchEndModalProps> = ({
   const renderStatCard = ({ snake, index }: { snake: GameState['snakes'][number]; index: number }) => {
     const who = snake.id;
     const stats = matchStats.statsBySeat[who] ?? (who === 'p1' ? matchStats.p1Stats : matchStats.p2Stats);
-    const isExpanded = expandedBySeat[who] ?? true;
+    const isExpanded = expandedBySeat[who] ?? false;
     const isWinner = gameState.winner === who;
     const palette = getPlayerColorPalette(snake, index);
 
