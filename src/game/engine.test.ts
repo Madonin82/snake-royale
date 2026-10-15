@@ -529,27 +529,28 @@ test('rattle detaches tail tip into permanent wall, moves 1 cell in chosen direc
   p1.equippedSkill = 'rattle';
   p1.skillPoints = 4;
   const p2 = state.snakes.find(snake => snake.id === 'p2')!;
-  p2.body = [{ x: 7, y: 7 }, { x: 7, y: 6 }, { x: 7, y: 5 }];
+  p2.body = [{ x: 7, y: 7 }, { x: 6, y: 7 }, { x: 5, y: 7 }];
   p2.direction = 'UP';
 
   assert.equal(queueSnakeSkill(p1, { skillId: 'rattle', direction: 'UP' }), true);
   const { nextState } = processGameTick(state, settings, 0);
   const afterP1 = nextState.snakes.find(snake => snake.id === 'p1')!;
 
-  // Moved UP to (2,3), length reduced from 3 to 2, tail (0,4) became wall
+  // Moved UP to (2,3), length reduced from 3 to 2, tail (0,4) became wall with fuse 3
+  // (fuse decrements at START of tick, so drop tick shows 3)
   assert.deepEqual(afterP1.body, [{ x: 2, y: 3 }, { x: 2, y: 4 }]);
   assert.equal(afterP1.body.length, 2);
   assert.equal(afterP1.skillPoints, 3);
-  assert.deepEqual(nextState.rattleWalls, [{ x: 0, y: 4 }]);
+  assert.deepEqual(nextState.rattleWalls, [{ x: 0, y: 4, fuseTicks: 3 }]);
   assert.ok(nextState.walls?.some(w => w.x === 0 && w.y === 4));
 
-  // Wall persists on subsequent ticks
+  // Wall persists on subsequent ticks, fuse decrements
   const { nextState: tick2 } = processGameTick(nextState, settings, 0);
-  assert.deepEqual(tick2.rattleWalls, [{ x: 0, y: 4 }]);
+  assert.deepEqual(tick2.rattleWalls, [{ x: 0, y: 4, fuseTicks: 2 }]);
   assert.ok(tick2.walls?.some(w => w.x === 0 && w.y === 4));
 });
 
-test('rattle stuns opponents in 3x3 for 1 tick, rattler unaffected', () => {
+test('rattle detonates after 3-turn fuse, stuns ALL snakes in 3x3 including rattler', () => {
   const state = createInitialState();
   const settings = { ...DEFAULT_SETTINGS, skillsAvailable: 'immediate' as const };
   state.tokens = [];
@@ -565,24 +566,39 @@ test('rattle stuns opponents in 3x3 for 1 tick, rattler unaffected', () => {
   p2.direction = 'UP';
 
   assert.equal(queueSnakeSkill(p1, { skillId: 'rattle', direction: 'UP' }), true);
-  const { nextState } = processGameTick(state, settings, 0);
-  const afterP2 = nextState.snakes.find(snake => snake.id === 'p2')!;
-  const afterP1 = nextState.snakes.find(snake => snake.id === 'p1')!;
+  const { nextState: tick1 } = processGameTick(state, settings, 0);
+  // No stun on drop — fuse is 3 on drop turn
+  assert.equal(tick1.snakes.find(s => s.id === 'p2')!.stunTicks ?? 0, 0);
+  assert.equal(tick1.snakes.find(s => s.id === 'p1')!.stunTicks ?? 0, 0);
+  assert.equal(tick1.rattleWalls?.[0].fuseTicks, 3);
 
-  // p2 stunned, p1 not
-  assert.equal(afterP2.stunTicks, 1);
-  assert.equal(afterP1.stunTicks ?? 0, 0);
-  // Stun zone set (9 cells centered on wall)
-  assert.equal(nextState.stunZones?.length, 9);
+  // Tick 2: fuse 2, no stun
+  const { nextState: tick2 } = processGameTick(tick1, settings, 0);
+  assert.equal(tick2.rattleWalls?.[0].fuseTicks, 2);
+  assert.equal(tick2.snakes.find(s => s.id === 'p2')!.stunTicks ?? 0, 0);
 
-  // Next tick: p2 stays in place (stun consumed), p1 moves
-  const p2HeadBefore = { ...afterP2.body[0] };
-  const { nextState: tick2 } = processGameTick(nextState, settings, 0);
-  const tick2P2 = tick2.snakes.find(snake => snake.id === 'p2')!;
-  assert.deepEqual(tick2P2.body[0], p2HeadBefore);
-  assert.equal(tick2P2.stunTicks, 0);
-  // Stun zone cleared
-  assert.equal(tick2.stunZones, undefined);
+  // Tick 3: fuse 1, no stun
+  const { nextState: tick3 } = processGameTick(tick2, settings, 0);
+  assert.equal(tick3.rattleWalls?.[0].fuseTicks, 1);
+  assert.equal(tick3.snakes.find(s => s.id === 'p2')!.stunTicks ?? 0, 0);
+
+  // Tick 4: fuse 0 → detonation! p2 stunned (in 3x3), p1 not (outside 3x3)
+  const { nextState: tick4 } = processGameTick(tick3, settings, 0);
+  assert.equal(tick4.rattleWalls?.[0].fuseTicks, 0);
+  assert.equal(tick4.snakes.find(s => s.id === 'p2')!.stunTicks, 1);
+  assert.equal(tick4.snakes.find(s => s.id === 'p1')!.stunTicks ?? 0, 0);
+  assert.equal(tick4.stunZones?.length, 9);
+  assert.ok(tick4.detonationAt);
+
+  // Tick 5: p2 stays in place (stun consumed), wall persists
+  const p2HeadBefore = { ...tick4.snakes.find(s => s.id === 'p2')!.body[0] };
+  const { nextState: tick5 } = processGameTick(tick4, settings, 0);
+  const tick5P2 = tick5.snakes.find(s => s.id === 'p2')!;
+  assert.deepEqual(tick5P2.body[0], p2HeadBefore);
+  assert.equal(tick5P2.stunTicks, 0);
+  assert.equal(tick5.stunZones, undefined);
+  assert.ok(tick5.rattleWalls?.some(w => w.x === 0 && w.y === 4));
+  assert.ok(tick5.walls?.some(w => w.x === 0 && w.y === 4));
 });
 
 test('hitting a rattle wall kills both opponents and the placer', () => {
@@ -642,7 +658,7 @@ test('darting through a rattle wall cell kills the darter', () => {
   state.tokens = [];
   state.skillsAvailable = 'immediate';
   state.walls = [{ x: 3, y: 4 }];
-  state.rattleWalls = [{ x: 3, y: 4 }];
+  state.rattleWalls = [{ x: 3, y: 4, fuseTicks: 3 }];
 
   const p1 = state.snakes.find(snake => snake.id === 'p1')!;
   p1.body = [{ x: 1, y: 4 }, { x: 0, y: 4 }, { x: 0, y: 5 }];

@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
-import { BufferEntry, CompactGameState, Direction, GameSettings, GameState, LatencyReport, PlayMode, Position, SkillId } from './types/game';
+import { BufferEntry, CompactGameState, Direction, GameSettings, GameState, LatencyReport, PlayMode, Position, RattleWall, SkillId } from './types/game';
 import { onAuthStateChanged, User } from 'firebase/auth';
 import { onValue, ref } from 'firebase/database';
 import {
@@ -14,7 +14,7 @@ import {
   queueSnakeDirection,
   queueSnakeSkill,
 } from './game/engine';
-import { canActivateSkill, canAffordQueuedSkill, canQueueRattleWithLength, isValidDartDirection, SKILLS } from './game/skills';
+import { canActivateSkill, canAffordQueuedDart, canAffordQueuedRattle, canAffordQueuedSkill, canQueueRattleWithLength, isValidDartDirection, SKILLS } from './game/skills';
 import { calculateAIAction, calculateAIMove } from './game/ai';
 import { cloneGameState, toCompactGameState } from './game/aiBridge';
 import { shouldApplyRtdbBridgeCommand } from './game/aiBridgeRtdb';
@@ -68,10 +68,10 @@ import { ArrowLeft, Volume2, VolumeX } from 'lucide-react';
 function computePreviewPlan(
   snake: any,
   buffer: BufferEntry[],
-): { body: Position[]; rattleWalls: Position[] } {
+): { body: Position[]; rattleWalls: RattleWall[] } {
   if (buffer.length === 0) return { body: snake.body, rattleWalls: [] };
   const body: Position[] = [...snake.body.map((seg: any) => ({ ...seg }))];
-  const rattleWalls: Position[] = [];
+  const rattleWalls: RattleWall[] = [];
   for (const entry of buffer) {
     if (entry.type === 'dart') {
       // Dart: 1 normal cell + 2 dart cells in the chosen direction
@@ -84,7 +84,7 @@ function computePreviewPlan(
       if (body.length >= 3) {
         const detachedTail = body.pop();
         if (detachedTail) {
-          rattleWalls.push({ x: detachedTail.x, y: detachedTail.y });
+          rattleWalls.push({ x: detachedTail.x, y: detachedTail.y, fuseTicks: 3 });
         }
       }
       const nextHead = getNextHeadPosition(body[0], entry.direction);
@@ -670,7 +670,7 @@ const GameApp: React.FC<{ campaignPlaytestLevel: CampaignLevel | null }> = ({ ca
     if (settings.turnBased && !replayActive) {
       const showP1 = playMode === 'LOCAL_2P' || viewerSeat === 'p1';
       const showP2 = playMode === 'LOCAL_2P' || viewerSeat === 'p2';
-      const previewRattleWalls: Position[] = [];
+      const previewRattleWalls: RattleWall[] = [];
 
       if (showP1 && !locks.p1 && moveBuffers.p1.length > 0) {
         const snake = stateCopy.snakes.find(candidate => candidate.id === 'p1');
@@ -1295,6 +1295,10 @@ const GameApp: React.FC<{ campaignPlaytestLevel: CampaignLevel | null }> = ({ ca
     }
     for (const snake of current.snakes) {
       if (!snake.isAlive) continue;
+      // Stun delays the buffer — do NOT pop the entry. The entry stays
+      // until the snake actually moves. Otherwise the stun eats the first
+      // move and the rest of the queue executes from the wrong position.
+      if ((snake.stunTicks ?? 0) > 0) continue;
       const buffer = moveBuffersRef.current[snake.id] ?? [];
       const entry = buffer.shift();
       if (entry) {

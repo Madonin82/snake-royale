@@ -19,6 +19,15 @@ export interface Position {
   y: number;
 }
 
+// RattleWall: a wall (x, y, blocks movement, renders as wall) + a fuse.
+// Dropped by Rattle, counts down 3 → 2 → 1, detonates a 3x3 stun on 0.
+// Wall stays permanent after detonation.
+export interface RattleWall {
+  x: number;
+  y: number;
+  fuseTicks: number; // turns until detonation (3 on drop, decrement each turn)
+}
+
 export interface Snake {
   id: string;
   name: string;
@@ -99,7 +108,7 @@ export interface GameState {
     surviveResults: boolean[];
   };
   walls?: Position[];
-  rattleWalls?: Position[];
+  rattleWalls?: RattleWall[];
   snakes: Snake[];
   ringInset: number; // 0 for full 8x8, 1 for 6x6, 2 for 4x4, 3 for 2x2
   isTelegraphingShrink: boolean;
@@ -111,6 +120,7 @@ export interface GameState {
   skillsAvailable?: SkillsAvailableConfig;
   dartTrail?: Array<{ snakeId: string; cells: Position[] }>;
   stunZones?: Position[]; // 3x3 cells flashing amber on rattle stun — fades over stun duration
+  detonationAt?: number; // timestamp (ms) when a rattle wall detonated — drives the 3-phase blast visual
   teamProtection?: boolean;
 }
 
