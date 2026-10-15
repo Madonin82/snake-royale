@@ -318,6 +318,23 @@
   will-change: transform, opacity;
 }
 
+.sp-fly-plus-n {
+  position: fixed;
+  pointer-events: none;
+  z-index: 9999;
+  user-select: none;
+  font-family: 'VT323', monospace;
+  font-weight: 900;
+  font-size: 18px;
+  line-height: 1;
+  padding: 1px 5px;
+  background-color: #1E3A8A;
+  color: #22D3EE;
+  border: 2px solid #22D3EE;
+  box-shadow: 2px 2px 0px #1E3A8A;
+  will-change: transform, opacity;
+}
+
 @keyframes scorePulse {
   0% {
     transform: scale(1);

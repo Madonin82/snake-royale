@@ -177,6 +177,7 @@ function spawnTokenFlyEffect(snakeId: string, state: GameState, defaultGridSize:
   const el = document.createElement('div');
   el.textContent = '+1';
   el.className = 'token-fly-plus-one';
+  el.style.fontSize = `${Math.min(cellWidth, cellHeight) * 0.75}px`;
   el.style.left = `${startX}px`;
   el.style.top = `${startY}px`;
   el.style.transform = 'translate(-50%, -50%) scale(0.6)';
@@ -222,7 +223,6 @@ function spawnTokenFlyEffect(snakeId: string, state: GameState, defaultGridSize:
 }
 
 function spawnSpFlyEffect(snakeId: string, state: GameState, defaultGridSize: number, spAwarded: number, onLand?: () => void) {
-  if (spAwarded < 2) return;
   if (typeof window === 'undefined' || typeof document === 'undefined') return;
   const snake = state.snakes.find(s => s.id === snakeId);
   if (!snake || snake.body.length === 0) return;
@@ -265,9 +265,11 @@ function spawnSpFlyEffect(snakeId: string, state: GameState, defaultGridSize: nu
 
   const el = document.createElement('div');
   el.textContent = `+${spAwarded} SP`;
-  el.className = 'token-fly-plus-one';
-  el.style.left = `${startX}px`;
-  el.style.top = `${startY}px`;
+  el.className = 'sp-fly-plus-n';
+  el.style.fontSize = `${Math.min(cellWidth, cellHeight) * 0.75}px`;
+  // Half a cell down-right from the token +1, so the pair doesn't overlap.
+  el.style.left = `${startX + cellWidth * 0.5}px`;
+  el.style.top = `${startY + cellHeight * 0.5}px`;
   el.style.transform = 'translate(-50%, -50%) scale(0.6)';
   el.style.opacity = '1';
 
@@ -300,8 +302,9 @@ function spawnSpFlyEffect(snakeId: string, state: GameState, defaultGridSize: nu
   lingerTimer = setTimeout(() => {
     if (cleanedUp) return;
     lingerTimer = null;
-    const dx = targetX - startX;
-    const dy = targetY - startY;
+    // Account for the half-cell offset starting position.
+    const dx = targetX - (startX + cellWidth * 0.5);
+    const dy = targetY - (startY + cellHeight * 0.5);
     el.style.transition = 'transform 600ms cubic-bezier(0.16, 1, 0.3, 1), opacity 600ms cubic-bezier(0.16, 1, 0.3, 1)';
     el.style.transform = `translate(calc(-50% + ${dx}px), calc(-50% + ${dy}px)) scale(1.2)`;
   }, FLY_LINGER_MS);
@@ -1262,12 +1265,10 @@ const GameApp: React.FC<{ campaignPlaytestLevel: CampaignLevel | null }> = ({ ca
           spawnTokenFlyEffect(snakeId, nextState, s.gridSize, () => {
             setPendingScore(prev => ({ ...prev, [snakeId]: Math.max(0, (prev[snakeId] ?? 0) - 1) }));
           });
-          if (spAwarded >= 2) {
-            setPendingSp(prev => ({ ...prev, [snakeId]: (prev[snakeId] ?? 0) + spAwarded }));
-            spawnSpFlyEffect(snakeId, nextState, s.gridSize, spAwarded, () => {
-              setPendingSp(prev => ({ ...prev, [snakeId]: Math.max(0, (prev[snakeId] ?? 0) - spAwarded) }));
-            });
-          }
+          setPendingSp(prev => ({ ...prev, [snakeId]: (prev[snakeId] ?? 0) + spAwarded }));
+          spawnSpFlyEffect(snakeId, nextState, s.gridSize, spAwarded, () => {
+            setPendingSp(prev => ({ ...prev, [snakeId]: Math.max(0, (prev[snakeId] ?? 0) - spAwarded) }));
+          });
         }
       }
     }
@@ -2741,12 +2742,10 @@ const GameApp: React.FC<{ campaignPlaytestLevel: CampaignLevel | null }> = ({ ca
             spawnTokenFlyEffect(snakeId, nextState, settingsRef.current.gridSize, () => {
               setPendingScore(prev => ({ ...prev, [snakeId]: Math.max(0, (prev[snakeId] ?? 0) - 1) }));
             });
-            if (spAwarded >= 2) {
-              setPendingSp(prev => ({ ...prev, [snakeId]: (prev[snakeId] ?? 0) + spAwarded }));
-              spawnSpFlyEffect(snakeId, nextState, settingsRef.current.gridSize, spAwarded, () => {
-                setPendingSp(prev => ({ ...prev, [snakeId]: Math.max(0, (prev[snakeId] ?? 0) - spAwarded) }));
-              });
-            }
+            setPendingSp(prev => ({ ...prev, [snakeId]: (prev[snakeId] ?? 0) + spAwarded }));
+            spawnSpFlyEffect(snakeId, nextState, settingsRef.current.gridSize, spAwarded, () => {
+              setPendingSp(prev => ({ ...prev, [snakeId]: Math.max(0, (prev[snakeId] ?? 0) - spAwarded) }));
+            });
           }
         }
       }
