@@ -132,6 +132,27 @@ function computeCommittedPath(snake: any, buffer: BufferEntry[]): Position[] {
 
 const FLY_LINGER_MS = 450;
 
+// Active fly effects, for cleanup on game over / unmount. Each entry
+// tracks the div, its linger timer, and its onLand callback (fired on
+// cleanup so pendingScore/pendingSp settle instead of wedging).
+interface ActiveFlyEffect {
+  el: HTMLDivElement;
+  lingerTimer: ReturnType<typeof setTimeout> | null;
+  onLand?: () => void;
+}
+const activeFlyEffects = new Set<ActiveFlyEffect>();
+
+export function cleanupFlyEffects(): void {
+  for (const effect of activeFlyEffects) {
+    if (effect.lingerTimer) {
+      clearTimeout(effect.lingerTimer);
+    }
+    effect.el.remove();
+    effect.onLand?.();
+  }
+  activeFlyEffects.clear();
+}
+
 function spawnTokenFlyEffect(snakeId: string, state: GameState, defaultGridSize: number, onLand?: () => void) {
   if (typeof window === 'undefined' || typeof document === 'undefined') return;
   const snake = state.snakes.find(s => s.id === snakeId);
@@ -190,12 +211,16 @@ function spawnTokenFlyEffect(snakeId: string, state: GameState, defaultGridSize:
   el.style.transform = 'translate(-50%, -50%) scale(1)';
   let cleanedUp = false;
   let lingerTimer: ReturnType<typeof setTimeout> | null = null;
+  const effect: ActiveFlyEffect = { el, lingerTimer: null, onLand };
+  activeFlyEffects.add(effect);
   const onDone = () => {
     if (cleanedUp) return;
     cleanedUp = true;
+    activeFlyEffects.delete(effect);
     if (lingerTimer) {
       clearTimeout(lingerTimer);
       lingerTimer = null;
+      effect.lingerTimer = null;
     }
     el.remove();
     if (targetEl) {
@@ -212,11 +237,13 @@ function spawnTokenFlyEffect(snakeId: string, state: GameState, defaultGridSize:
   lingerTimer = setTimeout(() => {
     if (cleanedUp) return;
     lingerTimer = null;
+    effect.lingerTimer = null;
     const dx = targetX - startX;
     const dy = targetY - startY;
     el.style.transition = 'transform 600ms cubic-bezier(0.16, 1, 0.3, 1), opacity 600ms cubic-bezier(0.16, 1, 0.3, 1)';
     el.style.transform = `translate(calc(-50% + ${dx}px), calc(-50% + ${dy}px)) scale(1.2)`;
   }, FLY_LINGER_MS);
+  effect.lingerTimer = lingerTimer;
 
   el.addEventListener('transitionend', onDone, { once: true });
   setTimeout(onDone, FLY_LINGER_MS + 650);
@@ -264,7 +291,7 @@ function spawnSpFlyEffect(snakeId: string, state: GameState, defaultGridSize: nu
   }
 
   const el = document.createElement('div');
-  el.textContent = `+${spAwarded} SP`;
+  el.textContent = `+${spAwarded}`;
   el.className = 'sp-fly-plus-n';
   el.style.fontSize = `${Math.min(cellWidth, cellHeight) * 0.75}px`;
   // Half a cell down-right from the token +1, so the pair doesn't overlap.
@@ -280,12 +307,16 @@ function spawnSpFlyEffect(snakeId: string, state: GameState, defaultGridSize: nu
   el.style.transform = 'translate(-50%, -50%) scale(1)';
   let cleanedUp = false;
   let lingerTimer: ReturnType<typeof setTimeout> | null = null;
+  const effect: ActiveFlyEffect = { el, lingerTimer: null, onLand };
+  activeFlyEffects.add(effect);
   const onDone = () => {
     if (cleanedUp) return;
     cleanedUp = true;
+    activeFlyEffects.delete(effect);
     if (lingerTimer) {
       clearTimeout(lingerTimer);
       lingerTimer = null;
+      effect.lingerTimer = null;
     }
     el.remove();
     if (targetEl) {
@@ -302,12 +333,14 @@ function spawnSpFlyEffect(snakeId: string, state: GameState, defaultGridSize: nu
   lingerTimer = setTimeout(() => {
     if (cleanedUp) return;
     lingerTimer = null;
+    effect.lingerTimer = null;
     // Account for the half-cell offset starting position.
     const dx = targetX - (startX + cellWidth * 0.5);
     const dy = targetY - (startY + cellHeight * 0.5);
     el.style.transition = 'transform 600ms cubic-bezier(0.16, 1, 0.3, 1), opacity 600ms cubic-bezier(0.16, 1, 0.3, 1)';
     el.style.transform = `translate(calc(-50% + ${dx}px), calc(-50% + ${dy}px)) scale(1.2)`;
   }, FLY_LINGER_MS);
+  effect.lingerTimer = lingerTimer;
 
   el.addEventListener('transitionend', onDone, { once: true });
   setTimeout(onDone, FLY_LINGER_MS + 650);
@@ -725,6 +758,17 @@ const GameApp: React.FC<{ campaignPlaytestLevel: CampaignLevel | null }> = ({ ca
     document.documentElement.classList.toggle('snake-ai-mode', aiMode);
     return () => document.documentElement.classList.remove('snake-ai-mode');
   }, [aiMode]);
+
+  // Clean up any in-flight fly effects when the game ends or the
+  // component unmounts — no stuck graphics after VICTORY/DEFEAT.
+  useEffect(() => {
+    if (gameState.phase === 'OVER') {
+      cleanupFlyEffects();
+    }
+  }, [gameState.phase]);
+  useEffect(() => {
+    return () => cleanupFlyEffects();
+  }, []);
 
   // Active menu handler ref for zero-re-render gamepad/keyboard dispatch
   const activeHandlerRef = useRef<((action: GamepadMenuAction) => void) | null>(null);
