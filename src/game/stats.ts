@@ -146,21 +146,31 @@ export function computeTurnLedger(
     while (i < entries.length) {
       const e = entries[i];
       if (e.arrows.length > 0) {
-        let tokens = e.tokensCollected;
-        let sp = e.spGained;
-        let j = i + 1;
+        // Lock at tick L owns tokens from L+1 through next lock's tick (inclusive).
+        // The lock tick itself is excluded (moves haven't executed yet).
+        // The next lock's own tick tokens belong to this lock (its moves ran on that tick).
+        let tokens = 0;
+        let sp = 0;
         const keep: TurnLedgerEntry[] = [];
-        while (j < entries.length && entries[j].arrows.length === 0) {
+        // Find next lock index
+        let nextLockIdx = entries.length;
+        for (let k = i + 1; k < entries.length; k++) {
+          if (entries[k].arrows.length > 0) {
+            nextLockIdx = k;
+            break;
+          }
+        }
+        // Sum from L+1 through next lock tick (inclusive)
+        for (let j = i + 1; j <= nextLockIdx && j < entries.length; j++) {
           tokens += entries[j].tokensCollected;
           sp += entries[j].spGained;
           if (entries[j].terminalResult) {
             keep.push({ ...entries[j], tokensCollected: 0, spGained: 0 });
           }
-          j++;
         }
         aggregated.push({ ...e, tokensCollected: tokens, spGained: sp });
         aggregated.push(...keep);
-        i = j;
+        i = nextLockIdx;
       } else {
         aggregated.push(e);
         i++;
