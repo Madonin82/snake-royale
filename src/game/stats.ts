@@ -82,7 +82,7 @@ export function computeTurnLedger(
 
       const scoreDelta = prevSnake ? snake.score - prevSnake.score : snake.score;
       const tokensCollected = scoreDelta > 0 ? scoreDelta : 0;
-      const spGained = prevSnake ? (snake.skillPoints ?? 0) - (prevSnake.skillPoints ?? 0) : (snake.skillPoints ?? 0);
+      const spGained = prevSnake ? (snake.spEarned ?? 0) - (prevSnake.spEarned ?? 0) : (snake.spEarned ?? 0);
 
       let terminalResult: string | undefined = undefined;
       if (!snake.isAlive && prevSnake && prevSnake.isAlive) {
