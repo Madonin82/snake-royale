@@ -130,7 +130,9 @@ function computeCommittedPath(snake: any, buffer: BufferEntry[]): Position[] {
   return path;
 }
 
-function spawnTokenFlyEffect(snakeId: string, state: GameState, defaultGridSize: number) {
+const FLY_LINGER_MS = 450;
+
+function spawnTokenFlyEffect(snakeId: string, state: GameState, defaultGridSize: number, onLand?: () => void) {
   if (typeof window === 'undefined' || typeof document === 'undefined') return;
   const snake = state.snakes.find(s => s.id === snakeId);
   if (!snake || snake.body.length === 0) return;
@@ -183,15 +185,17 @@ function spawnTokenFlyEffect(snakeId: string, state: GameState, defaultGridSize:
   document.body.appendChild(el);
   void el.offsetWidth; // Force synchronous reflow
 
-  const dx = targetX - startX;
-  const dy = targetY - startY;
-  el.style.transition = 'transform 600ms cubic-bezier(0.16, 1, 0.3, 1), opacity 600ms cubic-bezier(0.16, 1, 0.3, 1)';
-  el.style.transform = `translate(calc(-50% + ${dx}px), calc(-50% + ${dy}px)) scale(1.2)`;
-
+  // LINGER: sit at the pickup cell, readable, before flying.
+  el.style.transform = 'translate(-50%, -50%) scale(1)';
   let cleanedUp = false;
+  let lingerTimer: ReturnType<typeof setTimeout> | null = null;
   const onDone = () => {
     if (cleanedUp) return;
     cleanedUp = true;
+    if (lingerTimer) {
+      clearTimeout(lingerTimer);
+      lingerTimer = null;
+    }
     el.remove();
     if (targetEl) {
       targetEl.classList.remove('score-pulse');
@@ -201,13 +205,23 @@ function spawnTokenFlyEffect(snakeId: string, state: GameState, defaultGridSize:
         targetEl?.classList.remove('score-pulse');
       }, 400);
     }
+    onLand?.();
   };
 
+  lingerTimer = setTimeout(() => {
+    if (cleanedUp) return;
+    lingerTimer = null;
+    const dx = targetX - startX;
+    const dy = targetY - startY;
+    el.style.transition = 'transform 600ms cubic-bezier(0.16, 1, 0.3, 1), opacity 600ms cubic-bezier(0.16, 1, 0.3, 1)';
+    el.style.transform = `translate(calc(-50% + ${dx}px), calc(-50% + ${dy}px)) scale(1.2)`;
+  }, FLY_LINGER_MS);
+
   el.addEventListener('transitionend', onDone, { once: true });
-  setTimeout(onDone, 650);
+  setTimeout(onDone, FLY_LINGER_MS + 650);
 }
 
-function spawnSpFlyEffect(snakeId: string, state: GameState, defaultGridSize: number, spAwarded: number) {
+function spawnSpFlyEffect(snakeId: string, state: GameState, defaultGridSize: number, spAwarded: number, onLand?: () => void) {
   if (spAwarded < 2) return;
   if (typeof window === 'undefined' || typeof document === 'undefined') return;
   const snake = state.snakes.find(s => s.id === snakeId);
@@ -260,15 +274,17 @@ function spawnSpFlyEffect(snakeId: string, state: GameState, defaultGridSize: nu
   document.body.appendChild(el);
   void el.offsetWidth;
 
-  const dx = targetX - startX;
-  const dy = targetY - startY;
-  el.style.transition = 'transform 600ms cubic-bezier(0.16, 1, 0.3, 1), opacity 600ms cubic-bezier(0.16, 1, 0.3, 1)';
-  el.style.transform = `translate(calc(-50% + ${dx}px), calc(-50% + ${dy}px)) scale(1.2)`;
-
+  // LINGER: sit at the pickup cell, readable, before flying.
+  el.style.transform = 'translate(-50%, -50%) scale(1)';
   let cleanedUp = false;
+  let lingerTimer: ReturnType<typeof setTimeout> | null = null;
   const onDone = () => {
     if (cleanedUp) return;
     cleanedUp = true;
+    if (lingerTimer) {
+      clearTimeout(lingerTimer);
+      lingerTimer = null;
+    }
     el.remove();
     if (targetEl) {
       targetEl.classList.remove('score-pulse');
@@ -278,10 +294,20 @@ function spawnSpFlyEffect(snakeId: string, state: GameState, defaultGridSize: nu
         targetEl?.classList.remove('score-pulse');
       }, 400);
     }
+    onLand?.();
   };
 
+  lingerTimer = setTimeout(() => {
+    if (cleanedUp) return;
+    lingerTimer = null;
+    const dx = targetX - startX;
+    const dy = targetY - startY;
+    el.style.transition = 'transform 600ms cubic-bezier(0.16, 1, 0.3, 1), opacity 600ms cubic-bezier(0.16, 1, 0.3, 1)';
+    el.style.transform = `translate(calc(-50% + ${dx}px), calc(-50% + ${dy}px)) scale(1.2)`;
+  }, FLY_LINGER_MS);
+
   el.addEventListener('transitionend', onDone, { once: true });
-  setTimeout(onDone, 650);
+  setTimeout(onDone, FLY_LINGER_MS + 650);
 }
 
 function createLobbyState(settings: GameSettings): GameState {
@@ -504,6 +530,12 @@ const GameApp: React.FC<{ campaignPlaytestLevel: CampaignLevel | null }> = ({ ca
   const initialSeatRecords = Object.fromEntries(gameState.snakes.map(snake => [snake.id, false]));
   const locksRef = useRef<Record<string, boolean>>(initialSeatRecords);
   const [locks, setLocks] = useState<Record<string, boolean>>(initialSeatRecords);
+
+  // Pending score/SP increments waiting for their fly effect to land.
+  // The HUD displays actual − pending, so the card number ticks up
+  // exactly when the +N lands, not when the token is eaten.
+  const [pendingScore, setPendingScore] = useState<Record<string, number>>({});
+  const [pendingSp, setPendingSp] = useState<Record<string, number>>({});
   const [thinkTimeRemaining, setThinkTimeRemaining] = useState<Record<string, number | null>>(
     Object.fromEntries(gameState.snakes.map(snake => [snake.id, null])),
   );
@@ -576,6 +608,13 @@ const GameApp: React.FC<{ campaignPlaytestLevel: CampaignLevel | null }> = ({ ca
       ...(baseState.walls ? { walls: [...baseState.walls] } : {}),
       ...(baseState.rattleWalls ? { rattleWalls: [...baseState.rattleWalls] } : {}),
     };
+    // Hold back pending score/SP until their fly effects land.
+    if (!replayActive) {
+      for (const snake of stateCopy.snakes) {
+        snake.score = Math.max(0, snake.score - (pendingScore[snake.id] ?? 0));
+        snake.skillPoints = Math.max(0, (snake.skillPoints ?? 0) - (pendingSp[snake.id] ?? 0));
+      }
+    }
     if (settings.turnBased && !replayActive) {
       const showP1 = playMode === 'LOCAL_2P' || viewerSeat === 'p1';
       const showP2 = playMode === 'LOCAL_2P' || viewerSeat === 'p2';
@@ -603,7 +642,7 @@ const GameApp: React.FC<{ campaignPlaytestLevel: CampaignLevel | null }> = ({ ca
       }
     }
     return stateCopy;
-  }, [replayActive, matchHistory, replayIdx, gameState, moveBuffers, locks, settings.turnBased, playMode, viewerSeat]);
+  }, [replayActive, matchHistory, replayIdx, gameState, moveBuffers, locks, settings.turnBased, playMode, viewerSeat, pendingScore, pendingSp]);
 
   const lockedPaths = useMemo(() => {
     if (!settings.turnBased || replayActive) return undefined;
@@ -1219,9 +1258,15 @@ const GameApp: React.FC<{ campaignPlaytestLevel: CampaignLevel | null }> = ({ ca
     if (!aiMode && events.tokenEaten) {
       for (const [snakeId, spAwarded] of Object.entries(events.tokenEaten)) {
         if (spAwarded && spAwarded > 0) {
-          spawnTokenFlyEffect(snakeId, nextState, s.gridSize);
+          setPendingScore(prev => ({ ...prev, [snakeId]: (prev[snakeId] ?? 0) + 1 }));
+          spawnTokenFlyEffect(snakeId, nextState, s.gridSize, () => {
+            setPendingScore(prev => ({ ...prev, [snakeId]: Math.max(0, (prev[snakeId] ?? 0) - 1) }));
+          });
           if (spAwarded >= 2) {
-            spawnSpFlyEffect(snakeId, nextState, s.gridSize, spAwarded);
+            setPendingSp(prev => ({ ...prev, [snakeId]: (prev[snakeId] ?? 0) + spAwarded }));
+            spawnSpFlyEffect(snakeId, nextState, s.gridSize, spAwarded, () => {
+              setPendingSp(prev => ({ ...prev, [snakeId]: Math.max(0, (prev[snakeId] ?? 0) - spAwarded) }));
+            });
           }
         }
       }
@@ -2692,9 +2737,15 @@ const GameApp: React.FC<{ campaignPlaytestLevel: CampaignLevel | null }> = ({ ca
       if (!aiMode && events.tokenEaten) {
         for (const [snakeId, spAwarded] of Object.entries(events.tokenEaten)) {
           if (spAwarded && spAwarded > 0) {
-            spawnTokenFlyEffect(snakeId, nextState, settingsRef.current.gridSize);
+            setPendingScore(prev => ({ ...prev, [snakeId]: (prev[snakeId] ?? 0) + 1 }));
+            spawnTokenFlyEffect(snakeId, nextState, settingsRef.current.gridSize, () => {
+              setPendingScore(prev => ({ ...prev, [snakeId]: Math.max(0, (prev[snakeId] ?? 0) - 1) }));
+            });
             if (spAwarded >= 2) {
-              spawnSpFlyEffect(snakeId, nextState, settingsRef.current.gridSize, spAwarded);
+              setPendingSp(prev => ({ ...prev, [snakeId]: (prev[snakeId] ?? 0) + spAwarded }));
+              spawnSpFlyEffect(snakeId, nextState, settingsRef.current.gridSize, spAwarded, () => {
+                setPendingSp(prev => ({ ...prev, [snakeId]: Math.max(0, (prev[snakeId] ?? 0) - spAwarded) }));
+              });
             }
           }
         }
