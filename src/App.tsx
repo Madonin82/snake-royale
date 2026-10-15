@@ -199,7 +199,8 @@ function spawnTokenFlyEffect(snakeId: string, state: GameState, defaultGridSize:
   el.textContent = '+1';
   el.className = 'token-fly-plus-one';
   el.style.fontSize = `${Math.min(cellWidth, cellHeight) * 0.75}px`;
-  el.style.left = `${startX}px`;
+  // Left of center — side by side with the SP +N.
+  el.style.left = `${startX - cellWidth * 0.45}px`;
   el.style.top = `${startY}px`;
   el.style.transform = 'translate(-50%, -50%) scale(0.6)';
   el.style.opacity = '1';
@@ -238,7 +239,8 @@ function spawnTokenFlyEffect(snakeId: string, state: GameState, defaultGridSize:
     if (cleanedUp) return;
     lingerTimer = null;
     effect.lingerTimer = null;
-    const dx = targetX - startX;
+    // Account for the left-of-center starting position.
+    const dx = targetX - (startX - cellWidth * 0.45);
     const dy = targetY - startY;
     el.style.transition = 'transform 600ms cubic-bezier(0.16, 1, 0.3, 1), opacity 600ms cubic-bezier(0.16, 1, 0.3, 1)';
     el.style.transform = `translate(calc(-50% + ${dx}px), calc(-50% + ${dy}px)) scale(1.2)`;
@@ -294,9 +296,9 @@ function spawnSpFlyEffect(snakeId: string, state: GameState, defaultGridSize: nu
   el.textContent = `+${spAwarded}`;
   el.className = 'sp-fly-plus-n';
   el.style.fontSize = `${Math.min(cellWidth, cellHeight) * 0.75}px`;
-  // Half a cell down-right from the token +1, so the pair doesn't overlap.
-  el.style.left = `${startX + cellWidth * 0.5}px`;
-  el.style.top = `${startY + cellHeight * 0.5}px`;
+  // Right of center — side by side with the token +1.
+  el.style.left = `${startX + cellWidth * 0.45}px`;
+  el.style.top = `${startY}px`;
   el.style.transform = 'translate(-50%, -50%) scale(0.6)';
   el.style.opacity = '1';
 
@@ -334,9 +336,9 @@ function spawnSpFlyEffect(snakeId: string, state: GameState, defaultGridSize: nu
     if (cleanedUp) return;
     lingerTimer = null;
     effect.lingerTimer = null;
-    // Account for the half-cell offset starting position.
-    const dx = targetX - (startX + cellWidth * 0.5);
-    const dy = targetY - (startY + cellHeight * 0.5);
+    // Account for the right-of-center starting position.
+    const dx = targetX - (startX + cellWidth * 0.45);
+    const dy = targetY - startY;
     el.style.transition = 'transform 600ms cubic-bezier(0.16, 1, 0.3, 1), opacity 600ms cubic-bezier(0.16, 1, 0.3, 1)';
     el.style.transform = `translate(calc(-50% + ${dx}px), calc(-50% + ${dy}px)) scale(1.2)`;
   }, FLY_LINGER_MS);
