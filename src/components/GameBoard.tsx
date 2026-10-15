@@ -254,6 +254,9 @@ export const GameBoard: React.FC<GameBoardProps> = ({
         : isFirst
           ? GAMEBOY_COLORS.LIGHT
           : GAMEBOY_COLORS.LIGHTEST;
+      // Stunned snakes render dimmed for the tick.
+      const isStunned = (snake.stunTicks ?? 0) > 0;
+      if (isStunned) ctx.globalAlpha = 0.5;
       renderSnake(
         ctx,
         snake,
@@ -263,6 +266,7 @@ export const GameBoard: React.FC<GameBoardProps> = ({
         snake.id,
         isAnimatingFatalMove,
       );
+      if (isStunned) ctx.globalAlpha = 1;
     }
 
     // 8. Persistent red direction arrow on dead snake head cell for the rest of the match
@@ -318,6 +322,18 @@ export const GameBoard: React.FC<GameBoardProps> = ({
             cellSize - inset * 2
           );
         });
+      }
+      ctx.restore();
+    }
+
+    // 8d. Stun zone flash — amber 3x3 on rattle stun (fades when stun expires)
+    if (gameState.stunZones && gameState.stunZones.length > 0) {
+      ctx.save();
+      ctx.fillStyle = 'rgba(255, 193, 7, 0.6)'; // Amber #FFC107
+      for (const cell of gameState.stunZones) {
+        const cx = Math.max(0, Math.min(gridSize - 1, cell.x));
+        const cy = Math.max(0, Math.min(gridSize - 1, cell.y));
+        ctx.fillRect(cx * cellSize, cy * cellSize, cellSize, cellSize);
       }
       ctx.restore();
     }

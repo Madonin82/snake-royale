@@ -518,7 +518,7 @@ test('snipe on step 0: simultaneous head meeting, darter wins tiebreak → oppon
   assert.equal(afterP1.isAlive, true);
 });
 
-test('rattle detaches tail tip into permanent wall, moves 1 cell in chosen direction, reduces length by 1, and costs 2 SP', () => {
+test('rattle detaches tail tip into permanent wall, moves 1 cell in chosen direction, reduces length by 1, and costs 1 SP', () => {
   const state = createInitialState();
   const settings = { ...DEFAULT_SETTINGS, skillsAvailable: 'immediate' as const };
   state.tokens = [];
@@ -539,7 +539,7 @@ test('rattle detaches tail tip into permanent wall, moves 1 cell in chosen direc
   // Moved UP to (2,3), length reduced from 3 to 2, tail (0,4) became wall
   assert.deepEqual(afterP1.body, [{ x: 2, y: 3 }, { x: 2, y: 4 }]);
   assert.equal(afterP1.body.length, 2);
-  assert.equal(afterP1.skillPoints, 2);
+  assert.equal(afterP1.skillPoints, 3);
   assert.deepEqual(nextState.rattleWalls, [{ x: 0, y: 4 }]);
   assert.ok(nextState.walls?.some(w => w.x === 0 && w.y === 4));
 
@@ -547,6 +547,42 @@ test('rattle detaches tail tip into permanent wall, moves 1 cell in chosen direc
   const { nextState: tick2 } = processGameTick(nextState, settings, 0);
   assert.deepEqual(tick2.rattleWalls, [{ x: 0, y: 4 }]);
   assert.ok(tick2.walls?.some(w => w.x === 0 && w.y === 4));
+});
+
+test('rattle stuns opponents in 3x3 for 1 tick, rattler unaffected', () => {
+  const state = createInitialState();
+  const settings = { ...DEFAULT_SETTINGS, skillsAvailable: 'immediate' as const };
+  state.tokens = [];
+  state.skillsAvailable = 'immediate';
+  const p1 = state.snakes.find(snake => snake.id === 'p1')!;
+  p1.body = [{ x: 2, y: 4 }, { x: 1, y: 4 }, { x: 0, y: 4 }];
+  p1.direction = 'RIGHT';
+  p1.equippedSkill = 'rattle';
+  p1.skillPoints = 4;
+  const p2 = state.snakes.find(snake => snake.id === 'p2')!;
+  // p2 head at (1,5) — inside 3x3 centered on wall cell (0,4)
+  p2.body = [{ x: 1, y: 5 }, { x: 1, y: 6 }, { x: 1, y: 7 }];
+  p2.direction = 'UP';
+
+  assert.equal(queueSnakeSkill(p1, { skillId: 'rattle', direction: 'UP' }), true);
+  const { nextState } = processGameTick(state, settings, 0);
+  const afterP2 = nextState.snakes.find(snake => snake.id === 'p2')!;
+  const afterP1 = nextState.snakes.find(snake => snake.id === 'p1')!;
+
+  // p2 stunned, p1 not
+  assert.equal(afterP2.stunTicks, 1);
+  assert.equal(afterP1.stunTicks ?? 0, 0);
+  // Stun zone set (9 cells centered on wall)
+  assert.equal(nextState.stunZones?.length, 9);
+
+  // Next tick: p2 stays in place (stun consumed), p1 moves
+  const p2HeadBefore = { ...afterP2.body[0] };
+  const { nextState: tick2 } = processGameTick(nextState, settings, 0);
+  const tick2P2 = tick2.snakes.find(snake => snake.id === 'p2')!;
+  assert.deepEqual(tick2P2.body[0], p2HeadBefore);
+  assert.equal(tick2P2.stunTicks, 0);
+  // Stun zone cleared
+  assert.equal(tick2.stunZones, undefined);
 });
 
 test('hitting a rattle wall kills both opponents and the placer', () => {
@@ -622,7 +658,7 @@ test('darting through a rattle wall cell kills the darter', () => {
   assert.deepEqual(afterP1.deathPosition, { x: 3, y: 4 });
 });
 
-test('rattle cannot activate below length 3 or with fewer than 2 SP, and fizzles without direction', () => {
+test('rattle cannot activate below length 3 or with fewer than 1 SP, and fizzles without direction', () => {
   const state = createInitialState();
   const settings = { ...DEFAULT_SETTINGS, skillsAvailable: 'immediate' as const };
   state.tokens = [];
@@ -656,13 +692,13 @@ test('rattle cannot activate below length 3 or with fewer than 2 SP, and fizzles
   assert.equal(afterNoDir.skillPoints, 4);
   assert.equal(resNoDir.rattleWalls ?? undefined, undefined);
 
-  // Rattle with < 2 SP fizzles cleanly
-  p1.skillPoints = 1;
+  // Rattle with < 1 SP fizzles cleanly
+  p1.skillPoints = 0;
   queueSnakeSkill(p1, { skillId: 'rattle', direction: 'UP' });
   const resLowSp = processGameTick(state, settings, 0).nextState;
   const afterLowSp = resLowSp.snakes.find(s => s.id === 'p1')!;
   assert.equal(afterLowSp.body.length, 3);
-  assert.equal(afterLowSp.skillPoints, 1);
+  assert.equal(afterLowSp.skillPoints, 0);
   assert.equal(resLowSp.rattleWalls ?? undefined, undefined);
 });
 

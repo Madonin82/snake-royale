@@ -38,6 +38,7 @@ export interface Snake {
   killedBy?: string;
   tokensSinceLock?: number;
   spEarned?: number; // gross SP income this match — never decreases
+  stunTicks?: number; // ticks remaining stunned — skips move while > 0
 }
 
 export type GamePhase = 'LOBBY' | 'RACING' | 'SHRINKING' | 'OVER';
@@ -109,6 +110,7 @@ export interface GameState {
   readyConfirmed?: Record<string, boolean>;
   skillsAvailable?: SkillsAvailableConfig;
   dartTrail?: Array<{ snakeId: string; cells: Position[] }>;
+  stunZones?: Position[]; // 3x3 cells flashing amber on rattle stun — fades over stun duration
   teamProtection?: boolean;
 }
 
