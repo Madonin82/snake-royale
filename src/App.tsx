@@ -925,6 +925,10 @@ const GameApp: React.FC<{ campaignPlaytestLevel: CampaignLevel | null }> = ({ ca
 
   const turnTimeoutRef = useRef<NodeJS.Timeout | null>(null);
 
+  // True while an execution beat is scheduled; the tick-change effect must
+  // not re-enter maybeAdvanceTurn mid-chain.
+  const chainPendingRef = useRef<boolean>(false);
+
   const clearHitstop = useCallback(() => {
     if (hitstopTimerRef.current) {
       clearTimeout(hitstopTimerRef.current);
@@ -1241,6 +1245,8 @@ const GameApp: React.FC<{ campaignPlaytestLevel: CampaignLevel | null }> = ({ ca
     }
 
     const openNextLockPhase = () => {
+      // The chain's decision point — beat arrived, chain over.
+      chainPendingRef.current = false;
       const mergedLocks = Object.fromEntries(stateRef.current.snakes.map(snake => [
         snake.id,
         snake.isAlive && (moveBuffersRef.current[snake.id]?.length ?? 0) > 0 && Boolean(nextLocks[snake.id] || locksRef.current[snake.id]),
@@ -1273,6 +1279,8 @@ const GameApp: React.FC<{ campaignPlaytestLevel: CampaignLevel | null }> = ({ ca
           setTimeout(() => openNextLockPhase(), 550);
         }
       };
+      // Set BEFORE triggerHitstop — onResume may fire synchronously.
+      chainPendingRef.current = true;
       hitstopMs = triggerHitstop(prevState, nextState, openNextLockPhaseWithBeat);
       return hitstopMs;
     })();
@@ -1306,6 +1314,9 @@ const GameApp: React.FC<{ campaignPlaytestLevel: CampaignLevel | null }> = ({ ca
     if (inLobby || inOnlineLobby || replayActive) return;
     if (!settings.turnBased || gameState.phase === 'OVER') return;
     if (!isBuiltInAiActive()) return;
+    // Do not re-enter mid-execution: the scheduled chain's own beat
+    // advances the next step.
+    if (chainPendingRef.current) return;
     const hasUnlockedBot = gameState.snakes.some(
       snake => snake.isAlive && snake.id !== 'p1' && !locksRef.current[snake.id],
     );
