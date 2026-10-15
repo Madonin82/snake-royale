@@ -191,7 +191,8 @@ function spawnTokenFlyEffect(snakeId: string, state: GameState, defaultGridSize:
   let targetY = startY - 80;
   if (targetEl) {
     const tRect = targetEl.getBoundingClientRect();
-    targetX = tRect.left + tRect.width / 2;
+    // Land left of center — keeps the token path parallel to the SP path.
+    targetX = tRect.left + tRect.width / 2 - cellWidth * 0.4;
     targetY = tRect.top + tRect.height / 2;
   }
 
@@ -294,7 +295,8 @@ function spawnSpFlyEffect(snakeId: string, state: GameState, defaultGridSize: nu
   let targetY = startY - 80;
   if (targetEl) {
     const tRect = targetEl.getBoundingClientRect();
-    targetX = tRect.left + tRect.width / 2;
+    // Land right of center — keeps the SP path parallel to the token path.
+    targetX = tRect.left + tRect.width / 2 + cellWidth * 0.4;
     targetY = tRect.top + tRect.height / 2;
   }
 
