@@ -98,10 +98,10 @@ test('resolves a three-way simultaneous head-on collision as a draw', () => {
   assert.equal(nextState.winner, 'DRAW');
 });
 
-test('getHitstopForTransition returns 100ms for token pickup, 300ms for regular death, and 500ms + flash cell for boss death', () => {
+test('getHitstopForTransition returns null for token pickup (linger loop instead), 300ms for regular death, and 500ms + flash cell for boss death', () => {
   const settings = { ...DEFAULT_SETTINGS };
 
-  // Token pickup -> 100ms
+  // Token pickup -> null (no hitstop; token feedback is via the linger + fly loop)
   const tokenState = createInitialState(settings);
   tokenState.tokens = [{ x: 3, y: 2 }];
   const p1 = tokenState.snakes.find(s => s.id === 'p1')!;
@@ -109,11 +109,7 @@ test('getHitstopForTransition returns 100ms for token pickup, 300ms for regular 
   p1.direction = 'RIGHT';
   const afterToken = processGameTick(tokenState, settings, 0).nextState;
   const tokenHitstop = getHitstopForTransition(tokenState, afterToken, false);
-  assert.deepEqual(tokenHitstop, {
-    durationMs: 100,
-    kind: 'TOKEN',
-    flashCells: [],
-  });
+  assert.equal(tokenHitstop, null);
 
   // Regular death -> 300ms
   const deathState = createInitialState(settings);
@@ -144,10 +140,10 @@ test('getHitstopForTransition returns 100ms for token pickup, 300ms for regular 
   });
 });
 
-test('getHitstopForTransition adds durations per event: 2 tokens -> 200, token + death -> 400, dart + token -> 250, quiet -> null', () => {
+test('getHitstopForTransition: tokens contribute 0ms (linger loop), dart 150ms, death 300ms, quiet null', () => {
   const settings = { ...DEFAULT_SETTINGS };
 
-  // 2 tokens same turn (both snakes grab one) -> 200ms TOKEN
+  // 2 tokens same turn -> null (no hitstop; token feedback is via linger loop)
   const twoTokenState = createInitialState(settings);
   twoTokenState.tokens = [{ x: 3, y: 2 }, { x: 4, y: 5 }];
   const p1Two = twoTokenState.snakes.find(s => s.id === 'p1')!;
@@ -157,13 +153,9 @@ test('getHitstopForTransition adds durations per event: 2 tokens -> 200, token +
   p2Two.body = [{ x: 5, y: 5 }, { x: 6, y: 5 }];
   p2Two.direction = 'LEFT';
   const afterTwoTokens = processGameTick(twoTokenState, settings, 0).nextState;
-  assert.deepEqual(getHitstopForTransition(twoTokenState, afterTwoTokens, false), {
-    durationMs: 200,
-    kind: 'TOKEN',
-    flashCells: [],
-  });
+  assert.equal(getHitstopForTransition(twoTokenState, afterTwoTokens, false), null);
 
-  // Token + death same turn -> 400ms DEATH (token 100 + death 300)
+  // Token + death same turn -> 300ms DEATH (death only, token contributes 0)
   const mixedState = createInitialState(settings);
   mixedState.tokens = [{ x: 3, y: 2 }];
   const p1Mixed = mixedState.snakes.find(s => s.id === 'p1')!;
@@ -174,12 +166,12 @@ test('getHitstopForTransition adds durations per event: 2 tokens -> 200, token +
   p2Mixed.direction = 'RIGHT';
   const afterMixed = processGameTick(mixedState, settings, 0).nextState;
   assert.deepEqual(getHitstopForTransition(mixedState, afterMixed, false), {
-    durationMs: 400,
+    durationMs: 300,
     kind: 'DEATH',
     flashCells: [{ x: 8, y: 2 }],
   });
 
-  // Dart + token same turn -> 250ms DART (dart 150 + token 100)
+  // Dart + token same turn -> 150ms DART (dart only, token contributes 0)
   const dartState = createInitialState(settings);
   dartState.skillsAvailable = 'immediate';
   dartState.tokens = [{ x: 3, y: 2 }];
@@ -197,7 +189,7 @@ test('getHitstopForTransition adds durations per event: 2 tokens -> 200, token +
   queueSnakeSkill(p2Dart, { skillId: 'dart', direction: 'LEFT' });
   const afterDart = processGameTick(dartState, { ...settings, skillsAvailable: 'immediate' as const }, 0).nextState;
   assert.deepEqual(getHitstopForTransition(dartState, afterDart, false), {
-    durationMs: 250,
+    durationMs: 150,
     kind: 'DART',
     flashCells: [],
   });

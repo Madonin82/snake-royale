@@ -234,17 +234,11 @@ export function getHitstopForTransition(
     return prevSnake?.isAlive && !snake.isAlive;
   });
 
-  // Hitstop durations are purely additive: every event on the turn adds
-  // its ms on top of the base beat, so packed turns play in slow-mo.
+  // Hitstop is for dart/death drama only. Token feedback is via the
+  // linger + fly loop (the +N lingers at the pickup cell, flies to the
+  // card, and the counter updates on landing) — token pickups no longer
+  // pause the game. The 550ms base beat runs untouched every step.
   let durationMs = 0;
-
-  // Tokens: 100ms each. Score only increases via tokens (dart deducts
-  // skillPoints, not score), so the score delta is the token count.
-  const tokensEaten = nextState.snakes.reduce((total, snake) => {
-    const prevSnake = prevState.snakes.find(candidate => candidate.id === snake.id);
-    return total + Math.max(0, snake.score - (prevSnake?.score ?? snake.score));
-  }, 0);
-  durationMs += tokensEaten * 100;
 
   // Dart: 150ms.
   const darted = nextState.dartTrail && nextState.dartTrail.length > 0;
