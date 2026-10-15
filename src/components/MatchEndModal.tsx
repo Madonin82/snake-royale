@@ -33,7 +33,9 @@ export const Sparkline: React.FC<{
 }> = ({ p1Scores, p2Scores, scoresBySeat }) => {
   const seatEntries = scoresBySeat && Object.keys(scoresBySeat).length > 0
     ? Object.entries(scoresBySeat)
-    : [['p1', p1Scores], ['p2', p2Scores]] as [string, number[]][];
+    : (p2Scores.length > 0
+      ? [['p1', p1Scores], ['p2', p2Scores]]
+      : [['p1', p1Scores]]) as [string, number[]][];
   const allValues = seatEntries.flatMap(([, scores]) => scores);
   const maxScore = Math.max(1, ...allValues);
   const width = 110;
@@ -151,7 +153,7 @@ export const MatchEndModal: React.FC<MatchEndModalProps> = ({
   turnDecisions = [],
 }) => {
   const p1 = gameState.snakes.find(snake => snake.id === 'p1') ?? gameState.snakes[0]!;
-  const p2 = gameState.snakes.find(snake => snake.id === 'p2') ?? gameState.snakes[1]!;
+  const p2 = gameState.snakes.find(snake => snake.id === 'p2') ?? gameState.snakes[1] ?? null;
   const handleReturn = onReturnToEditor ?? onReturnToLobby;
   const isDraw = gameState.winner === 'DRAW';
   const winnerSnake = gameState.winner && gameState.winner !== 'DRAW'
@@ -488,7 +490,7 @@ export const MatchEndModal: React.FC<MatchEndModalProps> = ({
         {((series && (series.p1 + series.p2 + series.draws) > 0) ||
           (gameState.turnBased && Object.values(gameState.totalThinkTime).some(seconds => seconds > 0))) && (
           <div className="flex flex-wrap items-center justify-center gap-x-3 gap-y-0.5 text-[11px] [@media(max-height:520px)]:text-[10px] font-black bg-[#8BAC0F] border-2 border-[#0F380F] py-1 px-2 shrink-0">
-            {series && (series.p1 + series.p2 + series.draws) > 0 && (
+            {p2 && series && (series.p1 + series.p2 + series.draws) > 0 && (
               <span>
                 🏆 SERIES — {p1.name} {series.p1} · {p2.name} {series.p2}
                 {series.draws > 0 ? ` · DRAWS ${series.draws}` : ''}
