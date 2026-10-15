@@ -58,6 +58,7 @@ export interface TurnLedgerEntry {
   isAutoLock: boolean;
   tokensCollected: number;
   scoreDelta: number;
+  spGained: number;
   terminalResult?: string;
 }
 
@@ -81,6 +82,7 @@ export function computeTurnLedger(
 
       const scoreDelta = prevSnake ? snake.score - prevSnake.score : snake.score;
       const tokensCollected = scoreDelta > 0 ? scoreDelta : 0;
+      const spGained = prevSnake ? (snake.skillPoints ?? 0) - (prevSnake.skillPoints ?? 0) : (snake.skillPoints ?? 0);
 
       let terminalResult: string | undefined = undefined;
       if (!snake.isAlive && prevSnake && prevSnake.isAlive) {
@@ -122,13 +124,51 @@ export function computeTurnLedger(
           isAutoLock: decision ? decision.autoLock : false,
           tokensCollected,
           scoreDelta,
+          spGained,
           terminalResult,
         });
       }
     }
   }
 
-  return ledger.sort((a, b) => a.tick - b.tick);
+  // Aggregate tokens/SP per lock: for each entry with a decision (arrows),
+  // sum tokensCollected and spGained from that tick up to (not including)
+  // the next decision tick for the same seat.
+  const aggregated: TurnLedgerEntry[] = [];
+  const bySeat = new Map<string, TurnLedgerEntry[]>();
+  for (const e of ledger) {
+    if (!bySeat.has(e.seat)) bySeat.set(e.seat, []);
+    bySeat.get(e.seat)!.push(e);
+  }
+  for (const [, entries] of bySeat) {
+    entries.sort((a, b) => a.tick - b.tick);
+    let i = 0;
+    while (i < entries.length) {
+      const e = entries[i];
+      if (e.arrows.length > 0) {
+        let tokens = e.tokensCollected;
+        let sp = e.spGained;
+        let j = i + 1;
+        const keep: TurnLedgerEntry[] = [];
+        while (j < entries.length && entries[j].arrows.length === 0) {
+          tokens += entries[j].tokensCollected;
+          sp += entries[j].spGained;
+          if (entries[j].terminalResult) {
+            keep.push({ ...entries[j], tokensCollected: 0, spGained: 0 });
+          }
+          j++;
+        }
+        aggregated.push({ ...e, tokensCollected: tokens, spGained: sp });
+        aggregated.push(...keep);
+        i = j;
+      } else {
+        aggregated.push(e);
+        i++;
+      }
+    }
+  }
+
+  return aggregated.sort((a, b) => a.tick - b.tick);
 }
 
 export function computeMatchStats(
