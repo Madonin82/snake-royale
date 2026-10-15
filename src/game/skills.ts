@@ -19,7 +19,7 @@ export const SKILLS: Record<SkillId, SkillDefinition> = {
   rattle: {
     id: 'rattle',
     name: 'RATTLE',
-    cost: 2,
+    cost: 1,
     minLength: MIN_RATTLE_LENGTH,
   },
 };

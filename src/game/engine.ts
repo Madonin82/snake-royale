@@ -441,12 +441,15 @@ export function processGameTick(
       snake.direction = snake.queuedDirection;
       snake.queuedDirection = null;
     }
+    // Stunned snakes cannot use their equipped skill this turn.
+    const isStunned = (snake.stunTicks ?? 0) > 0;
     if (snake.pendingSkill && snake.pendingSkill.skillId === 'dart') {
       const dartDir = snake.pendingSkill.direction;
       snake.pendingSkill = null;
       const unlockedNow = canActivateSkill(snake, currentState, effectiveSkillsAvailable) ||
         canActivateSkill(snake, state, effectiveSkillsAvailable);
       if (
+        !isStunned &&
         snake.equippedSkill === 'dart' &&
         dartDir &&
         unlockedNow &&
@@ -460,6 +463,7 @@ export function processGameTick(
       const unlockedNow = canActivateSkill(snake, currentState, effectiveSkillsAvailable) ||
         canActivateSkill(snake, state, effectiveSkillsAvailable);
       if (
+        !isStunned &&
         snake.equippedSkill === 'rattle' &&
         rattleDir &&
         snake.body.length >= 3 &&
@@ -507,6 +511,15 @@ export function processGameTick(
     const movingIndices: number[] = [];
     for (let i = 0; i < snakes.length; i++) {
       if (!snakes[i].isAlive) continue;
+      // Stunned snakes skip their move (stay in place), buffer preserved.
+      if ((snakes[i].stunTicks ?? 0) > 0) {
+        snakes[i].stunTicks = (snakes[i].stunTicks ?? 0) - 1;
+        // Clear the stun zone flash once all stuns have expired.
+        if (!snakes.some(s => (s.stunTicks ?? 0) > 0)) {
+          state.stunZones = undefined;
+        }
+        continue;
+      }
       if (step === 0 || activeDarts.has(snakes[i].id)) {
         movingIndices.push(i);
       }
@@ -529,6 +542,22 @@ export function processGameTick(
             const wallCell = { x: detachedTail.x, y: detachedTail.y };
             state.walls = [...(state.walls ?? []), wallCell];
             state.rattleWalls = [...(state.rattleWalls ?? []), wallCell];
+            // 3x3 stun: opponents with any body segment in the 3x3 centered
+            // on the dropped wall cell are stunned for 1 tick.
+            const zone: Position[] = [];
+            for (let dx = -1; dx <= 1; dx++) {
+              for (let dy = -1; dy <= 1; dy++) {
+                zone.push({ x: wallCell.x + dx, y: wallCell.y + dy });
+              }
+            }
+            state.stunZones = zone;
+            for (const other of snakes) {
+              if (other.id === snakes[idx].id || !other.isAlive) continue;
+              const inZone = other.body.some(seg =>
+                Math.abs(seg.x - wallCell.x) <= 1 && Math.abs(seg.y - wallCell.y) <= 1
+              );
+              if (inZone) other.stunTicks = 1;
+            }
           }
         }
       }

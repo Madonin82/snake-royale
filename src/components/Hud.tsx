@@ -391,6 +391,11 @@ export const Hud: React.FC<HudProps> = ({
               >
                 ⚡{snake.skillPoints ?? 0} SP
               </span>
+              {(snake.stunTicks ?? 0) > 0 && (
+                <span className="text-[9px] px-1 py-0.5 bg-[#FFC107] border border-[#0F380F]/60 font-black tabular-nums leading-none">
+                  STUNNED
+                </span>
+              )}
               {snake.equippedSkill && renderSkillBadge(who, snake.equippedSkill)}
             </div>
           </div>
