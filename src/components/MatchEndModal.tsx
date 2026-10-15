@@ -119,7 +119,7 @@ export const TurnLedgerView: React.FC<{ entries: TurnLedgerEntry[]; matchStats: 
                         <span className="font-black">T{e.tick}</span>
                         <span className="font-bold tracking-widest text-[#306230]">{e.arrows.length > 0 ? e.arrows.join(' ') : '—'}</span>
                         <span className="opacity-95">{e.lockTimeMs > 0 ? `${(e.lockTimeMs / 1000).toFixed(1)}s` : '—'}{e.isAutoLock ? ' [AUTO]' : ''}</span>
-                        <span className="font-bold">{e.tokensCollected > 0 ? `+${e.tokensCollected} 💎` : e.terminalResult || (e.scoreDelta !== 0 ? `${e.scoreDelta > 0 ? '+' : ''}${e.scoreDelta}` : '')}</span>
+                        <span className="font-bold">{e.tokensCollected > 0 ? `+${e.tokensCollected} 💎` : ''}{e.spGained > 0 ? ` +${e.spGained}⚡` : ''}{e.tokensCollected === 0 && e.spGained === 0 ? (e.terminalResult || (e.scoreDelta !== 0 ? `${e.scoreDelta > 0 ? '+' : ''}${e.scoreDelta}` : '')) : ''}</span>
                       </div>
                     ))
                   )}
