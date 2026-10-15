@@ -328,10 +328,10 @@
   font-size: 18px;
   line-height: 1;
   padding: 1px 5px;
-  background-color: #1E3A8A;
-  color: #22D3EE;
-  border: 2px solid #22D3EE;
-  box-shadow: 2px 2px 0px #1E3A8A;
+  background-color: #451A03;
+  color: #FBBF24;
+  border: 2px solid #FBBF24;
+  box-shadow: 2px 2px 0px #451A03;
   will-change: transform, opacity;
 }
 
