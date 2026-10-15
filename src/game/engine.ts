@@ -500,6 +500,15 @@ export function processGameTick(
     }
   }
 
+  // Clear the stun-zone flash once all stuns have expired — including
+  // empty detonations where no snake was in the 3x3 (the step-loop
+  // clear only runs for stunned snakes, so it never fires there).
+  // Detonation sets stunZones at END of tick N, so this start-of-tick
+  // check on tick N+1 only clears zones whose stuns already expired.
+  if (state.stunZones && !snakes.some(s => s.isAlive && (s.stunTicks ?? 0) > 0)) {
+    state.stunZones = undefined;
+  }
+
   const totalSteps = activeDarts.size > 0 ? 3 : 1;
   let totalTokensConsumedCount = 0;
   const dartTrail: Array<{ snakeId: string; cells: Position[] }> = [];
@@ -852,6 +861,12 @@ export function processGameTick(
       }
     }
     state.stunZones = allZones;
+    // Consume the fuse: detonated walls leave rattleWalls and become
+    // plain permanent walls (they stay in state.walls).
+    const detonated = new Set(detonatingWalls.map(w => `${w.x},${w.y}`));
+    state.rattleWalls = (state.rattleWalls ?? []).filter(
+      w => !detonated.has(`${w.x},${w.y}`)
+    );
   }
 
   return { nextState: state, events };

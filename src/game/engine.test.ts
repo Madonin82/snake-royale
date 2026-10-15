@@ -583,8 +583,10 @@ test('rattle detonates after 3-turn fuse, stuns ALL snakes in 3x3 including ratt
   assert.equal(tick3.snakes.find(s => s.id === 'p2')!.stunTicks ?? 0, 0);
 
   // Tick 4: fuse 0 → detonation! p2 stunned (in 3x3), p1 not (outside 3x3)
+  // Wall is consumed: leaves rattleWalls, stays in walls as a plain blocker.
   const { nextState: tick4 } = processGameTick(tick3, settings, 0);
-  assert.equal(tick4.rattleWalls?.[0].fuseTicks, 0);
+  assert.deepEqual(tick4.rattleWalls, []);
+  assert.ok(tick4.walls?.some(w => w.x === 0 && w.y === 4));
   assert.equal(tick4.snakes.find(s => s.id === 'p2')!.stunTicks, 1);
   assert.equal(tick4.snakes.find(s => s.id === 'p1')!.stunTicks ?? 0, 0);
   assert.equal(tick4.stunZones?.length, 9);
@@ -597,8 +599,118 @@ test('rattle detonates after 3-turn fuse, stuns ALL snakes in 3x3 including ratt
   assert.deepEqual(tick5P2.body[0], p2HeadBefore);
   assert.equal(tick5P2.stunTicks, 0);
   assert.equal(tick5.stunZones, undefined);
-  assert.ok(tick5.rattleWalls?.some(w => w.x === 0 && w.y === 4));
+  assert.deepEqual(tick5.rattleWalls, []);
   assert.ok(tick5.walls?.some(w => w.x === 0 && w.y === 4));
+});
+
+test('rattle detonation happens exactly once — no re-detonation on later ticks', () => {
+  const state = createInitialState();
+  const settings = { ...DEFAULT_SETTINGS, skillsAvailable: 'immediate' as const };
+  state.tokens = [];
+  state.skillsAvailable = 'immediate';
+  const p1 = state.snakes.find(snake => snake.id === 'p1')!;
+  p1.body = [{ x: 2, y: 4 }, { x: 1, y: 4 }, { x: 0, y: 4 }];
+  p1.direction = 'RIGHT';
+  p1.equippedSkill = 'rattle';
+  p1.skillPoints = 4;
+  const p2 = state.snakes.find(snake => snake.id === 'p2')!;
+  p2.body = [{ x: 1, y: 5 }, { x: 1, y: 6 }, { x: 1, y: 7 }];
+  p2.direction = 'UP';
+
+  assert.equal(queueSnakeSkill(p1, { skillId: 'rattle', direction: 'UP' }), true);
+  const { nextState: tick1 } = processGameTick(state, settings, 0);
+  // Steer p1 RIGHT so it survives past tick 5 (otherwise p1 runs off the
+  // top edge on tick 5, the death early-return masks any re-detonation).
+  tick1.snakes.find(s => s.id === 'p1')!.direction = 'RIGHT';
+  const { nextState: tick2 } = processGameTick(tick1, settings, 0);
+  const { nextState: tick3 } = processGameTick(tick2, settings, 0);
+  const { nextState: tick4 } = processGameTick(tick3, settings, 0);
+  assert.equal(tick4.snakes.find(s => s.id === 'p2')!.stunTicks, 1);
+  assert.equal(tick4.stunZones?.length, 9);
+  const detonationAt = tick4.detonationAt;
+
+  // Tick 5: stun consumed, zone clears, both snakes alive (no early-return mask).
+  const { nextState: tick5 } = processGameTick(tick4, settings, 0);
+  assert.equal(tick5.snakes.find(s => s.id === 'p1')!.isAlive, true);
+  assert.equal(tick5.snakes.find(s => s.id === 'p2')!.stunTicks, 0);
+  assert.equal(tick5.stunZones, undefined);
+
+  // Tick 6: no re-detonation — stun stays 0, zone stays clear, detonationAt unchanged.
+  const { nextState: tick6 } = processGameTick(tick5, settings, 0);
+  assert.equal(tick6.snakes.find(s => s.id === 'p2')!.stunTicks, 0);
+  assert.equal(tick6.stunZones, undefined);
+  assert.equal(tick6.detonationAt, detonationAt);
+  assert.deepEqual(tick6.rattleWalls, []);
+  assert.ok(tick6.walls?.some(w => w.x === 0 && w.y === 4));
+});
+
+test('rattle detonation with no snake in 3x3 clears the blast zone next tick', () => {
+  const state = createInitialState();
+  const settings = { ...DEFAULT_SETTINGS, skillsAvailable: 'immediate' as const };
+  state.tokens = [];
+  state.skillsAvailable = 'immediate';
+  const p1 = state.snakes.find(snake => snake.id === 'p1')!;
+  p1.body = [{ x: 2, y: 4 }, { x: 1, y: 4 }, { x: 0, y: 4 }];
+  p1.direction = 'RIGHT';
+  p1.equippedSkill = 'rattle';
+  p1.skillPoints = 4;
+  const p2 = state.snakes.find(snake => snake.id === 'p2')!;
+  // p2 far from the 3x3 (x -1..1, y 3..5), moving LEFT along the bottom row.
+  p2.body = [{ x: 7, y: 7 }, { x: 7, y: 6 }, { x: 7, y: 5 }];
+  p2.direction = 'LEFT';
+
+  assert.equal(queueSnakeSkill(p1, { skillId: 'rattle', direction: 'UP' }), true);
+  const { nextState: tick1 } = processGameTick(state, settings, 0);
+  tick1.snakes.find(s => s.id === 'p1')!.direction = 'RIGHT';
+  const { nextState: tick2 } = processGameTick(tick1, settings, 0);
+  const { nextState: tick3 } = processGameTick(tick2, settings, 0);
+
+  // Tick 4: detonation, but nobody in the zone — no snake stunned.
+  const { nextState: tick4 } = processGameTick(tick3, settings, 0);
+  assert.equal(tick4.snakes.find(s => s.id === 'p1')!.stunTicks ?? 0, 0);
+  assert.equal(tick4.snakes.find(s => s.id === 'p2')!.stunTicks ?? 0, 0);
+  assert.equal(tick4.stunZones?.length, 9);
+  assert.ok(tick4.detonationAt);
+  assert.deepEqual(tick4.rattleWalls, []);
+
+  // Tick 5: blast zone clears even though nobody was stunned.
+  const { nextState: tick5 } = processGameTick(tick4, settings, 0);
+  assert.equal(tick5.stunZones, undefined);
+  assert.ok(tick5.walls?.some(w => w.x === 0 && w.y === 4));
+});
+
+test('detonated rattle wall still blocks as a plain wall', () => {
+  const state = createInitialState();
+  const settings = { ...DEFAULT_SETTINGS, skillsAvailable: 'immediate' as const };
+  state.tokens = [];
+  // Wall one tick from detonation, already in both arrays (as a live drop would be).
+  state.rattleWalls = [{ x: 4, y: 4, fuseTicks: 1 }];
+  state.walls = [{ x: 4, y: 4 }];
+  const p1 = state.snakes.find(snake => snake.id === 'p1')!;
+  p1.body = [{ x: 0, y: 0 }, { x: 0, y: 1 }, { x: 0, y: 2 }];
+  p1.direction = 'RIGHT';
+  const p2 = state.snakes.find(snake => snake.id === 'p2')!;
+  // p2 approaches from the right, will be stunned by detonation, then turns into the wall.
+  p2.body = [{ x: 5, y: 5 }, { x: 6, y: 5 }, { x: 7, y: 5 }];
+  p2.direction = 'LEFT';
+
+  // Tick 1: p2 moves to (4,5), detonation stuns it (body in 3x3), wall consumed.
+  const { nextState: tick1 } = processGameTick(state, settings, 0);
+  assert.equal(tick1.snakes.find(s => s.id === 'p2')!.stunTicks, 1);
+  assert.deepEqual(tick1.rattleWalls, []);
+  assert.ok(tick1.walls?.some(w => w.x === 4 && w.y === 4));
+
+  // Tick 2: p2 stunned, stays at (4,5).
+  const { nextState: tick2 } = processGameTick(tick1, settings, 0);
+  assert.equal(tick2.snakes.find(s => s.id === 'p2')!.stunTicks, 0);
+  tick2.snakes.find(s => s.id === 'p2')!.direction = 'UP';
+
+  // Tick 3: p2 moves UP into (4,4) — the detonated wall — and dies to WALL.
+  const { nextState: tick3 } = processGameTick(tick2, settings, 0);
+  const tick3P2 = tick3.snakes.find(s => s.id === 'p2')!;
+  assert.equal(tick3P2.isAlive, false);
+  assert.equal(tick3P2.deathReason, 'WALL');
+  assert.deepEqual(tick3P2.deathPosition, { x: 4, y: 4 });
 });
 
 test('hitting a rattle wall kills both opponents and the placer', () => {
