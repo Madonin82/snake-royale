@@ -1,6 +1,6 @@
 import { CampaignObjective, GameState } from '../types/game';
 
-const OBJECTIVE_PATTERN = /^(survival|collect|first_to|survive|win_under|shutout|outscore)(?::(\d+))?$/i;
+const OBJECTIVE_PATTERN = /^(survival|collect|first_to_sp|first_to|survive|win_under|shutout|outscore)(?::(\d+))?$/i;
 
 export function parseCampaignObjective(text: string): CampaignObjective | null {
   const match = OBJECTIVE_PATTERN.exec(text.trim());
@@ -20,13 +20,16 @@ export function createCampaignObjectives(
   bonusTexts: string[],
   p1Score: number,
   opponentScore: number,
+  p1Sp: number = 0,
+  opponentSp: number = 0,
 ): NonNullable<GameState['campaignObjectives']> {
   const primary = parseCampaignObjective(primaryText);
   const bonus = bonusTexts.map(parseCampaignObjective);
   const firstToResults = [primary, ...bonus].map(objective => {
-    if (objective?.kind !== 'first_to') return null;
-    const p1Reached = p1Score >= objective.target;
-    const opponentReached = opponentScore >= objective.target;
+    if (objective?.kind !== 'first_to' && objective?.kind !== 'first_to_sp') return null;
+    const isSp = objective.kind === 'first_to_sp';
+    const p1Reached = (isSp ? p1Sp : p1Score) >= objective.target;
+    const opponentReached = (isSp ? opponentSp : opponentScore) >= objective.target;
     // In the current two-snake campaign, opponent means P2. For future matches,
     // this comparison uses the highest-scoring other snake.
     return p1Reached && opponentReached ? 'tie' : p1Reached ? 'p1' : opponentReached ? 'opponent' : null;
@@ -49,11 +52,12 @@ export function recordFirstToResults(state: GameState): void {
   if (!p1) return;
 
   [objectives.primary, ...objectives.bonus].forEach((objective, index) => {
-    if (!objective || objective.kind !== 'first_to' || objectives.firstToResults[index]) return;
+    if (!objective || (objective.kind !== 'first_to' && objective.kind !== 'first_to_sp') || objectives.firstToResults[index]) return;
     // In the current two-snake campaign, opponent means P2. For future matches,
     // the highest score across other snakes determines the opponent threshold.
-    const p1Reached = p1.score >= objective.target;
-    const opponentReached = opponents.some(snake => snake.score >= objective.target);
+    const isSp = objective.kind === 'first_to_sp';
+    const p1Reached = (isSp ? (p1.spEarned ?? 0) : p1.score) >= objective.target;
+    const opponentReached = opponents.some(snake => (isSp ? (snake.spEarned ?? 0) : snake.score) >= objective.target);
     if (p1Reached && opponentReached) objectives.firstToResults[index] = 'tie';
     else if (p1Reached) objectives.firstToResults[index] = 'p1';
     else if (opponentReached) objectives.firstToResults[index] = 'opponent';
@@ -88,6 +92,7 @@ export function isCampaignObjectiveComplete(
     case 'collect':
       return (state.campaignObjectives?.p1TokensCollected ?? 0) >= objective.target;
     case 'first_to':
+    case 'first_to_sp':
       return state.campaignObjectives?.firstToResults[objectiveIndex] === 'p1';
     case 'survive':
       return state.campaignObjectives?.surviveResults[objectiveIndex] === true;
@@ -125,6 +130,13 @@ export function getCampaignObjectiveProgress(
         .filter(snake => snake.id !== 'p1')
         .map(snake => snake.score));
       return `First to ${objective.target}: P1 ${p1Score}, OP ${opponentScore}`;
+    }
+    case 'first_to_sp': {
+      const p1Sp = state.snakes.find(snake => snake.id === 'p1')?.spEarned ?? 0;
+      const opponentSp = Math.max(0, ...state.snakes
+        .filter(snake => snake.id !== 'p1')
+        .map(snake => snake.spEarned ?? 0));
+      return `First to ${objective.target} SP: P1 ${p1Sp}, OP ${opponentSp}`;
     }
     case 'survive':
       return `Turns: ${state.campaignObjectives?.surviveResults[objectiveIndex]

@@ -3,6 +3,7 @@ import test from 'node:test';
 import { createInitialState } from './engine';
 import {
   createCampaignObjectives,
+  getCampaignObjectiveProgress,
   isCampaignObjectiveComplete,
   parseCampaignObjective,
   recordFirstToResults,
@@ -45,6 +46,42 @@ test('tracks first_to outcomes and handles simultaneous thresholds as a tie', ()
   assert.deepEqual(state.campaignObjectives.firstToResults, ['tie', 'p1']);
   assert.equal(isCampaignObjectiveComplete(state.campaignObjectives.primary!, state, 0), false);
   assert.equal(isCampaignObjectiveComplete(state.campaignObjectives.bonus[0]!, state, 1), true);
+});
+
+test('tracks first_to_sp outcomes on spEarned and handles simultaneous thresholds as a tie', () => {
+  const state = createInitialState();
+  state.campaignObjectives = createCampaignObjectives('first_to_sp:5', ['first_to_sp:3'], 0, 0, 0, 0);
+  state.snakes[0].spEarned = 3;
+  recordFirstToResults(state);
+  assert.deepEqual(state.campaignObjectives.firstToResults, [null, 'p1']);
+
+  state.snakes[1].spEarned = 5;
+  state.snakes[0].spEarned = 5;
+  recordFirstToResults(state);
+  assert.deepEqual(state.campaignObjectives.firstToResults, ['tie', 'p1']);
+  assert.equal(isCampaignObjectiveComplete(state.campaignObjectives.primary!, state, 0), false);
+  assert.equal(isCampaignObjectiveComplete(state.campaignObjectives.bonus[0]!, state, 1), true);
+});
+
+test('parses first_to_sp and does not confuse it with first_to', () => {
+  assert.deepEqual(parseCampaignObjective('FIRST_TO_SP:10'), {
+    text: 'FIRST_TO_SP:10',
+    kind: 'first_to_sp',
+    target: 10,
+  });
+  assert.equal(parseCampaignObjective('first_to_sp:0'), null);
+  assert.deepEqual(parseCampaignObjective('FIRST_TO:10'), {
+    text: 'FIRST_TO:10',
+    kind: 'first_to',
+    target: 10,
+  });
+});
+
+test('first_to_sp progress shows SP values', () => {
+  const state = createInitialState();
+  state.snakes[0].spEarned = 3;
+  const objective = parseCampaignObjective('first_to_sp:10')!;
+  assert.equal(getCampaignObjectiveProgress(objective, state, 0), 'First to 10 SP: P1 3, OP 0');
 });
 
 test('evaluates end-of-match objectives against P1 and the highest-scoring opponent', () => {

@@ -25,6 +25,7 @@ const OBJECTIVE_OPTIONS: Array<{
   { kind: 'survival', label: 'SURVIVAL (LAST LIVING PLAYER WINS)', hasParam: false, defaultTarget: 0 },
   { kind: 'collect', label: 'COLLECT N TOKENS', hasParam: true, defaultTarget: 5 },
   { kind: 'first_to', label: 'FIRST TO N TOKENS', hasParam: true, defaultTarget: 10 },
+  { kind: 'first_to_sp', label: 'FIRST TO N SP', hasParam: true, defaultTarget: 10 },
   { kind: 'survive', label: 'SURVIVE N TURNS', hasParam: true, defaultTarget: 30 },
   { kind: 'win_under', label: 'WIN IN UNDER N TURNS', hasParam: true, defaultTarget: 40 },
   { kind: 'shutout', label: 'SHUTOUT (NO PARAMETER)', hasParam: false, defaultTarget: 0 },
