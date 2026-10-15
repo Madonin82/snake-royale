@@ -938,6 +938,10 @@ const GameApp: React.FC<{ campaignPlaytestLevel: CampaignLevel | null }> = ({ ca
       clearTimeout(fatalMoveTimerRef.current);
       fatalMoveTimerRef.current = null;
     }
+    // No timers pending means no chain pending — otherwise a quit
+    // mid-execution would leave the guard set forever and block the
+    // next match's tick-change kickoff.
+    chainPendingRef.current = false;
     hitstopUntilRef.current = 0;
     activeHitstopRef.current = null;
     setActiveHitstop(null);
