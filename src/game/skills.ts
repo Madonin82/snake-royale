@@ -64,18 +64,32 @@ export function canActivateSkill(
 }
 
 /**
+ * Generic queue-time escrow: can this snake afford one more use of the
+ * given skill, given how many are already queued? Reads cost from SKILLS —
+ * data-driven, no per-skill branches. Adding a skill with a different cost
+ * just works: add it to SKILLS with its cost, no UI changes needed.
+ */
+export function canAffordQueuedSkill(
+  skillPoints: number | undefined,
+  skillId: SkillId,
+  queuedCount: number,
+): boolean {
+  const points = skillPoints ?? 0;
+  const cost = SKILLS[skillId].cost;
+  return points - cost * queuedCount >= cost;
+}
+
+/**
  * Queue-time escrow: can this snake afford one more dart given the darts
  * already queued? Reserves 2 points per queued dart. Derive the reserved count
  * from the buffer — never a separate counter (it would drift from undo/clear).
  */
 export function canAffordQueuedDart(skillPoints: number | undefined, queuedDarts: number): boolean {
-  const points = skillPoints ?? 0;
-  return points - SKILLS.dart.cost * queuedDarts >= SKILLS.dart.cost;
+  return canAffordQueuedSkill(skillPoints, 'dart', queuedDarts);
 }
 
 export function canAffordQueuedRattle(skillPoints: number | undefined, queuedSkills: number): boolean {
-  const points = skillPoints ?? 0;
-  return points - SKILLS.rattle.cost * queuedSkills >= SKILLS.rattle.cost;
+  return canAffordQueuedSkill(skillPoints, 'rattle', queuedSkills);
 }
 
 export function canQueueRattleWithLength(bodyLength: number | undefined, queuedRattles: number = 0): boolean {

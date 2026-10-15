@@ -14,7 +14,7 @@ import {
   queueSnakeDirection,
   queueSnakeSkill,
 } from './game/engine';
-import { canActivateSkill, canAffordQueuedDart, canAffordQueuedRattle, canQueueRattleWithLength, isValidDartDirection, SKILLS } from './game/skills';
+import { canActivateSkill, canAffordQueuedSkill, canQueueRattleWithLength, isValidDartDirection, SKILLS } from './game/skills';
 import { calculateAIAction, calculateAIMove } from './game/ai';
 import { cloneGameState, toCompactGameState } from './game/aiBridge';
 import { shouldApplyRtdbBridgeCommand } from './game/aiBridgeRtdb';
@@ -903,8 +903,13 @@ const GameApp: React.FC<{ campaignPlaytestLevel: CampaignLevel | null }> = ({ ca
         soundEngine.playDenied();
         return;
       }
-      const queuedSkills = buf.filter(entry => typeof entry !== 'string' && (entry.type === 'dart' || entry.type === 'rattle')).length;
-      if (!canAffordQueuedDart(snake.skillPoints, queuedSkills)) {
+      const skillId = snake.equippedSkill;
+      if (!skillId) {
+        soundEngine.playDenied();
+        return;
+      }
+      const queuedSkills = buf.filter(entry => typeof entry !== 'string' && entry.type === skillId).length;
+      if (!canAffordQueuedSkill(snake.skillPoints, skillId, queuedSkills)) {
         soundEngine.playDenied();
         return;
       }
@@ -942,8 +947,10 @@ const GameApp: React.FC<{ campaignPlaytestLevel: CampaignLevel | null }> = ({ ca
     }
     const buf = moveBuffers[seat] ?? [];
     if (buf.length >= snake.body.length) return false;
-    const queuedSkills = buf.filter(e => typeof e !== 'string' && (e.type === 'dart' || e.type === 'rattle')).length;
-    if (!canAffordQueuedDart(snake.skillPoints, queuedSkills)) return false;
+    const skillId = snake.equippedSkill;
+    if (!skillId) return false;
+    const queued = buf.filter(e => typeof e !== 'string' && e.type === skillId).length;
+    if (!canAffordQueuedSkill(snake.skillPoints, skillId, queued)) return false;
     if (snake.equippedSkill === 'rattle') {
       const queuedRattles = buf.filter(e => typeof e !== 'string' && e.type === 'rattle').length;
       if (!canQueueRattleWithLength(snake.body.length, queuedRattles)) return false;
@@ -1684,10 +1691,8 @@ const GameApp: React.FC<{ campaignPlaytestLevel: CampaignLevel | null }> = ({ ca
         // Item 3d: escrow — direction first, then affordability. A skill rejected
         // for illegal direction consumes no escrow. Reserved count is derived
         // from the buffer, so undo/clear refunds are automatic.
-        const queuedSkills = buf.filter(entry => typeof entry !== 'string' && (entry.type === 'dart' || entry.type === 'rattle')).length;
-        const canAfford = skillId === 'rattle'
-          ? canAffordQueuedRattle(currentSnake.skillPoints, queuedSkills)
-          : canAffordQueuedDart(currentSnake.skillPoints, queuedSkills);
+        const queuedSkills = buf.filter(entry => typeof entry !== 'string' && entry.type === skillId).length;
+        const canAfford = canAffordQueuedSkill(currentSnake.skillPoints, skillId, queuedSkills);
         if (!canAfford) {
           soundEngine.playDenied();
           return false;
@@ -3403,8 +3408,10 @@ const GameApp: React.FC<{ campaignPlaytestLevel: CampaignLevel | null }> = ({ ca
                       }
                       if (settings.turnBased && snake) {
                         const buf = moveBuffers[seat] ?? [];
-                        const queuedSkills = buf.filter(e => e.type === 'dart' || e.type === 'rattle').length;
-                        if (!canAffordQueuedDart(snake.skillPoints, queuedSkills)) return false;
+                        const skillId = snake.equippedSkill;
+                        if (!skillId) return false;
+                        const queued = buf.filter(e => e.type === skillId).length;
+                        if (!canAffordQueuedSkill(snake.skillPoints, skillId, queued)) return false;
                         if (snake.equippedSkill === 'rattle') {
                           const queuedRattles = buf.filter(e => e.type === 'rattle').length;
                           if (!canQueueRattleWithLength(snake.body.length, queuedRattles)) return false;
