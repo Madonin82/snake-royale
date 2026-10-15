@@ -1,4 +1,4 @@
-import { Direction, GamePhase, GameSettings, GameState, PendingSkill, Position, Snake } from '../types/game';
+import { Direction, GamePhase, GameSettings, GameState, PendingSkill, Position, RattleWall, Snake } from '../types/game';
 import { soundEngine } from '../audio/soundEngine';
 import { createInitialThinkTimeValues } from './thinkTime';
 import { recordFirstToResults, recordSurviveResults } from './objectives';
@@ -218,7 +218,7 @@ export function queueSnakeSkill(snake: Snake, skill: PendingSkill | null): boole
 
 export interface HitstopInfo {
   durationMs: number;
-  kind: 'TOKEN' | 'DEATH' | 'BOSS_DEATH' | 'DART';
+  kind: 'TOKEN' | 'DEATH' | 'BOSS_DEATH' | 'DART' | 'DETONATION';
   flashCells: Position[];
 }
 
@@ -239,6 +239,11 @@ export function getHitstopForTransition(
   // card, and the counter updates on landing) — token pickups no longer
   // pause the game. The 550ms base beat runs untouched every step.
   let durationMs = 0;
+
+  // Rattle detonation: 300ms. The 3-phase blast visual (red → white → amber)
+  // plays during this hitstop.
+  const detonated = nextState.detonationAt && nextState.detonationAt !== prevState.detonationAt;
+  if (detonated) durationMs += 300;
 
   // Dart: 150ms.
   const darted = nextState.dartTrail && nextState.dartTrail.length > 0;
@@ -267,6 +272,8 @@ export function getHitstopForTransition(
   if (newlyDead.length > 0) {
     const bossDead = isCampaign && newlyDead.some(snake => snake.id !== 'p1');
     kind = bossDead ? 'BOSS_DEATH' : 'DEATH';
+  } else if (detonated) {
+    kind = 'DETONATION';
   } else if (darted) {
     kind = 'DART';
   }
@@ -481,6 +488,18 @@ export function processGameTick(
     (state.walls?.some(wall => wall.x === position.x && wall.y === position.y) ?? false) ||
     (state.rattleWalls?.some(wall => wall.x === position.x && wall.y === position.y) ?? false);
 
+  // Rattle fuse: decrement at START of tick (so wall shows 3 on drop turn,
+  // 2 next turn, 1 next turn, 0 on detonation turn). Collect walls that
+  // hit 0 — detonation (stun) is applied at END of tick so it affects
+  // the NEXT turn, not the current one.
+  const detonatingWalls: RattleWall[] = [];
+  if (state.rattleWalls && state.rattleWalls.length > 0) {
+    for (const wall of state.rattleWalls) {
+      wall.fuseTicks -= 1;
+      if (wall.fuseTicks <= 0) detonatingWalls.push(wall);
+    }
+  }
+
   const totalSteps = activeDarts.size > 0 ? 3 : 1;
   let totalTokensConsumedCount = 0;
   const dartTrail: Array<{ snakeId: string; cells: Position[] }> = [];
@@ -539,25 +558,10 @@ export function processGameTick(
           snakes[idx].direction = rattleDir;
           const detachedTail = snakes[idx].body.pop();
           if (detachedTail) {
-            const wallCell = { x: detachedTail.x, y: detachedTail.y };
-            state.walls = [...(state.walls ?? []), wallCell];
+            const wallCell = { x: detachedTail.x, y: detachedTail.y, fuseTicks: 3 };
+            state.walls = [...(state.walls ?? []), { x: wallCell.x, y: wallCell.y }];
             state.rattleWalls = [...(state.rattleWalls ?? []), wallCell];
-            // 3x3 stun: opponents with any body segment in the 3x3 centered
-            // on the dropped wall cell are stunned for 1 tick.
-            const zone: Position[] = [];
-            for (let dx = -1; dx <= 1; dx++) {
-              for (let dy = -1; dy <= 1; dy++) {
-                zone.push({ x: wallCell.x + dx, y: wallCell.y + dy });
-              }
-            }
-            state.stunZones = zone;
-            for (const other of snakes) {
-              if (other.id === snakes[idx].id || !other.isAlive) continue;
-              const inZone = other.body.some(seg =>
-                Math.abs(seg.x - wallCell.x) <= 1 && Math.abs(seg.y - wallCell.y) <= 1
-              );
-              if (inZone) other.stunTicks = 1;
-            }
+            // No immediate stun — the wall detonates when its fuse hits 0.
           }
         }
       }
@@ -823,6 +827,31 @@ export function processGameTick(
       const newTokens = spawnTokens(state.round, settings.gridSize, state.ringInset, snakes, [], state.walls);
       state.tokens.push(...newTokens);
     }
+  }
+
+  // Rattle detonation: apply stun for walls that hit 0 this tick.
+  // Runs AFTER the step loop so the stun applies to the NEXT turn.
+  // Iterate ALL zero-fuse walls (two players can rattle the same turn,
+  // so two walls can detonate simultaneously). Each detonation stuns ALL
+  // snakes in its 3x3 — including the rattler. No immunity.
+  if (detonatingWalls.length > 0) {
+    state.detonationAt = Date.now();
+    const allZones: Position[] = [];
+    for (const wall of detonatingWalls) {
+      for (let dx = -1; dx <= 1; dx++) {
+        for (let dy = -1; dy <= 1; dy++) {
+          allZones.push({ x: wall.x + dx, y: wall.y + dy });
+        }
+      }
+      for (const snake of snakes) {
+        if (!snake.isAlive) continue;
+        const inZone = snake.body.some(seg =>
+          Math.abs(seg.x - wall.x) <= 1 && Math.abs(seg.y - wall.y) <= 1
+        );
+        if (inZone) snake.stunTicks = 1;
+      }
+    }
+    state.stunZones = allZones;
   }
 
   return { nextState: state, events };

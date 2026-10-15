@@ -1,4 +1,4 @@
-import type { GameState, Position, Snake } from '../types/game';
+import type { GameState, Position, RattleWall, Snake } from '../types/game';
 
 /**
  * RTDB does not round-trip arrays faithfully:
@@ -16,6 +16,18 @@ function asPositionArray(value: unknown): Position[] {
   if (Array.isArray(value)) return value as Position[];
   if (value && typeof value === 'object') {
     const record = value as Record<string, Position>;
+    return Object.keys(record)
+      .filter(k => /^\d+$/.test(k))
+      .sort((a, b) => Number(a) - Number(b))
+      .map(k => record[k]);
+  }
+  return [];
+}
+
+function asRattleWallArray(value: unknown): RattleWall[] {
+  if (Array.isArray(value)) return value as RattleWall[];
+  if (value && typeof value === 'object') {
+    const record = value as Record<string, RattleWall>;
     return Object.keys(record)
       .filter(k => /^\d+$/.test(k))
       .sort((a, b) => Number(a) - Number(b))
@@ -53,7 +65,7 @@ export function normalizeGameState(state: GameState): GameState {
     ...state,
     tokens: asPositionArray((state as GameState).tokens),
     ...(state.walls === undefined ? {} : { walls: asPositionArray(state.walls) }),
-    ...(state.rattleWalls === undefined ? {} : { rattleWalls: asPositionArray(state.rattleWalls) }),
+    ...(state.rattleWalls === undefined ? {} : { rattleWalls: asRattleWallArray(state.rattleWalls) }),
     snakes: snakes.map((snake, index) => ({
       ...snake,
       id: snake.id || `p${index + 1}`,
