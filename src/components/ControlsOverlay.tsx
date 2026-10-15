@@ -169,7 +169,6 @@ export const ControlsOverlay: React.FC<ControlsOverlayProps> = ({
             </>
           )}
         </span>
-        {locked && <span className="shrink-0 bg-[#0F380F] text-[#9BBC0F] px-1 py-0.5 text-[9px] leading-none">LOCKED</span>}
       </div>
       {localTwoPlayer ? (
         <button
