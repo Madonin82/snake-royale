@@ -99,6 +99,7 @@ const DEFAULT_LEVEL: CampaignLevel = {
   },
   objectives: {
     primary: 'SURVIVAL',
+    required: [],
     bonus: [],
   },
 };
@@ -123,6 +124,8 @@ export const LevelEditor: React.FC = () => {
   levelRef.current = level;
   const [activeTool, setActiveTool] = useState<Tool>('WALL');
   const [isMouseDown, setIsMouseDown] = useState(false);
+  const [requiredDraftKind, setRequiredDraftKind] = useState<ObjectiveKind>('first_to');
+  const [requiredDraftTarget, setRequiredDraftTarget] = useState<number>(10);
   const [bonusDraftKind, setBonusDraftKind] = useState<ObjectiveKind>('first_to');
   const [bonusDraftTarget, setBonusDraftTarget] = useState<number>(10);
   const [statusMessage, setStatusMessage] = useState<string>('READY');
@@ -144,6 +147,27 @@ export const LevelEditor: React.FC = () => {
       objectives: {
         ...prev.objectives,
         primary: formatted,
+      },
+    }));
+  };
+
+  const handleAddRequiredObjective = () => {
+    const formatted = formatObjectiveString(requiredDraftKind, requiredDraftTarget);
+    setLevel(prev => ({
+      ...prev,
+      objectives: {
+        ...prev.objectives,
+        required: [...(prev.objectives.required ?? []), formatted],
+      },
+    }));
+  };
+
+  const handleRemoveRequiredObjective = (removeIndex: number) => {
+    setLevel(prev => ({
+      ...prev,
+      objectives: {
+        ...prev.objectives,
+        required: (prev.objectives.required ?? []).filter((_, idx) => idx !== removeIndex),
       },
     }));
   };
@@ -438,6 +462,11 @@ export const LevelEditor: React.FC = () => {
           ...parsed,
           spawns: nextSpawns,
           tokens: { ...parsed.tokens, mode: parsed.tokens.mode ?? 'ESCALATING' },
+          objectives: {
+            ...parsed.objectives,
+            required: parsed.objectives.required ?? [],
+            bonus: parsed.objectives.bonus ?? [],
+          },
         };
         levelRef.current = nextLevel;
         setLevel(nextLevel);
@@ -1086,6 +1115,73 @@ export const LevelEditor: React.FC = () => {
               {primaryParts.kind === 'survival' && (
                 <div className="text-[9px] font-bold text-[#306230] leading-snug">
                   Last living player wins. If remaining snakes die on the same turn, tiebreak rules (skill points, then length) decide the winner.
+                </div>
+              )}
+            </div>
+
+            <div className="space-y-2">
+              <div className="flex items-center justify-between">
+                <label className="block font-black">REQUIRED OBJECTIVES:</label>
+                <span className="text-[10px] font-bold text-[#306230]">
+                  DRAFT: {formatObjectiveString(requiredDraftKind, requiredDraftTarget)}
+                </span>
+              </div>
+              <div className="flex gap-2">
+                <select
+                  value={requiredDraftKind}
+                  onChange={(e) => {
+                    const nextKind = e.target.value as ObjectiveKind;
+                    const opt = OBJECTIVE_OPTIONS.find(o => o.kind === nextKind);
+                    setRequiredDraftKind(nextKind);
+                    if (opt?.hasParam) {
+                      setRequiredDraftTarget(opt.defaultTarget);
+                    }
+                  }}
+                  className="flex-1 bg-[#9BBC0F] border-2 border-[#0F380F] px-2 py-1 font-mono font-bold text-[#0F380F] outline-none cursor-pointer"
+                >
+                  {OBJECTIVE_OPTIONS.map(opt => (
+                    <option key={opt.kind} value={opt.kind}>{opt.label}</option>
+                  ))}
+                </select>
+                {requiredDraftKind !== 'shutout' && requiredDraftKind !== 'survival' && (
+                  <input
+                    type="number"
+                    min="1"
+                    max="999"
+                    value={requiredDraftTarget}
+                    onChange={(e) => setRequiredDraftTarget(Math.max(1, parseInt(e.target.value) || 1))}
+                    className="w-16 bg-[#9BBC0F] border-2 border-[#0F380F] px-2 py-1 font-mono font-bold text-[#0F380F] outline-none"
+                  />
+                )}
+                <button
+                  type="button"
+                  onClick={handleAddRequiredObjective}
+                  className="px-2.5 py-1 bg-[#0F380F] text-[#9BBC0F] font-black border-2 border-[#0F380F] hover:bg-[#306230] shrink-0"
+                >
+                  + ADD REQUIRED
+                </button>
+              </div>
+              {(level.objectives.required ?? []).length === 0 ? (
+                <div className="text-[10px] font-bold text-[#306230] border border-[#0F380F] bg-[#9BBC0F]/50 px-2 py-1.5">
+                  NO REQUIRED OBJECTIVES CONFIGURED.
+                </div>
+              ) : (
+                <div className="space-y-1">
+                  {(level.objectives.required ?? []).map((reqStr, idx) => (
+                    <div
+                      key={`${reqStr}-${idx}`}
+                      className="flex items-center justify-between bg-[#9BBC0F] border-2 border-[#0F380F] px-2 py-1"
+                    >
+                      <span className="font-mono font-black text-[#0F380F]">{reqStr}</span>
+                      <button
+                        type="button"
+                        onClick={() => handleRemoveRequiredObjective(idx)}
+                        className="px-1.5 py-0.5 bg-[#0F380F] text-[#9BBC0F] text-[10px] font-black hover:bg-[#8B1E0F] hover:text-white"
+                      >
+                        ✕
+                      </button>
+                    </div>
+                  ))}
                 </div>
               )}
             </div>

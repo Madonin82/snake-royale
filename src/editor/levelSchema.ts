@@ -45,6 +45,7 @@ export interface CampaignLevel {
     // Objective strings use "collect:N", "first_to:N", "survive:N",
     // "win_under:N", "shutout", or "outscore:N" (for example "collect:5").
     primary: string;
+    required: string[];
     bonus: string[];
   };
 }

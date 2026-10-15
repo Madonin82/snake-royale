@@ -102,6 +102,7 @@ export interface GameState {
   };
   campaignObjectives?: {
     primary: CampaignObjective | null;
+    required: (CampaignObjective | null)[];
     bonus: (CampaignObjective | null)[];
     p1TokensCollected: number;
     firstToResults: Array<'p1' | 'opponent' | 'tie' | null>;

@@ -57,7 +57,7 @@ export const Hud: React.FC<HudProps> = ({
   const isMultiCardSide = gameState.snakes.length > 2;
   const { left: leftSnakes, right: rightSnakes } = splitPlayersTwoPerSide(gameState.snakes);
   const objectiveList = gameState.campaignObjectives
-    ? [gameState.campaignObjectives.primary, ...gameState.campaignObjectives.bonus]
+    ? [gameState.campaignObjectives.primary, ...(gameState.campaignObjectives.required ?? []), ...gameState.campaignObjectives.bonus]
         .map((objective, index) => ({ objective, index }))
         .filter((item): item is { objective: NonNullable<typeof item.objective>; index: number } => item.objective !== null)
     : [];

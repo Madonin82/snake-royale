@@ -63,6 +63,7 @@ export const ControlsOverlay: React.FC<ControlsOverlayProps> = ({
           <ArrowRight className="w-6 h-6" />
         </button>
       </div>
+
         {/* Touch buttons in a diamond cluster: Y left, X top, A right, B bottom */}
         <div className="relative w-36 h-36 shrink-0">
           <button

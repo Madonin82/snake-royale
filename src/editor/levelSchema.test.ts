@@ -47,6 +47,7 @@ describe('CampaignLevel Schema', () => {
       },
       objectives: {
         primary: 'survive:30',
+        required: ['collect:3'],
         bonus: ['collect:5', 'shutout'],
       },
     };
@@ -70,6 +71,8 @@ describe('CampaignLevel Schema', () => {
     assert.strictEqual(parsed.phases.raceTurns, 50);
     assert.strictEqual(parsed.phases.shrinkEveryTurns, 8);
     assert.strictEqual(parsed.objectives.primary, 'survive:30');
+    assert.strictEqual(parsed.objectives.required.length, 1);
+    assert.strictEqual(parsed.objectives.required[0], 'collect:3');
     assert.strictEqual(parsed.objectives.bonus.length, 2);
   });
 });

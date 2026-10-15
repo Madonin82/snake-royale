@@ -22,10 +22,13 @@ export function createCampaignObjectives(
   opponentScore: number,
   p1Sp: number = 0,
   opponentSp: number = 0,
+  requiredTexts: string[] = [],
 ): NonNullable<GameState['campaignObjectives']> {
   const primary = parseCampaignObjective(primaryText);
-  const bonus = bonusTexts.map(parseCampaignObjective);
-  const firstToResults = [primary, ...bonus].map(objective => {
+  const required = (requiredTexts ?? []).map(parseCampaignObjective);
+  const bonus = (bonusTexts ?? []).map(parseCampaignObjective);
+  const allObjectives = [primary, ...required, ...bonus];
+  const firstToResults = allObjectives.map(objective => {
     if (objective?.kind !== 'first_to' && objective?.kind !== 'first_to_sp') return null;
     const isSp = objective.kind === 'first_to_sp';
     const p1Reached = (isSp ? p1Sp : p1Score) >= objective.target;
@@ -37,10 +40,11 @@ export function createCampaignObjectives(
 
   return {
     primary,
+    required,
     bonus,
     p1TokensCollected: 0,
     firstToResults,
-    surviveResults: [primary, ...bonus].map(() => false),
+    surviveResults: allObjectives.map(() => false),
   };
 }
 
@@ -51,7 +55,7 @@ export function recordFirstToResults(state: GameState): void {
   const opponents = state.snakes.filter(snake => snake.id !== 'p1');
   if (!p1) return;
 
-  [objectives.primary, ...objectives.bonus].forEach((objective, index) => {
+  [objectives.primary, ...(objectives.required ?? []), ...objectives.bonus].forEach((objective, index) => {
     if (!objective || (objective.kind !== 'first_to' && objective.kind !== 'first_to_sp') || objectives.firstToResults[index]) return;
     // In the current two-snake campaign, opponent means P2. For future matches,
     // the highest score across other snakes determines the opponent threshold.
@@ -69,7 +73,7 @@ export function recordSurviveResults(state: GameState): void {
   const p1 = state.snakes.find(snake => snake.id === 'p1');
   if (!objectives || !p1?.isAlive) return;
 
-  [objectives.primary, ...objectives.bonus].forEach((objective, index) => {
+  [objectives.primary, ...(objectives.required ?? []), ...objectives.bonus].forEach((objective, index) => {
     if (objective?.kind === 'survive' && state.tick >= objective.target) {
       objectives.surviveResults[index] = true;
     }

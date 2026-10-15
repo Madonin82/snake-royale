@@ -37,6 +37,7 @@ const createLevel = (): CampaignLevel => ({
   },
   objectives: {
     primary: 'TEST',
+    required: [],
     bonus: [],
   },
 });
@@ -202,6 +203,27 @@ test('campaign playtest tracks objective token collection during gameplay', () =
 
   assert.equal(state.campaignObjectives?.p1TokensCollected, 1);
   assert.equal(isCampaignObjectiveComplete(state.campaignObjectives!.primary!, state, 0), true);
+});
+
+test('campaign playtest initializes required objectives alongside primary and bonus', () => {
+  const level = createLevel();
+  level.objectives.primary = 'collect:10';
+  level.objectives.required = ['survive:20', 'first_to:5'];
+  level.objectives.bonus = ['shutout'];
+
+  const state = createCampaignPlaytestState(level);
+  assert.equal(state.campaignObjectives?.primary?.kind, 'collect');
+  assert.equal(state.campaignObjectives?.primary?.target, 10);
+  assert.equal(state.campaignObjectives?.required.length, 2);
+  assert.equal(state.campaignObjectives?.required[0]?.kind, 'survive');
+  assert.equal(state.campaignObjectives?.required[0]?.target, 20);
+  assert.equal(state.campaignObjectives?.required[1]?.kind, 'first_to');
+  assert.equal(state.campaignObjectives?.required[1]?.target, 5);
+  assert.equal(state.campaignObjectives?.bonus.length, 1);
+  assert.equal(state.campaignObjectives?.bonus[0]?.kind, 'shutout');
+  // Order of firstToResults and surviveResults is [primary, ...required, ...bonus]
+  assert.equal(state.campaignObjectives?.firstToResults.length, 4);
+  assert.equal(state.campaignObjectives?.surviveResults.length, 4);
 });
 
 test('campaign playtest spawns the configured count and safely skips unavailable cells', () => {

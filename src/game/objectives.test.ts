@@ -134,3 +134,59 @@ test('survival objective completes when P1 is the winner (last living player or 
   assert.equal(isCampaignObjectiveComplete(state.campaignObjectives.primary!, state, 0), false);
 });
 
+test('createCampaignObjectives orders firstToResults and surviveResults as [primary, ...required, ...bonus]', () => {
+  const objectives = createCampaignObjectives(
+    'collect:10',
+    ['first_to:8'],
+    0,
+    0,
+    0,
+    0,
+    ['survive:20', 'first_to:5'],
+  );
+
+  assert.equal(objectives.primary?.kind, 'collect');
+  assert.equal(objectives.required.length, 2);
+  assert.equal(objectives.required[0]?.kind, 'survive');
+  assert.equal(objectives.required[1]?.kind, 'first_to');
+  assert.equal(objectives.bonus.length, 1);
+  assert.equal(objectives.bonus[0]?.kind, 'first_to');
+
+  // [primary (collect:10), required[0] (survive:20), required[1] (first_to:5), bonus[0] (first_to:8)]
+  assert.equal(objectives.firstToResults.length, 4);
+  assert.equal(objectives.firstToResults[0], null); // collect is not first_to
+  assert.equal(objectives.firstToResults[1], null); // survive is not first_to
+  assert.equal(objectives.firstToResults[2], null); // first_to:5
+  assert.equal(objectives.firstToResults[3], null); // first_to:8
+
+  assert.equal(objectives.surviveResults.length, 4);
+  assert.deepEqual(objectives.surviveResults, [false, false, false, false]);
+});
+
+test('recordFirstToResults and recordSurviveResults index correctly across primary, required, and bonus', () => {
+  const state = createInitialState();
+  state.campaignObjectives = createCampaignObjectives(
+    'collect:10',
+    ['first_to:8'],
+    0,
+    0,
+    0,
+    0,
+    ['survive:15', 'first_to:5'],
+  );
+
+  // [0: primary=collect:10, 1: req=survive:15, 2: req=first_to:5, 3: bonus=first_to:8]
+  state.snakes[0].score = 5;
+  recordFirstToResults(state);
+  assert.equal(state.campaignObjectives.firstToResults[2], 'p1');
+  assert.equal(state.campaignObjectives.firstToResults[3], null);
+  assert.equal(isCampaignObjectiveComplete(state.campaignObjectives.required[1]!, state, 2), true);
+  assert.equal(isCampaignObjectiveComplete(state.campaignObjectives.bonus[0]!, state, 3), false);
+
+  state.tick = 15;
+  recordSurviveResults(state);
+  assert.equal(state.campaignObjectives.surviveResults[1], true);
+  assert.equal(isCampaignObjectiveComplete(state.campaignObjectives.required[0]!, state, 1), true);
+});
+
+

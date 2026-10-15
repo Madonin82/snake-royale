@@ -169,7 +169,7 @@ export const MatchEndModal: React.FC<MatchEndModalProps> = ({
   const turnLedgerEntries = computeTurnLedger(history, turnDecisions);
   const campaignObjectives = gameState.campaignObjectives;
   const objectiveRows = campaignObjectives
-    ? [campaignObjectives.primary, ...campaignObjectives.bonus]
+    ? [campaignObjectives.primary, ...(campaignObjectives.required ?? []), ...campaignObjectives.bonus]
         .map((objective, index) => ({ objective, index }))
         .filter((item): item is { objective: NonNullable<typeof item.objective>; index: number } => item.objective !== null)
     : [];

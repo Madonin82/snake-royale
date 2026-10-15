@@ -219,6 +219,7 @@ export function createCampaignPlaytestState(
       snakes[1]?.score ?? 0,
       snakes[0]?.spEarned ?? 0,
       snakes[1]?.spEarned ?? 0,
+      level.objectives.required,
     ),
     walls,
   };

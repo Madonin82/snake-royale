@@ -330,6 +330,7 @@ export function processGameTick(
       ? {
           campaignObjectives: {
             ...currentState.campaignObjectives,
+            required: [...(currentState.campaignObjectives.required ?? [])],
             bonus: [...currentState.campaignObjectives.bonus],
             firstToResults: [...currentState.campaignObjectives.firstToResults],
             surviveResults: [...currentState.campaignObjectives.surviveResults],
