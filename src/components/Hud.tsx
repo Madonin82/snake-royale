@@ -4,7 +4,7 @@ import { Activity, Gamepad, Wifi } from 'lucide-react';
 import { getCampaignObjectiveProgress, isCampaignObjectiveComplete } from '../game/objectives';
 import { getPlayerColorPalette, getSeatDisplayTag, splitPlayersTwoPerSide } from '../game/playerColors';
 
-import { canActivateSkill, canAffordQueuedDart, canAffordQueuedRattle, canQueueRattleWithLength } from '../game/skills';
+import { canActivateSkill, canAffordQueuedSkill, canQueueRattleWithLength } from '../game/skills';
 
 interface HudProps {
   gameState: GameState;
@@ -119,12 +119,12 @@ export const Hud: React.FC<HudProps> = ({
 
     const buf = moveBuffers?.[who] ?? [];
     if (buf.length >= snake.body.length) return false;
-    if (snake.equippedSkill === 'dart') {
-      const queuedDarts = buf.filter(e => typeof e !== 'string' && e.type === 'dart').length;
-      if (!canAffordQueuedDart(snake.skillPoints, queuedDarts)) return false;
-    } else if (snake.equippedSkill === 'rattle') {
+    const skillId = snake.equippedSkill;
+    if (!skillId) return false;
+    const queued = buf.filter(e => typeof e !== 'string' && e.type === skillId).length;
+    if (!canAffordQueuedSkill(snake.skillPoints, skillId, queued)) return false;
+    if (snake.equippedSkill === 'rattle') {
       const queuedRattles = buf.filter(e => typeof e !== 'string' && e.type === 'rattle').length;
-      if (!canAffordQueuedRattle(snake.skillPoints, queuedRattles)) return false;
       if (!canQueueRattleWithLength(snake.body.length, queuedRattles)) return false;
     }
     return true;
