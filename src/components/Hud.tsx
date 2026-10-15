@@ -416,7 +416,7 @@ export const Hud: React.FC<HudProps> = ({
                   ? '✕ ELIMINATED'
                   : locked
                   ? `LOCKED ${lastTurn !== null ? `(${lastTurn.toFixed(1)}s)` : ''}`
-                  : 'PLANNING…'}
+                  : thinkLabel(who)}
               </span>
               <span className="shrink-0 flex items-center gap-1.5">
                 {!locked && countdown !== null && gameState.phase !== 'OVER' && (
