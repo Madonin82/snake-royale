@@ -653,7 +653,6 @@ export const Hud: React.FC<HudProps> = ({
                 <span className="shrink-0">{locked ? '🔒 ' : '✏️ '}</span>
                 {buffer.length === 0 ? (
                   <>
-                    <span className="opacity-60 italic">Swipe/tap board</span>
                     <span aria-hidden="true" className="px-1 py-0.5 bg-[#0F380F] text-[#9BBC0F] text-[10px] font-black shrink-0 invisible">↑</span>
                     <span aria-hidden="true" className="px-1 py-0.5 bg-[#0F380F] text-[#9BBC0F] text-[10px] font-black shrink-0 invisible portrait:inline hidden">↑</span>
                   </>
