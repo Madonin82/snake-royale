@@ -830,3 +830,46 @@ test('rattle cannot activate below length 3 or with fewer than 1 SP, and fizzles
   assert.equal(resLowSp.rattleWalls ?? undefined, undefined);
 });
 
+test('frozen snake stays in place, still blocks, and keeps its stunTicks', () => {
+  const state = createInitialState();
+  const settings = { ...DEFAULT_SETTINGS };
+  state.tokens = [];
+  const p1 = state.snakes.find(s => s.id === 'p1')!;
+  const p2 = state.snakes.find(s => s.id === 'p2')!;
+  p1.body = [{ x: 2, y: 3 }, { x: 1, y: 3 }, { x: 0, y: 3 }];
+  p1.direction = 'RIGHT';
+  p2.body = [{ x: 5, y: 3 }, { x: 6, y: 3 }, { x: 7, y: 3 }];
+  p2.direction = 'LEFT';
+  p2.stunTicks = 2;
+
+  const result = processGameTick(state, settings, 0, { frozenSnakeIds: new Set(['p2']) });
+  const afterP1 = result.nextState.snakes.find(s => s.id === 'p1')!;
+  const afterP2 = result.nextState.snakes.find(s => s.id === 'p2')!;
+  // Active snake moves; frozen snake does not move.
+  assert.deepEqual(afterP1.body[0], { x: 3, y: 3 });
+  assert.deepEqual(afterP2.body, [{ x: 5, y: 3 }, { x: 6, y: 3 }, { x: 7, y: 3 }]);
+  // Frozen stun is preserved (not decremented) for the frozen snake's own turn.
+  assert.equal(afterP2.stunTicks, 2);
+  assert.equal(afterP1.isAlive, true);
+  assert.equal(afterP2.isAlive, true);
+});
+
+test('frozen snake body still kills a mover that runs into it', () => {
+  const state = createInitialState();
+  const settings = { ...DEFAULT_SETTINGS };
+  state.tokens = [];
+  const p1 = state.snakes.find(s => s.id === 'p1')!;
+  const p2 = state.snakes.find(s => s.id === 'p2')!;
+  p1.body = [{ x: 2, y: 3 }, { x: 1, y: 3 }, { x: 0, y: 3 }];
+  p1.direction = 'RIGHT';
+  p2.body = [{ x: 3, y: 3 }, { x: 4, y: 3 }, { x: 5, y: 3 }];
+  p2.direction = 'LEFT';
+
+  const result = processGameTick(state, settings, 0, { frozenSnakeIds: new Set(['p2']) });
+  const afterP1 = result.nextState.snakes.find(s => s.id === 'p1')!;
+  const afterP2 = result.nextState.snakes.find(s => s.id === 'p2')!;
+  assert.equal(afterP1.isAlive, false);
+  assert.equal(afterP1.deathReason, 'OPPONENT');
+  assert.equal(afterP2.isAlive, true);
+});
+

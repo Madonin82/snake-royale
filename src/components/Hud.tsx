@@ -100,6 +100,8 @@ export const Hud: React.FC<HudProps> = ({
     if (playMode === 'SOLO_AI') return seat === 'p1';
     if (playMode === 'ONLINE_HOST' || playMode === 'ONLINE_SERVER') return seat === 'p1';
     if (playMode === 'ONLINE_JOIN') return viewerSeat ? viewerSeat === seat : seat === 'p1';
+    // Hotseat: only the active player (holding the phone) is local.
+    if (playMode === 'LOCAL_HOTSEAT') return viewerSeat === seat;
     return seat === 'p1';
   };
 
@@ -208,7 +210,11 @@ export const Hud: React.FC<HudProps> = ({
       <div className="flex items-center gap-1.5 shrink-0">
         {gameState.turnBased && !isPlaytestHud && (
           <span className="hidden lg:inline text-[9px] opacity-80 whitespace-nowrap">
-            {gameState.phase === 'OVER' ? 'GAME!' : 'BOTH LOCK → BOARD STEPS'}
+            {gameState.phase === 'OVER'
+              ? 'GAME!'
+              : playMode === 'LOCAL_HOTSEAT'
+                ? (viewerSeat === 'p2' ? 'P2 TURN • UNLOCK → MOVE → LOCK → PASS' : 'P1 TURN • UNLOCK → MOVE → LOCK → PASS')
+                : 'BOTH LOCK → BOARD STEPS'}
           </span>
         )}
 

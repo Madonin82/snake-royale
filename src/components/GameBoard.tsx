@@ -11,6 +11,10 @@ interface GameBoardProps {
   onDirection: (direction: Direction, touchSeat?: 'p1' | 'p2') => void;
   interactionEnabled: boolean;
   splitTouchSeats?: boolean;
+  // Hotseat: touch taps route to onCellTap (pathfind + head-lock, like a
+  // PC mouse click) instead of the head-relative one-direction tap.
+  tapToPathfind?: boolean;
+  onCellTap?: (cell: Position) => void;
   animationsDisabled?: boolean;
   hitstop?: HitstopInfo | null;
   fatalMoveAnimating?: string[];
@@ -23,6 +27,8 @@ interface GameBoardProps {
 export const GameBoard: React.FC<GameBoardProps> = ({
   gameState, settings, lockedPaths, plannedPaths, controlSeat, onDirection, interactionEnabled,
   splitTouchSeats = false,
+  tapToPathfind = false,
+  onCellTap,
   animationsDisabled = false,
   hitstop = null,
   fatalMoveAnimating = [],
@@ -443,6 +449,19 @@ export const GameBoard: React.FC<GameBoardProps> = ({
     const cellSize = 32;
     const x = ((event.clientX - contentLeft) / canvas.clientWidth) * canvas.width;
     const y = ((event.clientY - contentTop) / canvas.clientHeight) * canvas.height;
+
+    // Hotseat: a tap is a cell tap (pathfind + head-lock, like a PC
+    // mouse click), not a one-direction step.
+    if (tapToPathfind && onCellTap) {
+      const gridSize = gameState.gridSize ?? settings.gridSize;
+      const cellX = Math.floor(x / cellSize);
+      const cellY = Math.floor(y / cellSize);
+      if (cellX >= 0 && cellX < gridSize && cellY >= 0 && cellY < gridSize) {
+        onCellTap({ x: cellX, y: cellY });
+      }
+      return;
+    }
+
     const left = head.x * cellSize;
     const right = left + cellSize;
     const top = head.y * cellSize;

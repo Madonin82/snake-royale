@@ -9,6 +9,7 @@ import { Bot, Gamepad, Globe, Play, Settings, Users, Sparkles, ArrowLeft, Upload
 interface LobbyViewProps {
   onStartSolo: (difficulty: 'EASY' | 'MEDIUM' | 'HARD') => void;
   onStartLocal2P: () => void;
+  onStartHotseat: () => void;
   onCreateOnlineRoom: (customLevel?: CampaignLevel | null) => void;
   onCreateServerRoom: (customLevel?: CampaignLevel | null) => void;
   onSpectateRoom: (roomCode: string) => void;
@@ -37,6 +38,7 @@ type ScreenId = 'MAIN' | 'SOLO' | 'VERSUS' | 'ONLINE' | 'SETTINGS';
 export const LobbyView: React.FC<LobbyViewProps> = ({
   onStartSolo,
   onStartLocal2P,
+  onStartHotseat,
   onCreateOnlineRoom,
   onCreateServerRoom,
   onSpectateRoom,
@@ -61,6 +63,9 @@ export const LobbyView: React.FC<LobbyViewProps> = ({
 }) => {
   const [screen, setScreen] = useState<ScreenId>(initialRoom ? 'ONLINE' : 'MAIN');
   const [difficulty, setDifficulty] = useState<'EASY' | 'MEDIUM' | 'HARD'>(settings.botDifficulty || 'MEDIUM');
+  // VERSUS mode: 'simultaneous' = existing local 2P (both plan at once),
+  // 'hotseat' = pass-the-phone unlock-to-move.
+  const [versusMode, setVersusMode] = useState<'simultaneous' | 'hotseat'>('simultaneous');
   const [roomInput, setRoomInput] = useState(initialRoom);
   const [focusIndex, setFocusIndex] = useState<number>(0);
   const [levelLoadError, setLevelLoadError] = useState<string | null>(null);
@@ -168,7 +173,7 @@ export const LobbyView: React.FC<LobbyViewProps> = ({
       case 'SOLO':
         return ['BACK', 'EASY', 'MEDIUM', 'HARD', 'START_SOLO'];
       case 'VERSUS':
-        return ['BACK', 'P1_NAME', 'P2_NAME', 'START_VERSUS'];
+        return ['BACK', 'P1_NAME', 'P2_NAME', 'MODE', 'START_VERSUS'];
       case 'ONLINE':
         return ['BACK', 'PLAYER_NAME', 'CUSTOM_LEVEL', 'CREATE_ROOM', 'ROOM_CODE', 'JOIN_ROOM', 'SPECTATE_ROOM', 'SERVER_ROOM'];
       case 'SETTINGS':
@@ -204,7 +209,7 @@ export const LobbyView: React.FC<LobbyViewProps> = ({
       if (action === 'START') {
         if (screen === 'MAIN') {
           if (currentItem === 'SOLO') navigateTo('SOLO', 4);
-          else if (currentItem === 'VERSUS') navigateTo('VERSUS', 3);
+          else if (currentItem === 'VERSUS') navigateTo('VERSUS', 4);
           else if (currentItem === 'ONLINE') navigateTo('ONLINE', 2);
           else if (currentItem === 'SETTINGS') navigateTo('SETTINGS', 1);
         } else if (screen === 'SOLO') {
@@ -212,7 +217,8 @@ export const LobbyView: React.FC<LobbyViewProps> = ({
           onStartSolo(difficulty);
         } else if (screen === 'VERSUS') {
           soundEngine.playMenuSelect();
-          onStartLocal2P();
+          if (versusMode === 'hotseat') onStartHotseat();
+          else onStartLocal2P();
         } else if (screen === 'ONLINE') {
           if (roomInput.trim()) handleJoin();
           else {
@@ -252,6 +258,13 @@ export const LobbyView: React.FC<LobbyViewProps> = ({
             return;
           }
         }
+        if (screen === 'VERSUS') {
+          if (currentItem === 'MODE') {
+            soundEngine.playMenuMove();
+            setVersusMode(prev => prev === 'hotseat' ? 'simultaneous' : 'hotseat');
+            return;
+          }
+        }
         if (screen === 'SETTINGS') {
           if (currentItem === 'THINK_TIME') cycleThinkTime(dir);
           else if (currentItem === 'GRID_SIZE') cycleGridSize(dir);
@@ -275,7 +288,7 @@ export const LobbyView: React.FC<LobbyViewProps> = ({
 
         if (screen === 'MAIN') {
           if (currentItem === 'SOLO') navigateTo('SOLO', 4);
-          else if (currentItem === 'VERSUS') navigateTo('VERSUS', 3);
+          else if (currentItem === 'VERSUS') navigateTo('VERSUS', 4);
           else if (currentItem === 'ONLINE') navigateTo('ONLINE', 2);
           else if (currentItem === 'SETTINGS') navigateTo('SETTINGS', 1);
           return;
@@ -299,9 +312,13 @@ export const LobbyView: React.FC<LobbyViewProps> = ({
           } else if (currentItem === 'P2_NAME') {
             soundEngine.playMenuSelect();
             p2InputRef.current?.focus();
+          } else if (currentItem === 'MODE') {
+            soundEngine.playMenuSelect();
+            setVersusMode(prev => prev === 'hotseat' ? 'simultaneous' : 'hotseat');
           } else if (currentItem === 'START_VERSUS') {
             soundEngine.playMenuSelect();
-            onStartLocal2P();
+            if (versusMode === 'hotseat') onStartHotseat();
+            else onStartLocal2P();
           }
           return;
         }
@@ -468,7 +485,7 @@ export const LobbyView: React.FC<LobbyViewProps> = ({
 
             <button
               type="button"
-              onClick={() => navigateTo('VERSUS', 3)}
+              onClick={() => navigateTo('VERSUS', 4)}
               onMouseEnter={() => setFocusIndex(1)}
               className={`border-2 border-[#0F380F] p-3 sm:p-4 [@media(max-height:500px)]:py-2 [@media(max-height:500px)]:px-3 text-left transition-all cursor-pointer shadow-[3px_3px_0px_#0F380F] [@media(max-height:500px)]:shadow-[2px_2px_0px_#0F380F] flex flex-col justify-center ${
                 currentItem === 'VERSUS'
@@ -731,23 +748,53 @@ export const LobbyView: React.FC<LobbyViewProps> = ({
             </div>
 
             <div className="grid grid-cols-2 gap-2 text-[10px] bg-[#9BBC0F] p-2 [@media(max-height:500px)]:p-1.5 border border-[#0F380F]">
-              <div>
-                <span className="font-bold text-[#0F380F]">PLAYER 1:</span>
-                <div>WASD / Touch / Gamepad 1</div>
-              </div>
-              <div>
-                <span className="font-bold text-[#306230]">PLAYER 2:</span>
-                <div>Arrows / IJKL / Gamepad 2</div>
-              </div>
+              {versusMode === 'hotseat' ? (
+                <div className="col-span-2">
+                  <span className="font-bold text-[#0F380F]">HOTSEAT:</span>
+                  <div>One shared control set — pass the phone. Tap head to lock / unlock. Optional 2-digit PIN.</div>
+                </div>
+              ) : (
+                <>
+                  <div>
+                    <span className="font-bold text-[#0F380F]">PLAYER 1:</span>
+                    <div>WASD / Touch / Gamepad 1</div>
+                  </div>
+                  <div>
+                    <span className="font-bold text-[#306230]">PLAYER 2:</span>
+                    <div>Arrows / IJKL / Gamepad 2</div>
+                  </div>
+                </>
+              )}
             </div>
 
             <button
               type="button"
               onClick={() => {
                 soundEngine.playMenuSelect();
-                onStartLocal2P();
+                setVersusMode(prev => prev === 'hotseat' ? 'simultaneous' : 'hotseat');
               }}
               onMouseEnter={() => setFocusIndex(3)}
+              className={`w-full py-2 [@media(max-height:500px)]:py-1.5 border-2 border-[#0F380F] font-black text-xs flex items-center justify-between gap-2 cursor-pointer transition-colors px-3 ${
+                currentItem === 'MODE'
+                  ? 'bg-[#0F380F] text-[#9BBC0F] ring-2 ring-[#0F380F]'
+                  : 'bg-[#8BAC0F] text-[#0F380F] hover:bg-[#0F380F] hover:text-[#9BBC0F]'
+              }`}
+            >
+              <span className="flex items-center gap-1">
+                {currentItem === 'MODE' && <span className="animate-pulse">►</span>}
+                <span>MODE</span>
+              </span>
+              <span className="font-black">&larr; {versusMode === 'hotseat' ? 'HOTSEAT (PASS PHONE)' : 'SAME SCREEN (BOTH AT ONCE)'} &rarr;</span>
+            </button>
+
+            <button
+              type="button"
+              onClick={() => {
+                soundEngine.playMenuSelect();
+                if (versusMode === 'hotseat') onStartHotseat();
+                else onStartLocal2P();
+              }}
+              onMouseEnter={() => setFocusIndex(4)}
               className={`w-full py-3 [@media(max-height:500px)]:py-2 mt-1 [@media(max-height:500px)]:mt-0.5 border-2 border-[#0F380F] font-black text-sm [@media(max-height:500px)]:text-xs flex items-center justify-center gap-2 cursor-pointer transition-all shadow-[3px_3px_0px_#0F380F] ${
                 currentItem === 'START_VERSUS'
                   ? 'bg-[#0F380F] text-[#9BBC0F] ring-4 ring-[#0F380F] scale-[1.01]'
