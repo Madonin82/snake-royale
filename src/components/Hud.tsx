@@ -1,5 +1,5 @@
-import React, { useEffect, useState } from 'react';
-import { BufferEntry, GameState, LatencyReport, PlayMode } from '../types/game';
+import React, { useEffect, useState, useRef } from 'react';
+import { BufferEntry, Direction, GameSettings, GameState, LatencyReport, PlayMode } from '../types/game';
 import { Activity, Gamepad, Wifi } from 'lucide-react';
 import { getCampaignObjectiveProgress, isCampaignObjectiveComplete } from '../game/objectives';
 import { getPlayerColorPalette, getSeatDisplayTag, splitPlayersTwoPerSide } from '../game/playerColors';
@@ -25,6 +25,8 @@ interface HudProps {
   mouseSeat?: 'p1' | 'p2';
   onToggleMouseSeat?: () => void;
   onSkill?: (seat: string) => void;
+  settings: GameSettings;
+  onCardSwipe?: (seat: 'p1' | 'p2', dir: Direction) => void;
   choosingSkillMap?: Record<string, boolean>;
   canUseSkill?: (seat: string) => boolean;
 }
@@ -47,6 +49,8 @@ export const Hud: React.FC<HudProps> = ({
   mouseSeat,
   onToggleMouseSeat,
   onSkill,
+  settings,
+  onCardSwipe,
   choosingSkillMap,
   canUseSkill: canUseSkillProp,
 }) => {
@@ -64,6 +68,31 @@ export const Hud: React.FC<HudProps> = ({
 
   // Live clock for the turn timer (re-renders 4x/sec while a turn is open)
   const [nowMs, setNowMs] = useState<number>(() => Date.now());
+  const cardPointerStartRef = useRef<Record<string, { x: number; y: number }>>({});
+
+  const handleCardPointerDown = (who: string, e: React.PointerEvent) => {
+    if (e.pointerType !== 'touch') return;
+    cardPointerStartRef.current[who] = { x: e.clientX, y: e.clientY };
+    e.currentTarget.setPointerCapture(e.pointerId);
+  };
+
+  const handleCardPointerUp = (who: 'p1' | 'p2', e: React.PointerEvent) => {
+    const start = cardPointerStartRef.current[who];
+    if (!start) return;
+    delete cardPointerStartRef.current[who];
+
+    if (settings.gestureCardSwipeEnabled === false) return;
+    if (typeof window !== 'undefined' && window.innerWidth > window.innerHeight) return; // portrait only
+
+    const deltaX = e.clientX - start.x;
+    const deltaY = e.clientY - start.y;
+    if (Math.hypot(deltaX, deltaY) > 20) {
+      const dir: Direction = Math.abs(deltaX) > Math.abs(deltaY)
+        ? deltaX < 0 ? 'LEFT' : 'RIGHT'
+        : deltaY < 0 ? 'UP' : 'DOWN';
+      onCardSwipe?.(who, dir);
+    }
+  };
   useEffect(() => {
     if (!gameState.turnBased || gameState.phase === 'OVER') return;
     const id = setInterval(() => setNowMs(Date.now()), 250);
@@ -360,6 +389,8 @@ export const Hud: React.FC<HudProps> = ({
           data-seat={who}
           data-locked={locked ? 'true' : 'false'}
           data-planning={gameState.turnBased && gameState.phase !== 'OVER' && snake.isAlive && !locked ? 'true' : 'false'}
+          onPointerDown={(e) => handleCardPointerDown(who, e)}
+          onPointerUp={(e) => handleCardPointerUp(who as 'p1' | 'p2', e)}
           className={`relative ${getCardContainerClasses(who)} ${
             isMultiCardSide ? 'p-2' : 'p-2.5'
           } [@media(max-height:540px)]:p-1.5 flex flex-col h-full min-h-0 overflow-hidden w-full font-mono text-[#0F380F] transition-all`}
@@ -496,6 +527,8 @@ export const Hud: React.FC<HudProps> = ({
         data-seat={who}
         data-locked={locked ? 'true' : 'false'}
         data-planning={gameState.turnBased && gameState.phase !== 'OVER' && snake.isAlive && !locked ? 'true' : 'false'}
+        onPointerDown={(e) => handleCardPointerDown(who, e)}
+        onPointerUp={(e) => handleCardPointerUp(who as 'p1' | 'p2', e)}
         className={`${getCardContainerClasses(who)} ${
           isMultiCardSide ? 'p-2' : 'p-3'
         } [@media(max-height:540px)]:p-1.5 flex flex-col h-full min-h-0 overflow-hidden w-full font-mono text-[#0F380F] transition-all`}
@@ -624,6 +657,8 @@ export const Hud: React.FC<HudProps> = ({
         data-seat={who}
         data-locked={locked ? 'true' : 'false'}
         data-planning={gameState.turnBased && gameState.phase !== 'OVER' && snake.isAlive && !locked ? 'true' : 'false'}
+        onPointerDown={(e) => handleCardPointerDown(who, e)}
+        onPointerUp={(e) => handleCardPointerUp(who as 'p1' | 'p2', e)}
         className={`${getCardContainerClasses(who)} p-2 flex flex-col justify-between min-w-0 overflow-hidden transition-all`}
       >
         <div className="shrink-0">
@@ -708,7 +743,12 @@ export const Hud: React.FC<HudProps> = ({
 
   return (
     <>
-      <div className="top-strip-area w-full flex flex-col items-center">
+      <div className="top-strip-area relative w-full flex flex-col items-center">
+        {playMode === 'LOCAL_2P' && (
+          <div data-testid="swipe-card-hint" className="absolute top-0 left-1/2 -translate-x-1/2 z-30 pointer-events-none bg-[#0F380F]/95 text-[#9BBC0F] px-2 py-0.5 text-center text-[9px] font-black font-mono border border-[#0F380F] shadow-[1px_1px_0px_#0F380F] whitespace-nowrap">
+            SWIPE YOUR CARD, NOT THE BOARD
+          </div>
+        )}
         <div className="portrait-match-header hidden w-full flex-col gap-1 font-mono text-[#0F380F]">
           <div className="flex h-8 items-center justify-between gap-1 border-2 border-[#0F380F] bg-[#8BAC0F] px-2 text-[10px] font-black tracking-tight">
             <span className={`min-w-0 truncate ${isRacing ? '' : isShrinking ? 'animate-pulse' : ''}`}>

@@ -10,7 +10,8 @@ interface GameBoardProps {
   controlSeat: 'p1' | 'p2';
   onDirection: (direction: Direction, touchSeat?: 'p1' | 'p2') => void;
   interactionEnabled: boolean;
-  splitTouchSeats?: boolean;
+  localTwoPlayer?: boolean;
+  onLongPress?: (cell: Position, touchSeat?: 'p1' | 'p2', tapGridPoint?: { gx: number; gy: number }) => void;
   // Local modes: touch taps route to onCellTap (pathfind + head-lock,
   // like a PC mouse click) instead of the head-relative one-direction
   // tap. Online modes keep the head-relative tap.
@@ -27,7 +28,8 @@ interface GameBoardProps {
 
 export const GameBoard: React.FC<GameBoardProps> = ({
   gameState, settings, lockedPaths, plannedPaths, controlSeat, onDirection, interactionEnabled,
-  splitTouchSeats = false,
+  localTwoPlayer = false,
+  onLongPress,
   tapToPathfind = false,
   onCellTap,
   animationsDisabled = false,
@@ -39,7 +41,9 @@ export const GameBoard: React.FC<GameBoardProps> = ({
   onCellContextMenu,
 }) => {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
-  const pointerStartRef = useRef<{ id: number; x: number; y: number } | null>(null);
+  const pointerStartRef = useRef<{ id: number; x: number; y: number; canvasX: number; canvasY: number; time?: number; startedOnSnake?: string } | null>(null);
+  const pointerTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const isDraggingRef = useRef<boolean>(false);
   const lastPointerTypeRef = useRef<string>('mouse');
 
   useEffect(() => {
@@ -412,34 +416,84 @@ export const GameBoard: React.FC<GameBoardProps> = ({
   const handlePointerDown = (event: ReactPointerEvent<HTMLCanvasElement>) => {
     lastPointerTypeRef.current = event.pointerType;
     if (!interactionEnabled || event.pointerType !== 'touch') return;
-    pointerStartRef.current = { id: event.pointerId, x: event.clientX, y: event.clientY };
+    const canvas = canvasRef.current;
+    const rect = canvas?.getBoundingClientRect();
+    if (!canvas || !rect) return;
+    const contentLeft = rect.left + canvas.clientLeft;
+    const contentTop = rect.top + canvas.clientTop;
+    const x = ((event.clientX - contentLeft) / canvas.clientWidth) * canvas.width;
+    const y = ((event.clientY - contentTop) / canvas.clientHeight) * canvas.height;
+    const cellSize = 32;
+    const gridSize = gameState.gridSize ?? settings.gridSize;
+    const cellX = Math.floor(x / cellSize);
+    const cellY = Math.floor(y / cellSize);
+
+    let startedSnakeId: string | undefined = undefined;
+    if (settings.gestureDragEnabled !== false) {
+      for (const snake of gameState.snakes) {
+        if (!snake.isAlive) continue;
+        if (snake.body.some(seg => seg.x === cellX && seg.y === cellY)) {
+          startedSnakeId = snake.id;
+          break;
+        }
+      }
+    }
+
+    pointerStartRef.current = {
+      id: event.pointerId,
+      x: event.clientX,
+      y: event.clientY,
+      canvasX: x,
+      canvasY: y,
+      time: Date.now(),
+      startedOnSnake: startedSnakeId,
+    };
+    isDraggingRef.current = false;
+
+    if (settings.gestureLongPressEnabled !== false) {
+      pointerTimerRef.current = setTimeout(() => {
+        if (!isDraggingRef.current && pointerStartRef.current) {
+          pointerStartRef.current = null;
+          if (cellX >= 0 && cellX < gridSize && cellY >= 0 && cellY < gridSize) {
+            if (onLongPress) {
+              onLongPress({ x: cellX, y: cellY }, undefined, { gx: x / cellSize, gy: y / cellSize });
+            }
+          }
+        }
+        pointerTimerRef.current = null;
+      }, 500);
+    }
+
     event.currentTarget.setPointerCapture(event.pointerId);
+  };
+
+  const handlePointerMove = (event: ReactPointerEvent<HTMLCanvasElement>) => {
+    const start = pointerStartRef.current;
+    if (!start || start.id !== event.pointerId) return;
+    const deltaX = event.clientX - start.x;
+    const deltaY = event.clientY - start.y;
+    if (Math.hypot(deltaX, deltaY) > 12) {
+      if (pointerTimerRef.current) {
+        clearTimeout(pointerTimerRef.current);
+        pointerTimerRef.current = null;
+      }
+      isDraggingRef.current = true;
+    }
   };
 
   const handlePointerUp = (event: ReactPointerEvent<HTMLCanvasElement>) => {
     const start = pointerStartRef.current;
     pointerStartRef.current = null;
+    if (pointerTimerRef.current) {
+      clearTimeout(pointerTimerRef.current);
+      pointerTimerRef.current = null;
+    }
     if (!interactionEnabled || !start || start.id !== event.pointerId) return;
 
-    const deltaX = event.clientX - start.x;
-    const deltaY = event.clientY - start.y;
     const canvas = canvasRef.current;
     const rect = canvas?.getBoundingClientRect();
-    const touchSeat = splitTouchSeats && rect
-      ? start.y < rect.top + rect.height / 2 ? 'p2' : 'p1'
-      : undefined;
-    if (Math.hypot(deltaX, deltaY) > 12) {
-      const direction: Direction = Math.abs(deltaX) > Math.abs(deltaY)
-        ? deltaX < 0 ? 'LEFT' : 'RIGHT'
-        : deltaY < 0 ? 'UP' : 'DOWN';
-      onDirection(direction, touchSeat);
-      return;
-    }
+    if (!canvas || !rect) return;
 
-    const snake = gameState.snakes.find(candidate => candidate.id === (touchSeat ?? controlSeat));
-    if (!snake) return;
-    const head = snake.body[0];
-    if (!canvas || !rect || !head) return;
     const contentLeft = rect.left + canvas.clientLeft;
     const contentTop = rect.top + canvas.clientTop;
     const contentRight = contentLeft + canvas.clientWidth;
@@ -450,33 +504,59 @@ export const GameBoard: React.FC<GameBoardProps> = ({
     const cellSize = 32;
     const x = ((event.clientX - contentLeft) / canvas.clientWidth) * canvas.width;
     const y = ((event.clientY - contentTop) / canvas.clientHeight) * canvas.height;
+    const gridSize = gameState.gridSize ?? settings.gridSize;
+    const cellX = Math.floor(x / cellSize);
+    const cellY = Math.floor(y / cellSize);
 
-    // Local modes: a tap is a cell tap (pathfind + head-lock, like a PC
-    // mouse click), not a one-direction step. The tapped half's seat
-    // (simultaneous 2P) and the tap point in fractional grid coords
-    // (tap-head tiebreak) ride along for the handler.
-    if (tapToPathfind && onCellTap) {
-      const gridSize = gameState.gridSize ?? settings.gridSize;
-      const cellX = Math.floor(x / cellSize);
-      const cellY = Math.floor(y / cellSize);
-      if (cellX >= 0 && cellX < gridSize && cellY >= 0 && cellY < gridSize) {
-        onCellTap({ x: cellX, y: cellY }, touchSeat, { gx: x / cellSize, gy: y / cellSize });
+    if (cellX < 0 || cellX >= gridSize || cellY < 0 || cellY >= gridSize) return;
+
+    if (isDraggingRef.current) {
+      isDraggingRef.current = false;
+      const deltaX = event.clientX - start.x;
+      const deltaY = event.clientY - start.y;
+      const dir: Direction = Math.abs(deltaX) > Math.abs(deltaY)
+        ? (deltaX > 0 ? 'RIGHT' : 'LEFT')
+        : (deltaY > 0 ? 'DOWN' : 'UP');
+
+      const startCellX = Math.floor(start.canvasX / cellSize);
+      const startCellY = Math.floor(start.canvasY / cellSize);
+      const cellDist = Math.abs(cellX - startCellX) + Math.abs(cellY - startCellY);
+
+      if (!localTwoPlayer) {
+        // 1P and hotseat: restore one-step swipe (onDirection) for short drags
+        if (cellDist <= 1 || !start.startedOnSnake) {
+          if (settings.gestureSwipeEnabled !== false) {
+            onDirection(dir, controlSeat);
+          }
+          return;
+        }
+        // Long drag on snake: full path
+        if (start.startedOnSnake && settings.gestureDragEnabled !== false && onCellTap) {
+          onCellTap({ x: cellX, y: cellY }, start.startedOnSnake as 'p1' | 'p2', { gx: x / cellSize, gy: y / cellSize });
+        }
+        return;
+      } else {
+        // Simultaneous 2P: board-swipe is retired (empty board drag does nothing)
+        if (start.startedOnSnake) {
+          if (cellDist <= 1) {
+            // Short drag on snake in 2P: one direction step
+            if (settings.gestureSwipeEnabled !== false) {
+              onDirection(dir, start.startedOnSnake as 'p1' | 'p2');
+            }
+          } else {
+            // Long drag on snake in 2P: full path
+            if (settings.gestureDragEnabled !== false && onCellTap) {
+              onCellTap({ x: cellX, y: cellY }, start.startedOnSnake as 'p1' | 'p2', { gx: x / cellSize, gy: y / cellSize });
+            }
+          }
+        }
+        return;
       }
-      return;
     }
 
-    const left = head.x * cellSize;
-    const right = left + cellSize;
-    const top = head.y * cellSize;
-    const bottom = top + cellSize;
-    if (x >= left && x < right && y >= top && y < bottom) return;
-
-    const horizontalDistance = x < left ? left - x : x >= right ? x - right : -1;
-    const verticalDistance = y < top ? top - y : y >= bottom ? y - bottom : -1;
-    const direction: Direction = horizontalDistance > verticalDistance
-      ? x < left ? 'LEFT' : 'RIGHT'
-      : y < top ? 'UP' : 'DOWN';
-    if (!isReverseDirection(snake.direction, direction)) onDirection(direction, touchSeat);
+    if (onCellTap) {
+      onCellTap({ x: cellX, y: cellY }, undefined, { gx: x / cellSize, gy: y / cellSize });
+    }
   };
 
   const getCellFromMouseEvent = (event: React.MouseEvent<HTMLCanvasElement>): Position | null => {
@@ -505,6 +585,7 @@ export const GameBoard: React.FC<GameBoardProps> = ({
         className="w-full h-full max-w-full aspect-square block pixelated border-2 border-[#306230]"
         style={{ imageRendering: 'pixelated' }}
         onPointerDown={handlePointerDown}
+        onPointerMove={handlePointerMove}
         onPointerUp={handlePointerUp}
         onPointerCancel={() => { pointerStartRef.current = null; }}
         onClick={(e) => {
@@ -525,11 +606,6 @@ export const GameBoard: React.FC<GameBoardProps> = ({
           if (onCellContextMenu) onCellContextMenu(e);
         }}
       />
-      {splitTouchSeats && (
-        <div aria-hidden="true" className="pointer-events-none absolute inset-3">
-          <div className="absolute inset-x-0 top-1/2 border-t-2 border-dashed border-[#0F380F]/45" />
-        </div>
-      )}
     </div>
   );
 };

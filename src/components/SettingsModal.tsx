@@ -87,13 +87,13 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
     }
   };
 
-  type SettingsRow = 'STYLE' | 'TURNS' | 'GRID' | 'TICKS' | 'THINK_TIME' | 'SOUND' | 'CRT' | 'ACCOUNT' | 'ADMIN' | 'CLOSE';
+  type SettingsRow = 'STYLE' | 'TURNS' | 'GRID' | 'TICKS' | 'THINK_TIME' | 'SOUND' | 'CRT' | 'CONTROLS' | 'ACCOUNT' | 'ADMIN' | 'CLOSE';
 
   const baseRows: SettingsRow[] = isOnlineGuest
-    ? ['SOUND', 'CRT', 'ACCOUNT', 'CLOSE']
+    ? ['SOUND', 'CRT', 'CONTROLS', 'ACCOUNT', 'CLOSE']
     : settings.turnBased
-    ? ['STYLE', 'TURNS', 'GRID', 'THINK_TIME', 'SOUND', 'CRT', 'ACCOUNT', 'CLOSE']
-    : ['STYLE', 'GRID', 'TICKS', 'SOUND', 'CRT', 'ACCOUNT', 'CLOSE'];
+    ? ['STYLE', 'TURNS', 'GRID', 'THINK_TIME', 'SOUND', 'CRT', 'CONTROLS', 'ACCOUNT', 'CLOSE']
+    : ['STYLE', 'GRID', 'TICKS', 'SOUND', 'CRT', 'CONTROLS', 'ACCOUNT', 'CLOSE'];
 
   const rows: SettingsRow[] = (signedInUser && ADMIN_UIDS.includes(signedInUser.uid))
     ? [...baseRows.slice(0, -1), 'ADMIN', 'CLOSE']
@@ -663,6 +663,48 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
             >
               {settings.crtFilterEnabled ? 'ON' : 'OFF'}
             </button>
+          </div>
+
+          {/* Controls Gestures Section */}
+          <div
+            className={`flex flex-col gap-1.5 p-2 border transition-all ${
+              currentRow === 'CONTROLS'
+                ? 'bg-[#8BAC0F] border-[#0F380F] ring-2 ring-[#0F380F]'
+                : 'bg-[#8BAC0F] border-[#0F380F]'
+            }`}
+            onClick={() => setFocusIndex(rows.indexOf('CONTROLS'))}
+          >
+            <div className="flex items-center justify-between text-xs font-black uppercase">
+              <span className="flex items-center gap-1.5">
+                {currentRow === 'CONTROLS' && <span className="animate-pulse">►</span>}
+                <span>CONTROLS GESTURES</span>
+              </span>
+              <span className="text-[9px] opacity-75">ALL ENABLED BY DEFAULT</span>
+            </div>
+            <div className="grid grid-cols-2 gap-1 text-[10px]">
+              {[
+                { key: 'gestureSwipeEnabled', label: 'Swipe' },
+                { key: 'gestureCardSwipeEnabled', label: 'Card-Swipe' },
+                { key: 'gestureTapPathEnabled', label: 'Tap-to-Path' },
+                { key: 'gestureTapHeadLockEnabled', label: 'Tap-Head Lock' },
+                { key: 'gestureDragEnabled', label: 'Drag' },
+                { key: 'gestureLongPressEnabled', label: 'Long-Press' },
+              ].map(({ key, label }) => {
+                const enabled = (settings as any)[key] !== false;
+                return (
+                  <button
+                    key={key}
+                    onClick={() => onUpdateSettings({ [key]: !enabled })}
+                    className={`py-1 px-1.5 border border-[#0F380F] font-black flex items-center justify-between cursor-pointer ${
+                      enabled ? 'bg-[#0F380F] text-[#9BBC0F]' : 'bg-[#9BBC0F] text-[#0F380F]'
+                    }`}
+                  >
+                    <span>{label}</span>
+                    <span>{enabled ? 'ON' : 'OFF'}</span>
+                  </button>
+                );
+              })}
+            </div>
           </div>
 
           {/* Optional account sign-in */}

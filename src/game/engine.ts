@@ -26,6 +26,12 @@ export const DEFAULT_SETTINGS: GameSettings = {
   crtFilterEnabled: false,
   botDifficulty: 'MEDIUM',
   skillsAvailable: 'after_race',
+  gestureSwipeEnabled: true,
+  gestureTapPathEnabled: true,
+  gestureTapHeadLockEnabled: true,
+  gestureDragEnabled: true,
+  gestureLongPressEnabled: true,
+  gestureCardSwipeEnabled: true,
 };
 
 // Check if a turn is 180-degree reverse

@@ -72,6 +72,12 @@ export interface GameSettings {
   campaignAiDifficulties?: Record<string, 'EASY' | 'MEDIUM' | 'HARD'>;
   campaignAiStyles?: Record<string, 'GREEDY' | 'TURTLE' | 'CUTOFF' | 'HEADHUNTER' | 'PATROL' | 'AVALENA' | 'avalena'>;
   skillsAvailable?: SkillsAvailableConfig;
+  gestureSwipeEnabled?: boolean;
+  gestureTapPathEnabled?: boolean;
+  gestureTapHeadLockEnabled?: boolean;
+  gestureDragEnabled?: boolean;
+  gestureLongPressEnabled?: boolean;
+  gestureCardSwipeEnabled?: boolean;
 }
 
 export type CampaignObjectiveKind = 'survival' | 'collect' | 'first_to' | 'first_to_sp' | 'survive' | 'win_under' | 'shutout' | 'outscore';
