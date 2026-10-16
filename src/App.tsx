@@ -14,6 +14,7 @@ import {
   queueSnakeDirection,
   queueSnakeSkill,
 } from './game/engine';
+import { resolveInitialSettings, saveStoredUserSettings } from './game/settingsStorage';
 import { canActivateSkill, canAffordQueuedDart, canAffordQueuedRattle, canAffordQueuedSkill, canQueueRattleWithLength, isValidDartDirection, SKILLS } from './game/skills';
 import { calculateAIAction, calculateAIMove } from './game/ai';
 import { cloneGameState, toCompactGameState } from './game/aiBridge';
@@ -447,7 +448,14 @@ const GameApp: React.FC<{ campaignPlaytestLevel: CampaignLevel | null }> = ({ ca
       : null,
     [campaignPlaytestLevel, initialCampaignSettings],
   );
-  const [settings, setSettings] = useState<GameSettings>(initialCampaignSettings ?? DEFAULT_SETTINGS);
+  const [settings, setSettings] = useState<GameSettings>(() =>
+    resolveInitialSettings(initialCampaignSettings)
+  );
+
+  useEffect(() => {
+    saveStoredUserSettings(settings);
+  }, [settings]);
+
   const [playMode, setPlayMode] = useState<PlayMode>('SOLO_AI');
   const [inLobby, setInLobby] = useState<boolean>(!campaignPlaytestLevel);
   const [inOnlineLobby, setInOnlineLobby] = useState<boolean>(false);
@@ -465,7 +473,7 @@ const GameApp: React.FC<{ campaignPlaytestLevel: CampaignLevel | null }> = ({ ca
   const [spectatorsCount, setSpectatorsCount] = useState<number>(0);
 
   const [gameState, setGameState] = useState<GameState>(() =>
-    initialCampaignState ?? createLobbyState(initialCampaignSettings ?? DEFAULT_SETTINGS)
+    initialCampaignState ?? createLobbyState(resolveInitialSettings(initialCampaignSettings))
   );
   const [joinerAcknowledgedMatchStart, setJoinerAcknowledgedMatchStart] = useState(false);
   const joinerAcknowledgedMatchStartRef = useRef(false);

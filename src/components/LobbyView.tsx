@@ -422,10 +422,22 @@ export const LobbyView: React.FC<LobbyViewProps> = ({
         <div className="flex flex-col h-full justify-between gap-2.5 [@media(max-height:500px)]:gap-1.5 min-h-0">
           {/* Title Header */}
           <div className="text-center border-b-4 [@media(max-height:500px)]:border-b-2 border-[#0F380F] pb-2 [@media(max-height:500px)]:pb-1 shrink-0">
-            <div className="flex items-center justify-center gap-2">
+            <div className="relative flex items-center justify-center">
               <h1 className="text-xl sm:text-2xl [@media(max-height:500px)]:text-base font-black uppercase tracking-wider font-['Press_Start_2P',monospace] text-[#0F380F]">
                 SNAKE ROYALE
               </h1>
+              <button
+                type="button"
+                onClick={() => {
+                  soundEngine.playMenuSelect();
+                  onOpenSettings();
+                }}
+                className="absolute right-0 top-1/2 -translate-y-1/2 min-w-[44px] min-h-[44px] p-2 border-2 border-[#0F380F] bg-[#8BAC0F] hover:bg-[#0F380F] text-[#0F380F] hover:text-[#9BBC0F] flex items-center justify-center cursor-pointer transition-colors shadow-[2px_2px_0px_#0F380F]"
+                title="Settings"
+                aria-label="Settings"
+              >
+                <Settings className="w-5 h-5" />
+              </button>
             </div>
             <div className="text-[11px] [@media(max-height:500px)]:text-[10px] font-bold mt-1 [@media(max-height:500px)]:mt-0.5 text-[#306230] uppercase tracking-widest">
               {settings.turnBased ? 'Turn-Based Strategy' : '2-Player Token Race'} • {settings.gridSize}×{settings.gridSize} Battle Arena
