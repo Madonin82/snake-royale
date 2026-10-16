@@ -11,10 +11,11 @@ interface GameBoardProps {
   onDirection: (direction: Direction, touchSeat?: 'p1' | 'p2') => void;
   interactionEnabled: boolean;
   splitTouchSeats?: boolean;
-  // Hotseat: touch taps route to onCellTap (pathfind + head-lock, like a
-  // PC mouse click) instead of the head-relative one-direction tap.
+  // Local modes: touch taps route to onCellTap (pathfind + head-lock,
+  // like a PC mouse click) instead of the head-relative one-direction
+  // tap. Online modes keep the head-relative tap.
   tapToPathfind?: boolean;
-  onCellTap?: (cell: Position) => void;
+  onCellTap?: (cell: Position, touchSeat?: 'p1' | 'p2', tapGridPoint?: { gx: number; gy: number }) => void;
   animationsDisabled?: boolean;
   hitstop?: HitstopInfo | null;
   fatalMoveAnimating?: string[];
@@ -450,14 +451,16 @@ export const GameBoard: React.FC<GameBoardProps> = ({
     const x = ((event.clientX - contentLeft) / canvas.clientWidth) * canvas.width;
     const y = ((event.clientY - contentTop) / canvas.clientHeight) * canvas.height;
 
-    // Hotseat: a tap is a cell tap (pathfind + head-lock, like a PC
-    // mouse click), not a one-direction step.
+    // Local modes: a tap is a cell tap (pathfind + head-lock, like a PC
+    // mouse click), not a one-direction step. The tapped half's seat
+    // (simultaneous 2P) and the tap point in fractional grid coords
+    // (tap-head tiebreak) ride along for the handler.
     if (tapToPathfind && onCellTap) {
       const gridSize = gameState.gridSize ?? settings.gridSize;
       const cellX = Math.floor(x / cellSize);
       const cellY = Math.floor(y / cellSize);
       if (cellX >= 0 && cellX < gridSize && cellY >= 0 && cellY < gridSize) {
-        onCellTap({ x: cellX, y: cellY });
+        onCellTap({ x: cellX, y: cellY }, touchSeat, { gx: x / cellSize, gy: y / cellSize });
       }
       return;
     }

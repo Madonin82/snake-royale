@@ -16,13 +16,20 @@ interface ControlsOverlayProps {
   locked: boolean;
   turnBased: boolean;
   localTwoPlayer?: boolean;
+  // Hotseat: when locked, lock buttons become active UNLOCK buttons.
+  isHotseat?: boolean;
+  onUnlock?: () => void;
 }
 
 export const ControlsOverlay: React.FC<ControlsOverlayProps> = ({
   onDirection, onLock, onUndo, onClear, onSkill, choosingSkill = false, canUseSkill = false, equippedSkill = null, queue, queueLimit, locked, turnBased,
   localTwoPlayer = false,
+  isHotseat = false,
+  onUnlock,
 }) => {
   const skillLabel = equippedSkill === 'rattle' ? 'RATTLE' : 'DART';
+  // Hotseat: a locked player unlocks (executes) instead of locking.
+  const showUnlock = isHotseat && locked && onUnlock !== undefined;
   return (
     <>
     <div className="legacy-mobile-controls w-full max-w-[340px] sm:hidden flex flex-col items-center py-2 select-none">
@@ -99,6 +106,16 @@ export const ControlsOverlay: React.FC<ControlsOverlayProps> = ({
               title="Lock P1's queued moves"
             >
               LOCK
+            </button>
+          ) : showUnlock ? (
+            <button
+              type="button"
+              onClick={onUnlock}
+              disabled={!turnBased}
+              className="absolute right-0 top-1/2 -translate-y-1/2 w-14 h-10 rounded border-2 border-[#0F380F] bg-[#0F380F] text-[#9BBC0F] text-[10px] font-black cursor-pointer"
+              title="Unlock and execute queued moves"
+            >
+              UNLOCK
             </button>
           ) : (
             <button
@@ -179,6 +196,16 @@ export const ControlsOverlay: React.FC<ControlsOverlayProps> = ({
           className="shrink-0 h-9 [@media(max-height:540px)]:h-7 border-2 border-[#0F380F] bg-[#0F380F] px-1.5 text-[10px] font-black text-[#9BBC0F] disabled:opacity-40 cursor-pointer flex items-center justify-center"
         >
           P1 LOCK
+        </button>
+      ) : showUnlock ? (
+        <button
+          type="button"
+          onClick={onUnlock}
+          disabled={!turnBased}
+          className="shrink-0 h-9 [@media(max-height:540px)]:h-7 border-2 border-[#0F380F] bg-[#0F380F] px-3 text-[11px] font-black text-[#9BBC0F] disabled:opacity-40 cursor-pointer flex items-center justify-center"
+          title="Unlock and execute queued moves"
+        >
+          UNLOCK
         </button>
       ) : (
         <button
