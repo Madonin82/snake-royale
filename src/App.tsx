@@ -583,6 +583,55 @@ const GameApp: React.FC<{ campaignPlaytestLevel: CampaignLevel | null }> = ({ ca
   const locksRef = useRef<Record<string, boolean>>(initialSeatRecords);
   const [locks, setLocks] = useState<Record<string, boolean>>(initialSeatRecords);
 
+  // LOCAL 2P HOTSEAT (unlock-to-move): one phone, one shared control set,
+  // players pass the phone. Active seat = whose turn it is (unlock + plan).
+  const [hotseatActiveSeat, setHotseatActiveSeat] = useState<'p1' | 'p2'>('p1');
+  const hotseatActiveSeatRef = useRef<'p1' | 'p2'>('p1');
+  hotseatActiveSeatRef.current = hotseatActiveSeat;
+  // Pass screen: which player the phone should pass TO (null = no pass screen).
+  const [hotseatPassTo, setHotseatPassTo] = useState<'p1' | 'p2' | null>(null);
+  const hotseatPassToRef = useRef<'p1' | 'p2' | null>(null);
+  hotseatPassToRef.current = hotseatPassTo;
+  // PIN pad: 'set' = first lock (choose a PIN or skip), 'unlock' = enter PIN to execute.
+  const [hotseatPinPad, setHotseatPinPad] = useState<null | { mode: 'set' | 'unlock'; seat: 'p1' | 'p2' }>(null);
+  const hotseatPinPadRef = useRef<null | { mode: 'set' | 'unlock'; seat: 'p1' | 'p2' }>(null);
+  hotseatPinPadRef.current = hotseatPinPad;
+  const [hotseatPinInput, setHotseatPinInput] = useState<string>('');
+  const [hotseatPinError, setHotseatPinError] = useState<string | null>(null);
+  // Per-match PINs: undefined = first lock not done yet; '' = no PIN; '12' = PIN set.
+  const [hotseatPins, setHotseatPins] = useState<Record<string, string | undefined>>({});
+  const hotseatPinsRef = useRef<Record<string, string | undefined>>({});
+  hotseatPinsRef.current = hotseatPins;
+  // True while a hotseat execution chain (move playback) is in progress.
+  const [hotseatExecuting, setHotseatExecuting] = useState<boolean>(false);
+  const hotseatExecutingRef = useRef<boolean>(false);
+  hotseatExecutingRef.current = hotseatExecuting;
+  const hotseatChainRef = useRef<boolean>(false);
+  const hotseatStepTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // After a hotseat lock lands: first lock → PIN setup pad; otherwise → pass screen.
+  const hotseatAfterLock = useCallback((seat: 'p1' | 'p2') => {
+    if (hotseatPinsRef.current[seat] === undefined) {
+      setHotseatPinInput('');
+      setHotseatPinError(null);
+      setHotseatPinPad({ mode: 'set', seat });
+    } else {
+      setHotseatPassTo(seat === 'p1' ? 'p2' : 'p1');
+    }
+  }, []);
+
+  // Hotseat input gate: only the active player's inputs count, and none
+  // count while the pass screen, PIN pad, or move playback is up.
+  // Reads refs only, so it never goes stale inside useCallbacks.
+  const hotseatBlocksInput = (targetKey: string): boolean => {
+    if (playModeRef.current !== 'LOCAL_HOTSEAT') return false;
+    if (targetKey !== hotseatActiveSeatRef.current) return true;
+    if (hotseatPassToRef.current !== null) return true;
+    if (hotseatExecutingRef.current) return true;
+    if (hotseatPinPadRef.current !== null) return true;
+    return false;
+  };
+
   // Pending score/SP increments waiting for their fly effect to land.
   // The HUD displays actual − pending, so the card number ticks up
   // exactly when the +N lands, not when the token is eaten.
@@ -619,8 +668,11 @@ const GameApp: React.FC<{ campaignPlaytestLevel: CampaignLevel | null }> = ({ ca
     if (playMode === 'ONLINE_JOIN') return onlineRole === 'p1' ? 'p1' : onlineRole === 'p2' ? 'p2' : null;
     if (playMode === 'ONLINE_SERVER' || playMode === 'ONLINE_SPECTATOR') return null;
     if (playMode === 'LOCAL_2P') return null; // Both local on shared keyboard
+    // Hotseat: the active player is the one holding the phone, so they
+    // see their own queue/paths and the inactive player's stay hidden.
+    if (playMode === 'LOCAL_HOTSEAT') return hotseatActiveSeat;
     return 'p1';
-  }, [playMode, onlineRole]);
+  }, [playMode, onlineRole, hotseatActiveSeat]);
 
   const replayDecisionQueues = useMemo(() => {
     if (!replayActive) return null;
@@ -812,7 +864,12 @@ const GameApp: React.FC<{ campaignPlaytestLevel: CampaignLevel | null }> = ({ ca
       Date.now(),
       isBuiltInAiActive(),
     );
-    for (const event of events) applyThinkTransition(event);
+    // Hotseat: only the active player gets a planning session (think
+    // timer). The inactive player's timer stays stopped.
+    const filtered = mode === 'LOCAL_HOTSEAT'
+      ? events.filter(event => event.player === hotseatActiveSeatRef.current)
+      : events;
+    for (const event of filtered) applyThinkTransition(event);
   }, [applyThinkTransition, isBuiltInAiActive]);
 
   const commitLocks = useCallback((
@@ -872,6 +929,9 @@ const GameApp: React.FC<{ campaignPlaytestLevel: CampaignLevel | null }> = ({ ca
     if (playModeRef.current === 'ONLINE_HOST' || playModeRef.current === 'ONLINE_SERVER') return 'p1';
     if (playModeRef.current === 'ONLINE_JOIN') return onlineRoleRef.current === 'p1' ? 'p1' : 'p2';
     if (playModeRef.current === 'LOCAL_2P') return playerSlot === 2 ? 'p2' : 'p1';
+    // Hotseat: the slot maps to the seat (the shared control set is
+    // wired to the active slot, and the hotseat gate checks active).
+    if (playModeRef.current === 'LOCAL_HOTSEAT') return playerSlot === 2 ? 'p2' : 'p1';
     return 'p1';
   }, []);
 
@@ -879,6 +939,7 @@ const GameApp: React.FC<{ campaignPlaytestLevel: CampaignLevel | null }> = ({ ca
     const current = stateRef.current;
     if (current.phase === 'OVER' || inLobby || inOnlineLobby) return;
     const targetKey = getTargetKey(playerSlot);
+    if (hotseatBlocksInput(targetKey)) return;
     if (choosingSkillMapRef.current[targetKey]) {
       soundEngine.playTick();
       setChoosingSkillMap(prev => {
@@ -1051,6 +1112,12 @@ const GameApp: React.FC<{ campaignPlaytestLevel: CampaignLevel | null }> = ({ ca
     // mid-execution would leave the guard set forever and block the
     // next match's tick-change kickoff.
     chainPendingRef.current = false;
+    // Hotseat execution chain (separate from maybeAdvanceTurn's chain).
+    hotseatChainRef.current = false;
+    if (hotseatStepTimerRef.current) {
+      clearTimeout(hotseatStepTimerRef.current);
+      hotseatStepTimerRef.current = null;
+    }
     hitstopUntilRef.current = 0;
     activeHitstopRef.current = null;
     setActiveHitstop(null);
@@ -1460,8 +1527,15 @@ const GameApp: React.FC<{ campaignPlaytestLevel: CampaignLevel | null }> = ({ ca
       return;
     }
 
+    // Hotseat: the lock does NOT advance the turn (simultaneous model).
+    // It opens PIN setup (first lock) or the pass screen.
+    if (playModeRef.current === 'LOCAL_HOTSEAT') {
+      hotseatAfterLock(who as 'p1' | 'p2');
+      return;
+    }
+
     maybeAdvanceTurn();
-  }, [maybeAdvanceTurn, setLock]);
+  }, [hotseatAfterLock, maybeAdvanceTurn, setLock]);
 
   useEffect(() => {
     if (!settings.turnBased) {
@@ -1504,6 +1578,7 @@ const GameApp: React.FC<{ campaignPlaytestLevel: CampaignLevel | null }> = ({ ca
       (['p1', 'p2'] as const).forEach(who => {
         const isOwnSeat =
           mode === 'LOCAL_2P' ||
+          (mode === 'LOCAL_HOTSEAT' && who === hotseatActiveSeatRef.current) ||
           (mode === 'SOLO_AI' && (who === 'p1' || !isBuiltInAiActive())) ||
           (mode === 'ONLINE_HOST' && who === 'p1') ||
           (mode === 'ONLINE_JOIN' && onlineRoleRef.current === who);
@@ -1512,6 +1587,14 @@ const GameApp: React.FC<{ campaignPlaytestLevel: CampaignLevel | null }> = ({ ca
           mode !== 'ONLINE_SPECTATOR' &&
           !(mode === 'SOLO_AI' && who === 'p2' && isBuiltInAiActive());
         const snake = current.snakes.find(candidate => candidate.id === who);
+
+        // Hotseat: only the active player's think timer runs. The
+        // inactive player's countdown never starts (and an auto-lock
+        // of the inactive player would break the pass-the-phone turn).
+        if (mode === 'LOCAL_HOTSEAT' && who !== hotseatActiveSeatRef.current) {
+          clearCountdown(who);
+          return;
+        }
 
         if (
           !matchActive ||
@@ -1582,6 +1665,7 @@ const GameApp: React.FC<{ campaignPlaytestLevel: CampaignLevel | null }> = ({ ca
     const current = stateRef.current;
     if (current.phase === 'OVER' || inLobby || inOnlineLobby) return;
     const targetKey = getTargetKey(playerSlot);
+    if (hotseatBlocksInput(targetKey)) return;
     if (choosingSkillMapRef.current[targetKey]) {
       setChoosingSkillMap(prev => {
         const updated = { ...prev, [targetKey]: false };
@@ -1606,6 +1690,7 @@ const GameApp: React.FC<{ campaignPlaytestLevel: CampaignLevel | null }> = ({ ca
     const current = stateRef.current;
     if (current.phase === 'OVER' || inLobby || inOnlineLobby || !settingsRef.current.turnBased) return;
     const targetKey = getTargetKey(playerSlot);
+    if (hotseatBlocksInput(targetKey)) return;
     if (locksRef.current[targetKey]) return;
 
     if (choosingSkillMapRef.current[targetKey]) {
@@ -1627,6 +1712,7 @@ const GameApp: React.FC<{ campaignPlaytestLevel: CampaignLevel | null }> = ({ ca
     const current = stateRef.current;
     if (current.phase === 'OVER' || inLobby || inOnlineLobby || !settingsRef.current.turnBased) return;
     const targetKey = getTargetKey(playerSlot, bridgeSeat);
+    if (hotseatBlocksInput(targetKey)) return;
     // If [RATTLE] or [DART] was pressed without a following direction, fizzle cleanly
     if (choosingSkillMapRef.current[targetKey]) {
       setChoosingSkillMap(prev => {
@@ -1649,8 +1735,15 @@ const GameApp: React.FC<{ campaignPlaytestLevel: CampaignLevel | null }> = ({ ca
       return;
     }
 
+    // Hotseat: the lock does NOT advance the turn (simultaneous model).
+    // It opens PIN setup (first lock) or the pass screen.
+    if (playModeRef.current === 'LOCAL_HOTSEAT') {
+      hotseatAfterLock(targetKey as 'p1' | 'p2');
+      return;
+    }
+
     maybeAdvanceTurn();
-  }, [inLobby, inOnlineLobby, maybeAdvanceTurn, setLock, getTargetKey]);
+  }, [hotseatAfterLock, inLobby, inOnlineLobby, maybeAdvanceTurn, setLock, getTargetKey]);
 
   const handleDirectionInput = useCallback((
     playerSlot: 1 | 2,
@@ -1663,6 +1756,8 @@ const GameApp: React.FC<{ campaignPlaytestLevel: CampaignLevel | null }> = ({ ca
     if (playModeRef.current === 'ONLINE_HOST' && !joinerAcknowledgedMatchStartRef.current) return false;
 
     const targetKey = getTargetKey(playerSlot, bridgeSeat);
+
+    if (hotseatBlocksInput(targetKey)) return false;
 
     const currentSnake = current.snakes.find(snake => snake.id === targetKey);
     if (!currentSnake || !currentSnake.isAlive) return false;
@@ -1918,6 +2013,11 @@ const GameApp: React.FC<{ campaignPlaytestLevel: CampaignLevel | null }> = ({ ca
         seat: mouseSeatRef.current,
       };
     }
+    // Hotseat: the mouse/touch tap always targets the active player.
+    if (playModeRef.current === 'LOCAL_HOTSEAT') {
+      const seat = hotseatActiveSeatRef.current;
+      return { slot: seat === 'p2' ? 2 : 1, seat };
+    }
     if (playModeRef.current === 'ONLINE_JOIN') {
       const mySeat = onlineRoleRef.current === 'p2' ? 'p2' : 'p1';
       return {
@@ -1937,7 +2037,217 @@ const GameApp: React.FC<{ campaignPlaytestLevel: CampaignLevel | null }> = ({ ca
     }, 1000);
   }, []);
 
-  const handleBoardCellClick = useCallback((cell: Position, _event: React.MouseEvent<HTMLCanvasElement>) => {
+  // ---- LOCAL 2P HOTSEAT: unlock-to-move execution ----
+  // Executes the active (locked) player's queued moves one at a time,
+  // with the other snake frozen. Each move is validated against the
+  // engine (clone-and-test) before committing: if a move would be
+  // illegal, stop before it and discard the rest (use-it-or-lose-it).
+  const executeHotseatMoves = useCallback((seat: 'p1' | 'p2') => {
+    if (hotseatChainRef.current) return;
+    if (stateRef.current.phase === 'OVER') return;
+    hotseatChainRef.current = true;
+    setHotseatExecuting(true);
+
+    const finish = (releaseLock: boolean) => {
+      hotseatChainRef.current = false;
+      setHotseatExecuting(false);
+      if (releaseLock) {
+        commitLocks({ ...locksRef.current, [seat]: false });
+      }
+    };
+
+    const step = () => {
+      if (!hotseatChainRef.current) return;
+      const current = stateRef.current;
+      if (current.phase === 'OVER') {
+        finish(false);
+        return;
+      }
+      const buf = moveBuffersRef.current[seat] ?? [];
+      if (buf.length === 0) {
+        // Buffer drained: release the lock → planning opens.
+        finish(true);
+        return;
+      }
+      const snake = current.snakes.find(s => s.id === seat);
+      if (!snake || !snake.isAlive) {
+        finish(true);
+        return;
+      }
+
+      // Stun: the engine skips a stunned snake's move and decrements
+      // stunTicks. Don't pop the entry (buffer preserved, like the
+      // simultaneous model) — burn one tick to tick the stun down,
+      // then end execution; the player plans with the entry still queued.
+      if ((snake.stunTicks ?? 0) > 0) {
+        const frozen = new Set(current.snakes.filter(s => s.id !== seat && s.isAlive).map(s => s.id));
+        const { nextState, events } = processGameTick(current, settingsRef.current, 0, { frozenSnakeIds: frozen });
+        playTickEvents(events);
+        stateRef.current = nextState;
+        setGameState(nextState);
+        setMatchHistory(prev => [...prev, nextState]);
+        dispatchAiState(nextState);
+        finish(true);
+        return;
+      }
+
+      const entry = buf[0];
+      // Clone-and-test: apply the entry to a clone, run the engine with
+      // the other snake frozen. If the active snake dies, the move is
+      // illegal → stop before it, discard the rest.
+      const testState = cloneGameState(current, current.gridSize ?? settingsRef.current.gridSize);
+      const testSnake = testState.snakes.find(s => s.id === seat)!;
+      if (entry.type === 'move') {
+        queueSnakeDirection(testSnake, entry.direction);
+      } else {
+        queueSnakeSkill(testSnake, { skillId: entry.type, direction: entry.direction });
+      }
+      const frozen = new Set(current.snakes.filter(s => s.id !== seat && s.isAlive).map(s => s.id));
+      const testResult = processGameTick(testState, settingsRef.current, 0, { frozenSnakeIds: frozen });
+      const testActive = testResult.nextState.snakes.find(s => s.id === seat)!;
+      if (!testActive.isAlive) {
+        // Illegal move: stop before it, discard this + all remaining
+        // (use-it-or-lose-it). The board is unchanged from before the
+        // illegal move, so the player sees exactly where they stopped.
+        moveBuffersRef.current = { ...moveBuffersRef.current, [seat]: [] };
+        setMoveBuffers({ ...moveBuffersRef.current });
+        finish(true);
+        return;
+      }
+
+      // Legal: commit. Pop the entry, apply to the real state, run the tick.
+      const nextBuf = buf.slice(1);
+      moveBuffersRef.current = { ...moveBuffersRef.current, [seat]: nextBuf };
+      setMoveBuffers({ ...moveBuffersRef.current });
+      const realSnake = stateRef.current.snakes.find(s => s.id === seat)!;
+      if (entry.type === 'move') {
+        queueSnakeDirection(realSnake, entry.direction);
+      } else {
+        queueSnakeSkill(realSnake, { skillId: entry.type, direction: entry.direction });
+      }
+      const prevState = stateRef.current;
+      const { nextState, events } = processGameTick(prevState, settingsRef.current, 0, { frozenSnakeIds: frozen });
+      playTickEvents(events);
+
+      // Token/SP fly effects (mirrors maybeAdvanceTurn's block).
+      if (!aiMode && events.tokenEaten) {
+        for (const [snakeId, spAwarded] of Object.entries(events.tokenEaten)) {
+          if (spAwarded && spAwarded > 0) {
+            setPendingScore(prev => ({ ...prev, [snakeId]: (prev[snakeId] ?? 0) + 1 }));
+            spawnTokenFlyEffect(snakeId, nextState, settingsRef.current.gridSize, () => {
+              setPendingScore(prev => ({ ...prev, [snakeId]: Math.max(0, (prev[snakeId] ?? 0) - 1) }));
+            });
+            setPendingSp(prev => ({ ...prev, [snakeId]: (prev[snakeId] ?? 0) + spAwarded }));
+            spawnSpFlyEffect(snakeId, nextState, settingsRef.current.gridSize, spAwarded, () => {
+              setPendingSp(prev => ({ ...prev, [snakeId]: Math.max(0, (prev[snakeId] ?? 0) - spAwarded) }));
+            });
+          }
+        }
+      }
+
+      stateRef.current = nextState;
+      setGameState(nextState);
+      setMatchHistory(prev => [...prev, nextState]);
+      dispatchAiState(nextState);
+
+      // Chain the next step after the beat (550ms, hitstop-aware),
+      // like maybeAdvanceTurn's openNextLockPhaseWithBeat.
+      triggerHitstop(prevState, nextState, () => {
+        hotseatStepTimerRef.current = setTimeout(() => {
+          hotseatStepTimerRef.current = null;
+          step();
+        }, 550);
+      });
+    };
+
+    step();
+  }, [aiMode, commitLocks, dispatchAiState, playTickEvents, triggerHitstop]);
+
+  // Tap head while locked = unlock. PIN pad if a PIN is set, otherwise
+  // the locked moves play immediately.
+  const handleHotseatUnlock = useCallback((seat: 'p1' | 'p2') => {
+    if (playModeRef.current !== 'LOCAL_HOTSEAT') return;
+    if (seat !== hotseatActiveSeatRef.current) return;
+    if (!locksRef.current[seat]) return;
+    if (hotseatExecutingRef.current) return;
+    if (hotseatPassToRef.current !== null) return;
+    if (hotseatPinPadRef.current !== null) return;
+    const pin = hotseatPinsRef.current[seat];
+    if (pin) {
+      setHotseatPinInput('');
+      setHotseatPinError(null);
+      setHotseatPinPad({ mode: 'unlock', seat });
+      return;
+    }
+    executeHotseatMoves(seat);
+  }, [executeHotseatMoves]);
+
+  // Pass screen TAP WHEN READY: the incoming player takes the phone.
+  // Their think timer starts at turn begin (unlock + plan phase) and
+  // stops when they lock.
+  const handleHotseatPassReady = useCallback(() => {
+    const next = hotseatPassToRef.current;
+    if (!next) return;
+    setHotseatPassTo(null);
+    setHotseatActiveSeat(next);
+    applyThinkTransition({ type: 'PLANNING_ENTERED', player: next, at: Date.now() });
+  }, [applyThinkTransition]);
+
+  // ---- Hotseat PIN pad actions ----
+  const handleHotseatPinDigit = (digit: string) => {
+    if (hotseatPinInput.length >= 2) return;
+    setHotseatPinInput(prev => (prev + digit).slice(0, 2));
+  };
+  const handleHotseatPinBackspace = () => {
+    setHotseatPinInput(prev => prev.slice(0, -1));
+  };
+  const handleHotseatPinClear = () => {
+    setHotseatPinInput('');
+  };
+  const handleHotseatPinSet = () => {
+    const pad = hotseatPinPadRef.current;
+    if (!pad || pad.mode !== 'set') return;
+    if (hotseatPinInput.length !== 2) return;
+    const nextPins = { ...hotseatPinsRef.current, [pad.seat]: hotseatPinInput };
+    hotseatPinsRef.current = nextPins;
+    setHotseatPins(nextPins);
+    setHotseatPinPad(null);
+    setHotseatPinInput('');
+    setHotseatPinError(null);
+    setHotseatPassTo(pad.seat === 'p1' ? 'p2' : 'p1');
+  };
+  const handleHotseatPinSkip = () => {
+    const pad = hotseatPinPadRef.current;
+    if (!pad || pad.mode !== 'set') return;
+    const nextPins = { ...hotseatPinsRef.current, [pad.seat]: '' };
+    hotseatPinsRef.current = nextPins;
+    setHotseatPins(nextPins);
+    setHotseatPinPad(null);
+    setHotseatPinInput('');
+    setHotseatPinError(null);
+    setHotseatPassTo(pad.seat === 'p1' ? 'p2' : 'p1');
+  };
+  const handleHotseatPinUnlock = () => {
+    const pad = hotseatPinPadRef.current;
+    if (!pad || pad.mode !== 'unlock') return;
+    if (hotseatPinInput.length !== 2) return;
+    if (hotseatPinInput === hotseatPinsRef.current[pad.seat]) {
+      setHotseatPinPad(null);
+      setHotseatPinInput('');
+      setHotseatPinError(null);
+      executeHotseatMoves(pad.seat);
+    } else {
+      setHotseatPinError('Wrong PIN — try again.');
+      setHotseatPinInput('');
+    }
+  };
+  const handleHotseatPinCancel = () => {
+    setHotseatPinPad(null);
+    setHotseatPinInput('');
+    setHotseatPinError(null);
+  };
+
+  const handleBoardCellClick = useCallback((cell: Position, _event?: React.MouseEvent<HTMLCanvasElement>) => {
     if (!settingsRef.current.turnBased) return;
     if (inLobby || inOnlineLobby || replayActive || stateRef.current.phase === 'OVER') return;
     if (playModeRef.current === 'ONLINE_SERVER' || playModeRef.current === 'ONLINE_SPECTATOR') return;
@@ -1951,6 +2261,18 @@ const GameApp: React.FC<{ campaignPlaytestLevel: CampaignLevel | null }> = ({ ca
     const { slot: targetSlot, seat: targetSeat } = getMouseTarget();
     const snake = stateRef.current.snakes.find(s => s.id === targetSeat);
     if (!snake || !snake.isAlive) return;
+
+    // Hotseat: while locked, tap head = UNLOCK (PIN pad if PIN set).
+    // Any other board tap while locked is silently ignored — the
+    // locked player cannot change their queue.
+    if (playModeRef.current === 'LOCAL_HOTSEAT' && locksRef.current[targetSeat]) {
+      if (hotseatBlocksInput(targetSeat)) return;
+      const head = snake.body[0];
+      if (head && cell.x === head.x && cell.y === head.y) {
+        handleHotseatUnlock(targetSeat as 'p1' | 'p2');
+      }
+      return;
+    }
 
     // Clicking while the buffer is already locked: denied sound, no X flash
     if (locksRef.current[targetSeat]) {
@@ -2033,7 +2355,7 @@ const GameApp: React.FC<{ campaignPlaytestLevel: CampaignLevel | null }> = ({ ca
     if (anyQueued) {
       lastClickInfoRef.current = { cell, time: now, targetSeat };
     }
-  }, [flashDeniedCell, getMouseTarget, handleBufferLock, handleDirectionInput, inLobby, inOnlineLobby, replayActive]);
+  }, [flashDeniedCell, getMouseTarget, handleBufferLock, handleDirectionInput, handleHotseatUnlock, inLobby, inOnlineLobby, replayActive]);
 
   const handleBoardCellDoubleClick = useCallback((_cell: Position) => {
     if (!settingsRef.current.turnBased || inLobby || inOnlineLobby || replayActive || stateRef.current.phase === 'OVER') return;
@@ -2059,9 +2381,10 @@ const GameApp: React.FC<{ campaignPlaytestLevel: CampaignLevel | null }> = ({ ca
 
   const mouseEffectiveSeat: 'p1' | 'p2' = useMemo(() => {
     if (playMode === 'LOCAL_2P') return mouseSeat;
+    if (playMode === 'LOCAL_HOTSEAT') return hotseatActiveSeat;
     if (playMode === 'ONLINE_JOIN') return onlineRole === 'p2' ? 'p2' : 'p1';
     return 'p1';
-  }, [playMode, mouseSeat, onlineRole]);
+  }, [playMode, mouseSeat, onlineRole, hotseatActiveSeat]);
 
   useEffect(() => {
     if (
@@ -2159,6 +2482,15 @@ const GameApp: React.FC<{ campaignPlaytestLevel: CampaignLevel | null }> = ({ ca
   const handleReturnToLobby = useCallback(() => {
     clearHitstop();
     realTimeInputBufferRef.current = {};
+    // Hotseat: drop any pass screen / PIN pad / execution on quit.
+    hotseatPinsRef.current = {};
+    setHotseatPins({});
+    setHotseatPinPad(null);
+    setHotseatPinInput('');
+    setHotseatPinError(null);
+    setHotseatPassTo(null);
+    setHotseatActiveSeat('p1');
+    setHotseatExecuting(false);
     if (campaignPlaytestLevel) {
       window.location.hash = '#/level-editor';
       return;
@@ -2335,6 +2667,13 @@ const GameApp: React.FC<{ campaignPlaytestLevel: CampaignLevel | null }> = ({ ca
       }
       if (e.key === 'Enter' || e.key === ' ') {
         const playMode = playModeRef.current;
+        // Hotseat: one shared control set — Enter and Space both lock
+        // the active player (whosever turn it is).
+        if (playMode === 'LOCAL_HOTSEAT') {
+          handleBufferLock(hotseatActiveSeatRef.current === 'p2' ? 2 : 1);
+          e.preventDefault();
+          return;
+        }
         if (playMode === 'LOCAL_2P') {
           handleBufferLock(e.key === ' ' ? 2 : 1);
           e.preventDefault();
@@ -2889,34 +3228,39 @@ const GameApp: React.FC<{ campaignPlaytestLevel: CampaignLevel | null }> = ({ ca
     realTimeInputBufferRef.current = {};
     setGameOverConfirmed(false);
     activeHandlerRef.current = null;
-    soloAiP2OverriddenRef.current = playMode === 'SOLO_AI' && bridgeSeatRef.current === 'p2';
+    // Read the mode from the ref (not the state): handleStartHotseat
+    // sets the ref synchronously before calling this, so a fresh
+    // hotseat start sees LOCAL_HOTSEAT. For every other caller the ref
+    // equals the state at call time, so behavior is unchanged.
+    const mode = playModeRef.current;
+    soloAiP2OverriddenRef.current = mode === 'SOLO_AI' && bridgeSeatRef.current === 'p2';
     const me = displayName.trim();
     const p2Local = displayNameP2.trim();
     let matchNames = { p1: 'PLAYER 1', p2: 'PLAYER 2' };
-    if (playMode === 'SOLO_AI') {
+    if (mode === 'SOLO_AI') {
       matchNames = { p1: me || 'PLAYER 1', p2: 'BOT' };
-    } else if (playMode === 'LOCAL_2P') {
+    } else if (mode === 'LOCAL_2P' || mode === 'LOCAL_HOTSEAT') {
       matchNames = { p1: me || 'PLAYER 1', p2: p2Local || 'PLAYER 2' };
-    } else if (playMode === 'ONLINE_HOST') {
+    } else if (mode === 'ONLINE_HOST') {
       matchNames = { p1: me || 'PLAYER 1', p2: playerNamesRef.current.p2 || 'PLAYER 2' };
-    } else if (playMode === 'ONLINE_SERVER') {
+    } else if (mode === 'ONLINE_SERVER') {
       matchNames = { p1: playerNamesRef.current.p1 || 'PLAYER 1', p2: playerNamesRef.current.p2 || 'PLAYER 2' };
-    } else if (playMode === 'ONLINE_JOIN') {
+    } else if (mode === 'ONLINE_JOIN') {
       matchNames = onlineRoleRef.current === 'p1'
         ? { p1: me || 'PLAYER 1', p2: playerNamesRef.current.p2 || 'PLAYER 2' }
         : { p1: playerNamesRef.current.p1 || 'PLAYER 1', p2: me || 'PLAYER 2' };
     }
-    const isOnline = playMode === 'ONLINE_HOST' || playMode === 'ONLINE_JOIN' || playMode === 'ONLINE_SERVER';
-    const isOnlineAuthority = playMode === 'ONLINE_HOST' || playMode === 'ONLINE_SERVER';
+    const isOnline = mode === 'ONLINE_HOST' || mode === 'ONLINE_JOIN' || mode === 'ONLINE_SERVER';
+    const isOnlineAuthority = mode === 'ONLINE_HOST' || mode === 'ONLINE_SERVER';
     if (isOnlineAuthority) {
       joinerAcknowledgedMatchStartRef.current = false;
       setJoinerAcknowledgedMatchStart(false);
     }
-    if (playMode === 'ONLINE_JOIN') {
+    if (mode === 'ONLINE_JOIN') {
       hasAcknowledgedMatchStartRef.current = false;
       setHasAcknowledgedMatchStart(false);
     }
-    const hostCustomLevel = (playMode === 'ONLINE_HOST' || playMode === 'ONLINE_SERVER')
+    const hostCustomLevel = (mode === 'ONLINE_HOST' || mode === 'ONLINE_SERVER')
       ? customOnlineLevelRef.current
       : null;
     const matchSettings = hostCustomLevel
@@ -2946,6 +3290,18 @@ const GameApp: React.FC<{ campaignPlaytestLevel: CampaignLevel | null }> = ({ ca
     stateRef.current = initial;
     setGameState(initial);
     clearLocks();
+    // Hotseat: fresh per-match state — P1 starts, no pass screen, no
+    // PINs (set at first lock), no execution in flight.
+    if (mode === 'LOCAL_HOTSEAT') {
+      hotseatPinsRef.current = {};
+      setHotseatPins({});
+      setHotseatPinPad(null);
+      setHotseatPinInput('');
+      setHotseatPinError(null);
+      setHotseatPassTo(null);
+      setHotseatActiveSeat('p1');
+      setHotseatExecuting(false);
+    }
     maybeOpenPlanningSessions();
     dispatchAiState(initial);
     sentTickRef.current = -1;
@@ -2957,7 +3313,7 @@ const GameApp: React.FC<{ campaignPlaytestLevel: CampaignLevel | null }> = ({ ca
 
     soundEngine.playCountdown(true);
 
-    if (playMode === 'ONLINE_HOST' || playMode === 'ONLINE_SERVER') {
+    if (mode === 'ONLINE_HOST' || mode === 'ONLINE_SERVER') {
       activeMatchRef.current = networkManager.broadcastMatchStart(initial, settingsRef.current);
     } else {
       activeMatchRef.current = null;
@@ -2975,6 +3331,15 @@ const GameApp: React.FC<{ campaignPlaytestLevel: CampaignLevel | null }> = ({ ca
   const handleStartLocal2P = () => {
     bridgeSeatRef.current = 'p1';
     setPlayMode('LOCAL_2P');
+    startNewMatch();
+  };
+
+  const handleStartHotseat = () => {
+    bridgeSeatRef.current = 'p1';
+    // Set the ref synchronously — startNewMatch reads the ref, so a
+    // fresh hotseat start (from SOLO_AI lobby) sees LOCAL_HOTSEAT.
+    playModeRef.current = 'LOCAL_HOTSEAT';
+    setPlayMode('LOCAL_HOTSEAT');
     startNewMatch();
   };
 
@@ -3187,7 +3552,9 @@ const GameApp: React.FC<{ campaignPlaytestLevel: CampaignLevel | null }> = ({ ca
   // Single-screen match layout: when a match (or replay) is on screen, the
   // root <main> becomes a locked viewport (100dvh, no scroll).
   const isMatchView = !inLobby && !inOnlineLobby;
-  const controlsSnake = gameState.snakes.find(snake => snake.id === getTargetKey(1))!;
+  // Hotseat: the single shared control set follows the active player.
+  const controlsSlot: 1 | 2 = playMode === 'LOCAL_HOTSEAT' ? (hotseatActiveSeat === 'p2' ? 2 : 1) : 1;
+  const controlsSnake = gameState.snakes.find(snake => snake.id === getTargetKey(controlsSlot))!;
 
   return (
     <main className={`h-[100dvh] overflow-hidden flex flex-col items-center justify-between p-1.5 sm:p-3 [@media(max-height:500px)]:p-1 ${settings.crtFilterEnabled ? 'crt-overlay' : ''}`}>
@@ -3235,6 +3602,7 @@ const GameApp: React.FC<{ campaignPlaytestLevel: CampaignLevel | null }> = ({ ca
             <LobbyView
               onStartSolo={handleStartSolo}
               onStartLocal2P={handleStartLocal2P}
+              onStartHotseat={handleStartHotseat}
               onCreateOnlineRoom={handleCreateOnlineRoom}
               onCreateServerRoom={handleCreateServerRoom}
               onSpectateRoom={handleSpectateRoom}
@@ -3295,7 +3663,7 @@ const GameApp: React.FC<{ campaignPlaytestLevel: CampaignLevel | null }> = ({ ca
                 mouseSeat={!inLobby && !inOnlineLobby && settings.turnBased ? (hasClaimedMouseRef.current ? mouseEffectiveSeat : undefined) : undefined}
                 onToggleMouseSeat={playMode === 'LOCAL_2P' ? () => setMouseSeat(prev => prev === 'p1' ? 'p2' : 'p1') : undefined}
                 onSkill={(seat) => {
-                  if (playMode === 'LOCAL_2P') {
+                  if (playMode === 'LOCAL_2P' || playMode === 'LOCAL_HOTSEAT') {
                     handleSkillButton(seat === 'p2' ? 2 : 1);
                   } else {
                     handleSkillButton(1);
@@ -3310,10 +3678,19 @@ const GameApp: React.FC<{ campaignPlaytestLevel: CampaignLevel | null }> = ({ ca
                   settings={settings}
                   lockedPaths={lockedPaths}
                   plannedPaths={plannedPaths}
-                  controlSeat={playMode === 'ONLINE_JOIN' && onlineRole === 'p2' ? 'p2' : 'p1'}
-                  onDirection={(dir, touchSeat) => handleDirectionInput(touchSeat === 'p2' ? 2 : 1, dir)}
+                  controlSeat={playMode === 'LOCAL_HOTSEAT' ? hotseatActiveSeat : (playMode === 'ONLINE_JOIN' && onlineRole === 'p2' ? 'p2' : 'p1')}
+                  onDirection={(dir, touchSeat) => {
+                    // Hotseat: the shared control set always drives the active player.
+                    if (playMode === 'LOCAL_HOTSEAT') {
+                      handleDirectionInput(hotseatActiveSeat === 'p2' ? 2 : 1, dir);
+                    } else {
+                      handleDirectionInput(touchSeat === 'p2' ? 2 : 1, dir);
+                    }
+                  }}
                   interactionEnabled={!replayActive}
                   splitTouchSeats={playMode === 'LOCAL_2P'}
+                  tapToPathfind={playMode === 'LOCAL_HOTSEAT'}
+                  onCellTap={(cell) => handleBoardCellClick(cell)}
                   animationsDisabled={aiMode}
                   hitstop={activeHitstop}
                   fatalMoveAnimating={fatalMoveSnakes}
@@ -3333,7 +3710,7 @@ const GameApp: React.FC<{ campaignPlaytestLevel: CampaignLevel | null }> = ({ ca
                   )}
                 {showTurnHint && displayState.turnBased && displayState.phase !== 'OVER' && !replayActive && (
                   <div role="status" className="absolute top-1 left-1/2 z-30 flex w-[min(20rem,calc(100%-1rem))] -translate-x-1/2 items-center justify-between gap-2 border-2 border-[#0F380F] bg-[#9BBC0F] px-2 py-1 font-mono text-[10px] font-bold text-[#0F380F] shadow-[2px_2px_0px_#0F380F]">
-                    <span>BOTH LOCK → BOARD STEPS</span>
+                    <span>{playMode === 'LOCAL_HOTSEAT' ? 'UNLOCK → MOVE → LOCK → PASS' : 'BOTH LOCK → BOARD STEPS'}</span>
                     <button
                       type="button"
                       onClick={() => {
@@ -3397,15 +3774,15 @@ const GameApp: React.FC<{ campaignPlaytestLevel: CampaignLevel | null }> = ({ ca
               <div className="controls-area">
                 {!replayActive && (
                   <ControlsOverlay
-                    onDirection={(dir) => handleDirectionInput(1, dir)}
-                    onLock={() => handleBufferLock(1)}
-                    onUndo={() => handleBufferUndo(1)}
-                    onClear={() => handleBufferClear(1)}
-                    onSkill={() => handleSkillButton(1)}
-                    choosingSkill={Boolean(choosingSkillMap[getTargetKey(1)])}
+                    onDirection={(dir) => handleDirectionInput(controlsSlot, dir)}
+                    onLock={() => handleBufferLock(controlsSlot)}
+                    onUndo={() => handleBufferUndo(controlsSlot)}
+                    onClear={() => handleBufferClear(controlsSlot)}
+                    onSkill={() => handleSkillButton(controlsSlot)}
+                    choosingSkill={Boolean(choosingSkillMap[getTargetKey(controlsSlot)])}
                     equippedSkill={controlsSnake?.equippedSkill ?? null}
                     canUseSkill={(() => {
-                      const seat = getTargetKey(1);
+                      const seat = getTargetKey(controlsSlot);
                       const snake = gameState.snakes.find(s => s.id === seat);
                       if (!canActivateSkill(snake, gameState, gameState.skillsAvailable ?? settings.skillsAvailable)) {
                         return false;
@@ -3424,12 +3801,12 @@ const GameApp: React.FC<{ campaignPlaytestLevel: CampaignLevel | null }> = ({ ca
                       return true;
                     })()}
                     queue={settings.turnBased
-                      ? moveBuffers[getTargetKey(1)]
+                      ? moveBuffers[getTargetKey(controlsSlot)]
                       : [controlsSnake.queuedDirection]
                         .filter((direction): direction is Direction => direction !== null)
                         .map((direction): BufferEntry => ({ type: 'move', direction }))}
                     queueLimit={controlsSnake.body.length}
-                    locked={locks[getTargetKey(1)]}
+                    locked={locks[getTargetKey(controlsSlot)]}
                     turnBased={settings.turnBased}
                     localTwoPlayer={playMode === 'LOCAL_2P'}
                   />
@@ -3459,8 +3836,77 @@ const GameApp: React.FC<{ campaignPlaytestLevel: CampaignLevel | null }> = ({ ca
       {/* Footer info — hidden in match view and short landscape screens to give full vertical budget */}
       {!isMatchView && (
         <footer className="text-center text-[10px] font-mono opacity-80 py-0.5 shrink-0 [@media(max-height:500px)]:hidden">
-          4-shade palette • {settings.gridSize}×{settings.gridSize} grid • {settings.turnBased ? 'Turn-based simultaneous moves' : `Host-authoritative ${settings.tickRate} TPS`} • Gamepad API ready
+          4-shade palette • {settings.gridSize}×{settings.gridSize} grid • {playMode === 'LOCAL_HOTSEAT' ? 'Turn-based hotseat: unlock → move → lock → pass' : settings.turnBased ? 'Turn-based simultaneous moves' : `Host-authoritative ${settings.tickRate} TPS`} • Gamepad API ready
         </footer>
+      )}
+
+      {/* ---- LOCAL 2P HOTSEAT: pass screen + PIN pad ---- */}
+      {playMode === 'LOCAL_HOTSEAT' && hotseatPassTo !== null && (
+        <div role="dialog" aria-modal="true" aria-label="Pass the phone" className="fixed inset-0 z-50 flex flex-col items-center justify-center gap-4 bg-[#0F380F] p-6 font-mono text-[#9BBC0F]">
+          <div className="text-center">
+            <div className="text-xs font-black uppercase tracking-widest opacity-80">Hotseat • Pass the phone</div>
+            <div className="mt-2 text-2xl font-black">Pass to {gameState.snakes.find(s => s.id === hotseatPassTo)?.name ?? 'PLAYER'}</div>
+            <div className="mt-1 text-xs opacity-80">Hand the phone over — your turn is locked.</div>
+          </div>
+          <button
+            type="button"
+            onClick={handleHotseatPassReady}
+            className="w-full max-w-[320px] cursor-pointer py-4 bg-[#9BBC0F] text-[#0F380F] border-4 border-[#9BBC0F] font-black text-lg shadow-[4px_4px_0px_#306230] active:translate-x-[2px] active:translate-y-[2px] active:shadow-none"
+          >
+            TAP WHEN READY
+          </button>
+        </div>
+      )}
+      {playMode === 'LOCAL_HOTSEAT' && hotseatPinPad !== null && (
+        <div role="dialog" aria-modal="true" aria-label="PIN pad" className="fixed inset-0 z-50 flex flex-col items-center justify-center gap-3 bg-[#0F380F] p-6 font-mono text-[#9BBC0F]">
+          <div className="w-full max-w-[300px] flex flex-col gap-3 bg-[#9BBC0F] border-4 border-[#0F380F] shadow-[6px_6px_0px_#306230] p-4 text-center text-[#0F380F]">
+            <div className="text-xs font-black uppercase tracking-wider">
+              {hotseatPinPad.mode === 'set'
+                ? `Set a 2-digit PIN (${gameState.snakes.find(s => s.id === hotseatPinPad.seat)?.name ?? 'PLAYER'})`
+                : `Enter PIN (${gameState.snakes.find(s => s.id === hotseatPinPad.seat)?.name ?? 'PLAYER'})`}
+            </div>
+            <div className="text-[10px] font-bold opacity-80">
+              {hotseatPinPad.mode === 'set'
+                ? 'Optional — skip for no PIN. The PIN keeps the other player from viewing your queue.'
+                : 'Unlock your locked moves.'}
+            </div>
+            <div aria-live="polite" className="h-7 text-lg font-black tracking-[0.5em]">
+              {hotseatPinInput.padEnd(2, '·')}
+            </div>
+            {hotseatPinError && <div role="alert" className="text-[11px] font-black text-red-700">{hotseatPinError}</div>}
+            <div className="grid grid-cols-3 gap-2">
+              {['1', '2', '3', '4', '5', '6', '7', '8', '9', 'C', '0', '←'].map(key => (
+                <button
+                  key={key}
+                  type="button"
+                  onClick={() => key === '←' ? handleHotseatPinBackspace() : key === 'C' ? handleHotseatPinClear() : handleHotseatPinDigit(key)}
+                  className="cursor-pointer py-3 bg-[#0F380F] text-[#9BBC0F] font-black text-lg border-2 border-[#0F380F] active:bg-[#306230]"
+                >
+                  {key}
+                </button>
+              ))}
+            </div>
+            {hotseatPinPad.mode === 'set' ? (
+              <div className="flex gap-2">
+                <button type="button" onClick={handleHotseatPinSet} disabled={hotseatPinInput.length !== 2} className="flex-1 cursor-pointer py-2 bg-[#0F380F] text-[#9BBC0F] font-black text-sm border-2 border-[#0F380F] disabled:opacity-40">
+                  SET PIN
+                </button>
+                <button type="button" onClick={handleHotseatPinSkip} className="flex-1 cursor-pointer py-2 bg-[#8BAC0F] text-[#0F380F] font-black text-sm border-2 border-[#0F380F]">
+                  SKIP — NO PIN
+                </button>
+              </div>
+            ) : (
+              <div className="flex gap-2">
+                <button type="button" onClick={handleHotseatPinUnlock} disabled={hotseatPinInput.length !== 2} className="flex-1 cursor-pointer py-2 bg-[#0F380F] text-[#9BBC0F] font-black text-sm border-2 border-[#0F380F] disabled:opacity-40">
+                  UNLOCK
+                </button>
+                <button type="button" onClick={handleHotseatPinCancel} className="flex-1 cursor-pointer py-2 bg-[#8BAC0F] text-[#0F380F] font-black text-sm border-2 border-[#0F380F]">
+                  CANCEL
+                </button>
+              </div>
+            )}
+          </div>
+        </div>
       )}
 
       {/* Modals */}

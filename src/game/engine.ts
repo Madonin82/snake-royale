@@ -299,7 +299,8 @@ export interface TickResult {
 export function processGameTick(
   currentState: GameState,
   settings: GameSettings,
-  deltaMs: number
+  deltaMs: number,
+  opts?: { frozenSnakeIds?: ReadonlySet<string> },
 ): TickResult {
   if (currentState.phase === 'OVER') {
     return {
@@ -540,6 +541,12 @@ export function processGameTick(
     const movingIndices: number[] = [];
     for (let i = 0; i < snakes.length; i++) {
       if (!snakes[i].isAlive) continue;
+      // Hotseat: frozen snakes (the inactive player's) stay in place.
+      // Their bodies still block (they're excluded from movingIndices, so
+      // collision checks use their full body), but they don't move, eat,
+      // or collide as movers. Checked BEFORE stun so a frozen snake's
+      // real stunTicks is preserved for its own turn.
+      if (opts?.frozenSnakeIds?.has(snakes[i].id)) continue;
       // Stunned snakes skip their move (stay in place), buffer preserved.
       if ((snakes[i].stunTicks ?? 0) > 0) {
         snakes[i].stunTicks = (snakes[i].stunTicks ?? 0) - 1;

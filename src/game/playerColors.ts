@@ -102,6 +102,8 @@ export function getSeatDisplayTag(
   if (playMode === 'ONLINE_SERVER' || playMode === 'ONLINE_SPECTATOR') return `(P${seatNumber})`;
   if (playMode === 'SOLO_AI') return seat === 'p1' ? '(YOU)' : '';
   if (playMode === 'LOCAL_2P') return `(P${seatNumber})`;
+  // Hotseat: both players are local, sitting next to each other — never "(REMOTE)".
+  if (playMode === 'LOCAL_HOTSEAT') return `(P${seatNumber})`;
   if (viewerSeat) return viewerSeat === seat ? '(YOU)' : '(REMOTE)';
   return seat === 'p1' ? '(YOU)' : '';
 }

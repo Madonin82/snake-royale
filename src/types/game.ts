@@ -167,7 +167,7 @@ export interface SnakeAiBridge {
   ) => () => void;
 }
 
-export type PlayMode = 'SOLO_AI' | 'LOCAL_2P' | 'ONLINE_HOST' | 'ONLINE_JOIN' | 'ONLINE_SERVER' | 'ONLINE_SPECTATOR' | 'VIRTUAL_BOT';
+export type PlayMode = 'SOLO_AI' | 'LOCAL_2P' | 'LOCAL_HOTSEAT' | 'ONLINE_HOST' | 'ONLINE_JOIN' | 'ONLINE_SERVER' | 'ONLINE_SPECTATOR' | 'VIRTUAL_BOT';
 
 export interface LatencySample {
   pingId: string;
