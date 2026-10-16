@@ -1,0 +1,113 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import {
+  getDeviceGestureDefaults,
+  getStoredUserSettings,
+  resolveInitialSettings,
+  saveStoredUserSettings,
+  SETTINGS_STORAGE_KEY,
+} from './settingsStorage';
+import { DEFAULT_SETTINGS } from './engine';
+import { GameSettings } from '../types/game';
+
+class MockStorage implements Storage {
+  private store = new Map<string, string>();
+
+  get length() {
+    return this.store.size;
+  }
+  clear(): void {
+    this.store.clear();
+  }
+  getItem(key: string): string | null {
+    return this.store.get(key) ?? null;
+  }
+  key(index: number): string | null {
+    return Array.from(this.store.keys())[index] ?? null;
+  }
+  removeItem(key: string): void {
+    this.store.delete(key);
+  }
+  setItem(key: string, value: string): void {
+    this.store.set(key, value);
+  }
+}
+
+test('device gesture defaults: touch device turns tap-to-path OFF, swipe ON', () => {
+  const touchDefaults = getDeviceGestureDefaults(true);
+  assert.equal(touchDefaults.gestureSwipeEnabled, true);
+  assert.equal(touchDefaults.gestureTapPathEnabled, false);
+  assert.equal(touchDefaults.gestureTapHeadLockEnabled, true);
+  assert.equal(touchDefaults.gestureDragEnabled, true);
+  assert.equal(touchDefaults.gestureLongPressEnabled, true);
+  assert.equal(touchDefaults.gestureCardSwipeEnabled, true);
+});
+
+test('device gesture defaults: non-touch device turns tap-to-path ON, swipe ON', () => {
+  const desktopDefaults = getDeviceGestureDefaults(false);
+  assert.equal(desktopDefaults.gestureSwipeEnabled, true);
+  assert.equal(desktopDefaults.gestureTapPathEnabled, true);
+  assert.equal(desktopDefaults.gestureTapHeadLockEnabled, true);
+  assert.equal(desktopDefaults.gestureDragEnabled, true);
+  assert.equal(desktopDefaults.gestureLongPressEnabled, true);
+  assert.equal(desktopDefaults.gestureCardSwipeEnabled, true);
+});
+
+test('fresh install without stored settings merges device defaults over DEFAULT_SETTINGS', () => {
+  const storage = new MockStorage();
+  const settings = getStoredUserSettings(storage);
+  // In Node environment without window.matchMedia, isTouch is false
+  assert.equal(settings.gestureTapPathEnabled, true);
+  assert.equal(settings.gestureSwipeEnabled, true);
+  assert.equal(settings.gridSize, DEFAULT_SETTINGS.gridSize);
+});
+
+test('persists settings to localStorage and reloads them', () => {
+  const storage = new MockStorage();
+  const modified: GameSettings = {
+    ...DEFAULT_SETTINGS,
+    gestureSwipeEnabled: false,
+    gestureTapPathEnabled: false,
+    gridSize: 16,
+  };
+
+  saveStoredUserSettings(modified, storage);
+  assert.ok(storage.getItem(SETTINGS_STORAGE_KEY));
+
+  const loaded = getStoredUserSettings(storage);
+  assert.equal(loaded.gestureSwipeEnabled, false);
+  assert.equal(loaded.gestureTapPathEnabled, false);
+  assert.equal(loaded.gridSize, 16);
+  // Future/other defaults are preserved
+  assert.equal(loaded.gestureDragEnabled, true);
+});
+
+test('recovering from invalid JSON falls back gracefully', () => {
+  const storage = new MockStorage();
+  storage.setItem(SETTINGS_STORAGE_KEY, 'invalid json {[');
+  const loaded = getStoredUserSettings(storage);
+  assert.equal(loaded.gestureSwipeEnabled, true);
+});
+
+test('precedence: campaign/level settings > stored user settings > DEFAULT_SETTINGS', () => {
+  const storage = new MockStorage();
+  const userSettings: GameSettings = {
+    ...DEFAULT_SETTINGS,
+    gridSize: 12,
+    raceTurns: 60,
+    gestureTapPathEnabled: false,
+  };
+  saveStoredUserSettings(userSettings, storage);
+
+  // Campaign level overrides gridSize to 16, but does not specify gestureTapPathEnabled
+  const campaignSettings: Partial<GameSettings> = {
+    gridSize: 16,
+  };
+
+  const resolved = resolveInitialSettings(campaignSettings as GameSettings, storage);
+  // Campaign wins for defined settings:
+  assert.equal(resolved.gridSize, 16);
+  // Stored user settings fill in what the level didn't specify:
+  assert.equal(resolved.raceTurns, 60);
+  assert.equal(resolved.gestureTapPathEnabled, false);
+});

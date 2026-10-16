@@ -679,7 +679,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                 {currentRow === 'CONTROLS' && <span className="animate-pulse">►</span>}
                 <span>CONTROLS GESTURES</span>
               </span>
-              <span className="text-[9px] opacity-75">ALL ENABLED BY DEFAULT</span>
+              <span className="text-[9px] opacity-75">DEVICE DEFAULTS</span>
             </div>
             <div className="grid grid-cols-2 gap-1 text-[10px]">
               {[
@@ -694,8 +694,9 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                 return (
                   <button
                     key={key}
+                    type="button"
                     onClick={() => onUpdateSettings({ [key]: !enabled })}
-                    className={`py-1 px-1.5 border border-[#0F380F] font-black flex items-center justify-between cursor-pointer ${
+                    className={`min-h-[44px] py-2 px-2 border border-[#0F380F] font-black flex items-center justify-between cursor-pointer ${
                       enabled ? 'bg-[#0F380F] text-[#9BBC0F]' : 'bg-[#9BBC0F] text-[#0F380F]'
                     }`}
                   >
