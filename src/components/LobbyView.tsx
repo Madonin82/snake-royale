@@ -612,7 +612,7 @@ export const LobbyView: React.FC<LobbyViewProps> = ({
 
           <div className="bg-[#8BAC0F] p-3 [@media(max-height:500px)]:p-2 border-2 border-[#0F380F] flex flex-col gap-2.5 [@media(max-height:500px)]:gap-1.5 flex-1 justify-center min-h-0">
             <div className="text-xs [@media(max-height:500px)]:text-[11px] font-bold leading-tight">
-              🎮 Spar against the built-in bot! On phones: swipe or tap the board to queue moves, then tap LOCK.
+              🎮 Spar against the built-in bot! On phones: swipe for one step, tap a cell to go there, then tap your head to lock.
             </div>
 
             <div className="text-[10px] font-bold uppercase tracking-wider text-[#0F380F]">
@@ -1134,7 +1134,7 @@ export const LobbyView: React.FC<LobbyViewProps> = ({
                 Both players plan moves in secret, then the board steps simultaneously. Grab tokens to grow ({settings.raceTurns} turns), then survive the shrinking ring (closes every {settings.shrinkEveryTurns} turns). Last snake slithering wins.
               </div>
               <div className="mt-0.5 pt-0.5 border-t border-[#0F380F]/40 font-bold text-[#306230] flex flex-col gap-0.5">
-                <div>📱 TOUCH / IPHONE: SWIPE OR TAP THE BOARD TO QUEUE MOVES • TAP LOCK / UNDO</div>
+                <div>📱 TOUCH / IPHONE: SWIPE = ONE STEP • TAP A CELL = GO THERE • TAP YOUR HEAD = LOCK</div>
                 <div>🎮 KEYBOARD / GAMEPAD: D-PAD / ARROWS • A / ENTER: SELECT • B / ESC: BACK</div>
               </div>
             </div>

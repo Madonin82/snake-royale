@@ -2247,7 +2247,7 @@ const GameApp: React.FC<{ campaignPlaytestLevel: CampaignLevel | null }> = ({ ca
     setHotseatPinError(null);
   };
 
-  const handleBoardCellClick = useCallback((cell: Position, _event?: React.MouseEvent<HTMLCanvasElement>) => {
+  const handleBoardCellClick = useCallback((cell: Position, _event?: React.MouseEvent<HTMLCanvasElement>, touchInfo?: { seat?: 'p1' | 'p2'; tapGridPoint?: { gx: number; gy: number } }) => {
     if (!settingsRef.current.turnBased) return;
     if (inLobby || inOnlineLobby || replayActive || stateRef.current.phase === 'OVER') return;
     if (playModeRef.current === 'ONLINE_SERVER' || playModeRef.current === 'ONLINE_SPECTATOR') return;
@@ -2258,7 +2258,36 @@ const GameApp: React.FC<{ campaignPlaytestLevel: CampaignLevel | null }> = ({ ca
       setMouseSeat('p1');
     }
 
-    const { slot: targetSlot, seat: targetSeat } = getMouseTarget();
+    // Resolve the target seat. Simultaneous-2P touch: the tapped head
+    // wins (tap-head locks whichever head was tapped); otherwise the
+    // tapped half. Tiebreak (tap between two adjacent heads): nearest
+    // virtual-head centre by tap point; P1 if exactly equidistant.
+    let targetSlot: 1 | 2;
+    let targetSeat: 'p1' | 'p2';
+    if (playModeRef.current === 'LOCAL_2P' && touchInfo?.seat) {
+      const p1Snake = stateRef.current.snakes.find(s => s.id === 'p1');
+      const p2Snake = stateRef.current.snakes.find(s => s.id === 'p2');
+      const p1Head = p1Snake && p1Snake.isAlive ? computeVirtualHead(p1Snake, moveBuffersRef.current['p1'] ?? []) : null;
+      const p2Head = p2Snake && p2Snake.isAlive ? computeVirtualHead(p2Snake, moveBuffersRef.current['p2'] ?? []) : null;
+      const onP1Head = p1Head !== null && cell.x === p1Head.pos.x && cell.y === p1Head.pos.y;
+      const onP2Head = p2Head !== null && cell.x === p2Head.pos.x && cell.y === p2Head.pos.y;
+      if (onP1Head && onP2Head && touchInfo.tapGridPoint) {
+        const d1 = (touchInfo.tapGridPoint.gx - (p1Head.pos.x + 0.5)) ** 2 + (touchInfo.tapGridPoint.gy - (p1Head.pos.y + 0.5)) ** 2;
+        const d2 = (touchInfo.tapGridPoint.gx - (p2Head.pos.x + 0.5)) ** 2 + (touchInfo.tapGridPoint.gy - (p2Head.pos.y + 0.5)) ** 2;
+        targetSeat = d1 <= d2 ? 'p1' : 'p2';
+      } else if (onP1Head) {
+        targetSeat = 'p1';
+      } else if (onP2Head) {
+        targetSeat = 'p2';
+      } else {
+        targetSeat = touchInfo.seat;
+      }
+      targetSlot = targetSeat === 'p2' ? 2 : 1;
+    } else {
+      const t = getMouseTarget();
+      targetSlot = t.slot;
+      targetSeat = t.seat;
+    }
     const snake = stateRef.current.snakes.find(s => s.id === targetSeat);
     if (!snake || !snake.isAlive) return;
 
@@ -2667,10 +2696,15 @@ const GameApp: React.FC<{ campaignPlaytestLevel: CampaignLevel | null }> = ({ ca
       }
       if (e.key === 'Enter' || e.key === ' ') {
         const playMode = playModeRef.current;
-        // Hotseat: one shared control set — Enter and Space both lock
-        // the active player (whosever turn it is).
+        // Hotseat: one shared control set — Enter and Space toggle
+        // lock/unlock for the active player (whosever turn it is).
         if (playMode === 'LOCAL_HOTSEAT') {
-          handleBufferLock(hotseatActiveSeatRef.current === 'p2' ? 2 : 1);
+          const seat = hotseatActiveSeatRef.current;
+          if (locksRef.current[seat]) {
+            handleHotseatUnlock(seat);
+          } else {
+            handleBufferLock(seat === 'p2' ? 2 : 1);
+          }
           e.preventDefault();
           return;
         }
@@ -3689,8 +3723,8 @@ const GameApp: React.FC<{ campaignPlaytestLevel: CampaignLevel | null }> = ({ ca
                   }}
                   interactionEnabled={!replayActive}
                   splitTouchSeats={playMode === 'LOCAL_2P'}
-                  tapToPathfind={playMode === 'LOCAL_HOTSEAT'}
-                  onCellTap={(cell) => handleBoardCellClick(cell)}
+                  tapToPathfind={playMode === 'SOLO_AI' || playMode === 'LOCAL_2P' || playMode === 'LOCAL_HOTSEAT'}
+                  onCellTap={(cell, touchSeat, tapGridPoint) => handleBoardCellClick(cell, undefined, { seat: touchSeat, tapGridPoint })}
                   animationsDisabled={aiMode}
                   hitstop={activeHitstop}
                   fatalMoveAnimating={fatalMoveSnakes}
@@ -3809,6 +3843,8 @@ const GameApp: React.FC<{ campaignPlaytestLevel: CampaignLevel | null }> = ({ ca
                     locked={locks[getTargetKey(controlsSlot)]}
                     turnBased={settings.turnBased}
                     localTwoPlayer={playMode === 'LOCAL_2P'}
+                    isHotseat={playMode === 'LOCAL_HOTSEAT'}
+                    onUnlock={() => handleHotseatUnlock(hotseatActiveSeat)}
                   />
                 )}
                 {replayActive && (
