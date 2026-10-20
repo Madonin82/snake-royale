@@ -16,7 +16,8 @@ import {
 } from './game/engine';
 import { resolveInitialSettings, saveStoredUserSettings } from './game/settingsStorage';
 import { canActivateSkill, canAffordQueuedDart, canAffordQueuedRattle, canAffordQueuedSkill, canQueueRattleWithLength, isValidDartDirection, SKILLS } from './game/skills';
-import { calculateAIAction, calculateAIMove } from './game/ai';
+import { buildAIPlan, calculateAIAction, calculateAIMove, planDiverged } from './game/ai';
+import type { ChainIntent } from './game/ai';
 import { cloneGameState, toCompactGameState } from './game/aiBridge';
 import { shouldApplyRtdbBridgeCommand } from './game/aiBridgeRtdb';
 import { computeVirtualHead, findBfsPath, findFallbackBfsPath, resolveDominantDirection } from './game/mousePathfinding';
@@ -590,6 +591,13 @@ const GameApp: React.FC<{ campaignPlaytestLevel: CampaignLevel | null }> = ({ ca
   const initialSeatRecords = Object.fromEntries(gameState.snakes.map(snake => [snake.id, false]));
   const locksRef = useRef<Record<string, boolean>>(initialSeatRecords);
   const [locks, setLocks] = useState<Record<string, boolean>>(initialSeatRecords);
+
+  // BOT-BALANCE SPEC (Changes 2 + 4): per-AI-snake plan projections
+  // (opponent bodies the locked plan expects after each executed
+  // entry — the divergence check compares the live board against
+  // these) and HARD chain intent carried across locks.
+  const planProjectionsRef = useRef<Record<string, { bodiesByPly: Record<string, Position[]>[]; lockedCount: number }>>({});
+  const chainIntentRef = useRef<Record<string, ChainIntent | null>>({});
 
   // LOCAL 2P HOTSEAT (unlock-to-move): one phone, one shared control set,
   // players pass the phone. Active seat = whose turn it is (unlock + plan).
@@ -1252,7 +1260,16 @@ const GameApp: React.FC<{ campaignPlaytestLevel: CampaignLevel | null }> = ({ ca
           const buf = moveBuffersRef.current[snake.id];
           const isLocked = locksRef.current[snake.id];
           if (isLocked && buf && buf.length > 0) {
-            continue; // Locked plan still executing — don't wipe it.
+            // Change 2 (bot-balance spec): the locked plan executes
+            // open-loop ONLY while the world matches its projections.
+            // If an opponent has diverged from the body projected for
+            // the plies already executed, drop the plan and replan
+            // from the live board below.
+            const proj = planProjectionsRef.current[snake.id];
+            if (!proj || !planDiverged(proj.bodiesByPly, proj.lockedCount - buf.length, current.snakes)) {
+              continue; // Locked plan still executing — don't wipe it.
+            }
+            delete planProjectionsRef.current[snake.id];
           }
           moveBuffersRef.current[snake.id] = [];
           locksRef.current[snake.id] = false;
@@ -1271,84 +1288,33 @@ const GameApp: React.FC<{ campaignPlaytestLevel: CampaignLevel | null }> = ({ ca
         // displayed mid-thought. Lock length is dynamic by confidence: 1 careful
         // move when tight, up to 3 when wide open. Like a person: think, then
         // buffer, then lock.
-        const hiddenPlan: NonNullable<(typeof moveBuffersRef.current)[string]> = [];
-        let curDir = aiSnake.direction;
-        let simBody = [...aiSnake.body];
-        const planLen = Math.min(3, aiSnake.body.length);
+        // Bot-balance spec (Changes 1/2/4/5): the planning itself lives in
+        // buildAIPlan (src/game/ai.ts) — the sim advances every snake, routes
+        // are scored as routes, HARD holds chain setups across locks, and the
+        // plan carries the opponent projections the Change 2 divergence
+        // check above compares the live board against.
         const botStyle = s.campaignAiStyles?.[aiSnake.id] ?? s.aiStyle;
         const botDifficulty = s.campaignAiDifficulties?.[aiSnake.id] ?? s.botDifficulty;
-        for (let i = 0; i < planLen; i++) {
-          const action = calculateAIAction({
-            ...current,
-            snakes: current.snakes.map(snake => snake.id === aiSnake.id
-              ? { ...snake, body: simBody, direction: curDir }
-              : snake),
-          }, s.gridSize, aiSnake.id, botDifficulty, botStyle, current.skillsAvailable);
-          // Skill path: the brain may decide to dart. Same legality rules
-          // as the player (direction validated against the last entry,
-          // escrow affordability) before a dart entry goes in the plan.
-          const skillDir = action.skill?.skillId === 'dart' ? action.skill.direction : null;
-          const queuedDarts = hiddenPlan.filter(entry => typeof entry !== 'string' && entry.type === 'dart').length;
-          if (skillDir && isValidDartDirection(curDir, skillDir) &&
-              canAffordQueuedDart(aiSnake.skillPoints, queuedDarts)) {
-            hiddenPlan.push({ type: 'dart', direction: skillDir });
-            curDir = skillDir;
-            for (let k = 0; k < 3; k++) {
-              simBody.unshift(getNextHeadPosition(simBody[0], skillDir));
-              simBody.pop();
-            }
-            continue;
-          }
-          const aiDir = action.direction;
-          if (aiDir && !isOppositeDirection(curDir, aiDir)) {
-            hiddenPlan.push({ type: 'move', direction: aiDir });
-            curDir = aiDir;
-            const nextHead = getNextHeadPosition(simBody[0], aiDir);
-            simBody.unshift(nextHead);
-            simBody.pop();
-          } else {
-            break;
-          }
-        }
-        if (hiddenPlan.length === 0) {
-          const fallback = ['UP', 'DOWN', 'LEFT', 'RIGHT'].find(d => !isOppositeDirection(curDir, d as Direction)) as Direction || 'LEFT';
-          hiddenPlan.push({ type: 'move', direction: fallback });
-        }
-        // Dynamic lock: how much of the hidden plan to commit visibly.
-        // This is about confidence in the plan (how much to show as locked),
-        // not about whether move 0 is safe — the 3-ply lookahead already
-        // handles safety. If the destination after move 0 is tight (<=1 safe
-        // escape), lock just 1 and reassess next tick. In open space, lock
-        // the full plan. A dart always locks as a single committed entry
-        // (its 3 cells are atomic, don't slice into them).
-        let lockCount = hiddenPlan.length;
-        const firstEntry = hiddenPlan[0];
-        const firstIsDart = typeof firstEntry !== 'string' && firstEntry.type === 'dart';
-        if (!firstIsDart && hiddenPlan.length > 1) {
-          // Simulate the board after move 0 to count escape routes.
-          const afterMove0 = [...aiSnake.body];
-          const firstDir = (firstEntry as { direction: Direction }).direction;
-          const dest = getNextHeadPosition(afterMove0[0], firstDir);
-          afterMove0.unshift(dest);
-          afterMove0.pop();
-          const allBodies = new Set<string>();
-          for (const snake of current.snakes) {
-            const body = snake.id === aiSnake.id ? afterMove0 : snake.body;
-            for (const seg of body) allBodies.add(`${seg.x},${seg.y}`);
-          }
-          let safeEscapes = 0;
-          for (const d of ['UP', 'DOWN', 'LEFT', 'RIGHT'] as Direction[]) {
-            if (isOppositeDirection(firstDir, d)) continue;
-            const n = getNextHeadPosition(dest, d);
-            if (isCellInArena(n, s.gridSize, current.ringInset) && !allBodies.has(`${n.x},${n.y}`)) {
-              safeEscapes++;
-            }
-          }
-          if (safeEscapes <= 1) lockCount = 1;
-        }
+        const planResult = buildAIPlan({
+          gameState: current,
+          gridSize: s.gridSize,
+          botRole: aiSnake.id,
+          difficulty: botDifficulty,
+          aiStyle: botStyle,
+          skillsAvailable: current.skillsAvailable,
+          raceTurns: s.raceTurns,
+          intent: chainIntentRef.current[aiSnake.id] ?? null,
+        });
+        chainIntentRef.current[aiSnake.id] = planResult.intent;
+        const hiddenPlan = planResult.plan;
+        const lockCount = Math.min(planResult.lockCount, hiddenPlan.length);
         // Only the locked slice goes into the visible buffer. The rest of
         // hiddenPlan stays in her head — replanned fresh next tick.
         const aiBuffer = hiddenPlan.slice(0, lockCount);
+        planProjectionsRef.current[aiSnake.id] = {
+          bodiesByPly: planResult.projections.slice(0, lockCount),
+          lockedCount: aiBuffer.length,
+        };
         moveBuffersRef.current = { ...moveBuffersRef.current, [aiSnake.id]: aiBuffer };
         agentDrivenRef.current[aiSnake.id] = true;
         commitLocks({ ...locksRef.current, [aiSnake.id]: true });

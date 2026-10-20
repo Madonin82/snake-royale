@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { calculateAIAction, calculateAIMove } from './ai';
+import { buildAIPlan, calculateAIAction, calculateAIMove, calculateAIMoveCandidates, planDiverged } from './ai';
 import { canAffordQueuedDart, isValidDartDirection } from './skills';
 import { GameState, Snake } from '../types/game';
 
@@ -268,4 +268,144 @@ test('EASY chain multiplier is 1x — token seeking unchanged', () => {
   // Deliberate UP (75%) + random UP (~25% of 25% ≈ 6%) ≈ 81% expected.
   // Assert UP is clearly the dominant move (not suppressed by a leaked mult).
   assert.ok(upCount >= 25, `EASY should still seek token UP (got ${upCount}/40)`);
+});
+
+// ============================================================
+// Bot-balance spec fixtures (Oct 20 2026). Boards are reconstructed
+// from the batch replays Jimmy played against the HARD bot
+// (snake-royale-replay-20261020-1232 / -1235 / -1240) — the three
+// traced endings the spec's acceptance criteria name.
+// ============================================================
+
+function fixtureSnake(id: string, body: [number, number][], direction: Snake['direction'], extra: Partial<Snake>): Snake {
+  return {
+    id,
+    name: id.toUpperCase(),
+    body: body.map(([x, y]) => ({ x, y })),
+    direction,
+    queuedDirection: null,
+    score: 0,
+    skillPoints: 0,
+    isAlive: true,
+    color: '#000',
+    equippedSkill: null,
+    pendingSkill: null,
+    tokensSinceLock: 0,
+    spEarned: 0,
+    ...extra,
+  } as Snake;
+}
+
+function fixtureState(snakes: Snake[], tokens: [number, number][], extra: Partial<GameState>): GameState {
+  return {
+    tick: 0,
+    turnBased: true,
+    phaseTurnsRemaining: 30,
+    lastTurnTimes: null,
+    totalThinkTime: {},
+    phase: 'RACING',
+    phaseTimeRemaining: 0,
+    phaseEndTime: 0,
+    round: 1,
+    tokens: tokens.map(([x, y]) => ({ x, y })),
+    snakes,
+    ringInset: 0,
+    skillsAvailable: 'immediate',
+    ...extra,
+  } as GameState;
+}
+
+const STEP: Record<string, [number, number]> = { UP: [0, -1], DOWN: [0, 1], LEFT: [-1, 0], RIGHT: [1, 0] };
+
+function planHeads(state: GameState, botId: string, plan: { direction: string }[]): { x: number; y: number }[] {
+  const bot = state.snakes.find(s => s.id === botId)!;
+  let head = bot.body[0];
+  return plan.map(entry => {
+    const [dx, dy] = STEP[entry.direction];
+    head = { x: head.x + dx, y: head.y + dy };
+    return head;
+  });
+}
+
+test('bot-balance 1232: the plan never steps onto the token the opponent is projected to take', () => {
+  // Replay 1232, tick 27 — the board the bot locked [LEFT, LEFT, UP]
+  // from and died head-on at (3,3). The sim now projects Jimmy diving
+  // (4,1) -> (3,1) -> (3,2) -> (3,3): he takes the token and grows.
+  const state = fixtureState([
+    fixtureSnake('p1', [[4, 1], [5, 1], [5, 2], [5, 3], [6, 3], [7, 3], [7, 2], [7, 1]], 'LEFT', { score: 5, skillPoints: 6, tokensSinceLock: 2, spEarned: 6 }),
+    fixtureSnake('p2', [[5, 4], [6, 4], [7, 4], [7, 5], [6, 5], [5, 5]], 'LEFT', { score: 3, skillPoints: 3 }),
+  ], [[0, 1], [3, 3]], { tick: 27, phaseTurnsRemaining: 33, round: 4 });
+  const result = buildAIPlan({ gameState: state, gridSize: 8, botRole: 'p2', difficulty: 'HARD', raceTurns: 60, intent: null });
+  const heads = planHeads(state, 'p2', result.plan);
+  assert.ok(heads.length > 0, 'planner produced a plan');
+  for (const h of heads) {
+    assert.ok(!(h.x === 3 && h.y === 3), `plan steps onto (3,3): ${JSON.stringify(result.plan)}`);
+  }
+  // The mechanism, not luck: the final projection has Jimmy ON (3,3).
+  const finalProj = result.projections[result.projections.length - 1];
+  assert.equal(finalProj.p1[0].x, 3);
+  assert.equal(finalProj.p1[0].y, 3);
+});
+
+test('bot-balance 1235: contesting a head-on the bot wins stays allowed (not vetoed)', () => {
+  // Replay 1235 at the route's last ply: bot on (7,5) facing RIGHT,
+  // token on (7,4) inside Jimmy's reach — but the bot wins that
+  // tiebreak (SP 8 vs 7), so UP must survive as a candidate.
+  const state = fixtureState([
+    fixtureSnake('p1', [[6, 4], [6, 3], [6, 2], [6, 1], [5, 1], [4, 1], [3, 1], [2, 1], [1, 1]], 'DOWN', { score: 6, skillPoints: 7, spEarned: 7 }),
+    fixtureSnake('p2', [[7, 5], [6, 5], [5, 5], [4, 5], [4, 4], [4, 3], [3, 3], [3, 4], [3, 5], [3, 6]], 'RIGHT', { score: 7, skillPoints: 8, spEarned: 8 }),
+  ], [[7, 6], [7, 4]], { tick: 46, phaseTurnsRemaining: 14, round: 5 });
+  const candidates = calculateAIMoveCandidates(state, 8, 'p2', 'HARD');
+  assert.ok(candidates.some(c => c.dir === 'UP'), `UP (the (7,4) contest) must not be vetoed: ${JSON.stringify(candidates)}`);
+});
+
+test('bot-balance 1235: the plan still takes a token on the winning race board', () => {
+  // Replay 1235, tick 44 — the bot beelined (7,4) and won the head-on.
+  // The planner must keep racing: some token falls by the final ply,
+  // and no ply lands inside the projected opponent body.
+  const state = fixtureState([
+    fixtureSnake('p1', [[6, 2], [6, 1], [5, 1], [4, 1], [3, 1], [2, 1], [1, 1], [0, 1], [0, 0]], 'DOWN', { score: 6, skillPoints: 7, spEarned: 7 }),
+    fixtureSnake('p2', [[5, 5], [4, 5], [3, 5], [2, 5], [2, 4], [2, 3], [1, 3], [1, 4], [1, 5], [1, 6]], 'RIGHT', { score: 7, skillPoints: 8, spEarned: 8 }),
+  ], [[7, 6], [7, 4]], { tick: 44, phaseTurnsRemaining: 16, round: 5 });
+  const result = buildAIPlan({ gameState: state, gridSize: 8, botRole: 'p2', difficulty: 'HARD', raceTurns: 60, intent: null });
+  const heads = planHeads(state, 'p2', result.plan);
+  const finalHead = heads[heads.length - 1];
+  assert.ok(
+    (finalHead.x === 7 && finalHead.y === 4) || (finalHead.x === 7 && finalHead.y === 6),
+    `plan should end on a token, ended at (${finalHead.x},${finalHead.y}): ${JSON.stringify(result.plan)}`,
+  );
+  heads.forEach((h, i) => {
+    const projBody = result.projections[i]?.p1 ?? [];
+    assert.ok(!projBody.some(c => c.x === h.x && c.y === h.y), `ply ${i} head (${h.x},${h.y}) inside projected body`);
+  });
+});
+
+test('bot-balance 1240: no ply enters a cell the projection shows occupied', () => {
+  // Replay 1240, tick 71 — shrink endgame, every flood-fill veto
+  // fails (36-cell box, 27 occupied). Outcome-based on purpose (the
+  // historical fatal step was RIGHT into the body): the produced
+  // plan, whatever its shape, must not route into the projected body.
+  const state = fixtureState([
+    fixtureSnake('p1', [[3, 2], [4, 2], [4, 3], [5, 3], [6, 3], [7, 3], [7, 2], [7, 1], [7, 0], [6, 0], [6, 1], [5, 1], [4, 1], [3, 1]], 'LEFT', { score: 11, skillPoints: 15, spEarned: 15 }),
+    fixtureSnake('p2', [[3, 4], [3, 5], [4, 5], [4, 6], [3, 6], [2, 6], [2, 5], [2, 4], [1, 4], [0, 4], [0, 3], [1, 3], [2, 3]], 'UP', { score: 10, skillPoints: 12, spEarned: 12 }),
+  ], [], { tick: 71, phaseTurnsRemaining: 5, round: 6, phase: 'SHRINKING', ringInset: 1 });
+  const result = buildAIPlan({ gameState: state, gridSize: 8, botRole: 'p2', difficulty: 'HARD', raceTurns: 60, intent: null });
+  const heads = planHeads(state, 'p2', result.plan);
+  assert.ok(heads.length > 0, 'planner produced a plan');
+  heads.forEach((h, i) => {
+    const projBody = result.projections[i]?.p1 ?? [];
+    assert.ok(!projBody.some(c => c.x === h.x && c.y === h.y), `ply ${i} head (${h.x},${h.y}) inside projected body`);
+  });
+});
+
+test('planDiverged: matching projection is not a divergence; a shifted or dead opponent is', () => {
+  const body = [{ x: 3, y: 3 }, { x: 3, y: 2 }, { x: 4, y: 2 }];
+  const projections = [{ p1: body.map(c => ({ ...c })) }];
+  const alive = (cells: { x: number; y: number }[]) =>
+    ({ id: 'p1', body: cells, isAlive: true } as Snake);
+  assert.equal(planDiverged(projections, 0, [alive(body)]), false); // nothing executed yet
+  assert.equal(planDiverged(projections, 1, [alive(body)]), false); // world matches projection
+  assert.equal(planDiverged(projections, 1, [alive([{ x: 2, y: 3 }, { x: 3, y: 3 }, { x: 4, y: 3 }])]), true); // veered
+  assert.equal(planDiverged(projections, 1, [{ id: 'p1', body, isAlive: false } as Snake]), true); // died
+  assert.equal(planDiverged(projections, 1, []), true); // gone entirely
 });
