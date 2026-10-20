@@ -1,6 +1,6 @@
-import { Direction, GameState, PendingSkill, Position, Snake } from '../types/game';
+import { BufferEntry, Direction, GameState, PendingSkill, Position, Snake } from '../types/game';
 import { getNextHeadPosition, isCellInArena, isOppositeDirection } from './engine';
-import { canActivateSkill } from './skills';
+import { canActivateSkill, canAffordQueuedDart, isValidDartDirection } from './skills';
 
 const ALL_DIRECTIONS: Direction[] = ['UP', 'RIGHT', 'DOWN', 'LEFT'];
 
@@ -298,22 +298,25 @@ function calculateHuntMoveTowardTarget(
   return ratedMoves[0].dir;
 }
 
-export function calculateAIMove(
+
+/**
+ * The §1–§5 rating pass of calculateAIMove, extracted so the turn planner
+ * can see the ranked candidate moves instead of only the single pick.
+ * Hard-vetoed directions (certain death) never appear in ratedMoves;
+ * heavily penalized ones (e.g. a losing head-on at −10000) do.
+ */
+interface RatedAIMoves {
+  ratedMoves: { dir: Direction; score: number }[];
+  validDirs: Direction[];
+  me: Snake;
+}
+
+function rateAIMoves(
   gameState: GameState,
   gridSize: number,
-  botRole: string = 'p2',
-  difficulty: 'EASY' | 'MEDIUM' | 'HARD' = 'MEDIUM',
-  aiStyle?: string,
-): Direction | null {
-  const normalizedStyle = (aiStyle || '').toLowerCase();
-  if (normalizedStyle === 'avalena') {
-    const action = calculateAvalenaAction(gameState, gridSize, botRole, gameState.skillsAvailable);
-    if (action.skill) {
-      const me = gameState.snakes.find(snake => snake.id === botRole);
-      if (me) me.pendingSkill = action.skill;
-    }
-    return action.direction;
-  }
+  botRole: string,
+  difficulty: 'EASY' | 'MEDIUM' | 'HARD',
+): RatedAIMoves | null {
   const me = gameState.snakes.find(snake => snake.id === botRole);
   if (!me) return null;
   const opponents = gameState.snakes.filter(snake => snake.id !== botRole && !sameTeam(me, snake));
@@ -473,6 +476,51 @@ export function calculateAIMove(
 
     ratedMoves.push({ dir, score });
   }
+  return { ratedMoves, validDirs, me };
+}
+
+/**
+ * Ranked non-vetoed moves for a snake, best first. No EASY randomness and
+ * no trapped fallback — callers planning ahead want the raw ratings.
+ */
+export function calculateAIMoveCandidates(
+  gameState: GameState,
+  gridSize: number,
+  botRole: string = 'p2',
+  difficulty: 'EASY' | 'MEDIUM' | 'HARD' = 'MEDIUM',
+  aiStyle?: string,
+): { dir: Direction; score: number }[] {
+  const normalizedStyle = (aiStyle || '').toLowerCase();
+  if (normalizedStyle === 'avalena') {
+    const action = calculateAvalenaAction(gameState, gridSize, botRole, gameState.skillsAvailable);
+    return action.direction ? [{ dir: action.direction, score: 0 }] : [];
+  }
+  const rated = rateAIMoves(gameState, gridSize, botRole, difficulty);
+  if (!rated) return [];
+  return [...rated.ratedMoves].sort((a, b) => b.score - a.score);
+}
+
+export function calculateAIMove(
+  gameState: GameState,
+  gridSize: number,
+  botRole: string = 'p2',
+  difficulty: 'EASY' | 'MEDIUM' | 'HARD' = 'MEDIUM',
+  aiStyle?: string,
+): Direction | null {
+  const normalizedStyle = (aiStyle || '').toLowerCase();
+  if (normalizedStyle === 'avalena') {
+    const action = calculateAvalenaAction(gameState, gridSize, botRole, gameState.skillsAvailable);
+    if (action.skill) {
+      const me = gameState.snakes.find(snake => snake.id === botRole);
+      if (me) me.pendingSkill = action.skill;
+    }
+    return action.direction;
+  }
+  const rated = rateAIMoves(gameState, gridSize, botRole, difficulty);
+  if (!rated) return null;
+  const { ratedMoves, validDirs, me } = rated;
+  const head = me.body[0];
+  const currentDir = me.direction;
 
   if (ratedMoves.length === 0) {
     // Trapped: all moves vetoed. Don't return validDirs[0] blind — that's
@@ -552,4 +600,646 @@ function floodFillArea(pos: Position, state: GameState, gridSize: number, me: Sn
   }
 
   return count;
+}
+
+// ============================================================
+// Turn planner (bot-balance spec, Oct 20 2026 — Changes 1, 2, 4, 5)
+// Base: origin/main @ 611c236.
+//
+// Change 1 — the planning simulation advances EVERY living snake per
+//   ply. Opponents advance along their own scorer's choice on the
+//   simulated state (an SP-seeking model: every player in this game is
+//   playing to maximize SP, so the honest projection has them diving
+//   for tokens, not walking in a straight line). Tokens eaten in-sim
+//   are removed and the eater grows — including the bot, whose body
+//   no longer pops unconditionally.
+// Change 2 — the plan records the projected opponent bodies after
+//   every entry; App.tsx compares the live board against the
+//   projection for the plies already executed (planDiverged below)
+//   and drops the remainder + replans when the world has diverged.
+//   Divergence is the normal state of a real match, not an edge case.
+// Change 4 — routes are scored as routes: the escalated SP of tokens
+//   eaten along the route counts at full chain value, and on HARD a
+//   chain setup is held across locks (chain intent): position now,
+//   cash next lock. Chains are the high-end goal — in puzzle-fighter
+//   terms the built chain is the attack; here SP is literally skill
+//   ammunition. Vetoes still gate every ply: a chain that kills the
+//   builder is not an attack.
+// Change 5 — posture: Protect (ahead, late) demands an exit margin
+//   and only contests tokens on a clear win; Chase (behind, late)
+//   contests on even math. Posture gates never override the vetoes.
+// ============================================================
+
+const CHAIN_SP_WEIGHT = 10; // route value per point of escalated chain SP
+const HEAD_ON_WIN_BONUS = 300; // an in-sim head-on the bot wins ends the game
+const IN_SIM_HEAD_ON_LOSS = -10000; // an in-sim head-on the bot loses (or ties)
+const INTENT_CASH_BONUS = 30; // cashing a token of the active chain setup
+const INTENT_STEP_BONUS = 5; // per ply that closes on the setup anchor
+const SETUP_VALUE_DISCOUNT = 0.5; // a setup is a promise, not SP in hand
+const PROTECT_AREA_PENALTY = 400; // route ends boxed while protecting a lead
+const PROTECT_CONTEST_PENALTY = 150; // contested token eaten without a clear win
+const MAX_SIM_DEPTH = 3;
+
+export interface ChainIntent {
+  tokenKeys: string[]; // the cluster's token cells ("x,y")
+  anchor: Position; // cluster centroid
+  createdTick: number;
+  locksWithoutProgress: number;
+  lastDistance: number; // my head's Manhattan distance to the anchor
+}
+
+export interface AIPlanResult {
+  plan: BufferEntry[];
+  lockCount: number;
+  /** Projected opponent bodies after each plan entry (index = entry). */
+  projections: Record<string, Position[]>[];
+  intent: ChainIntent | null;
+  posture: 'PROTECT' | 'CHASE' | null;
+}
+
+interface SimSnake {
+  id: string;
+  body: Position[];
+  direction: Direction;
+  tokensSinceLock: number;
+  skillPoints: number;
+  isAlive: boolean;
+  stunTicks: number;
+}
+
+interface SimState {
+  snakes: SimSnake[];
+  tokens: Position[];
+}
+
+/** A full GameState view of a simulated position, for the scorer. */
+function simToGameState(base: GameState, sim: SimState): GameState {
+  const byId = new Map(sim.snakes.map(s => [s.id, s]));
+  return {
+    ...base,
+    tokens: sim.tokens.map(t => ({ ...t })),
+    snakes: base.snakes.map(s => {
+      const simSnake = byId.get(s.id);
+      if (!simSnake) return s;
+      return {
+        ...s,
+        body: simSnake.body.map(c => ({ ...c })),
+        direction: simSnake.direction,
+        tokensSinceLock: simSnake.tokensSinceLock,
+        isAlive: simSnake.isAlive,
+      };
+    }),
+  };
+}
+
+function initialSim(gameState: GameState): SimState {
+  return {
+    tokens: gameState.tokens.map(t => ({ ...t })),
+    snakes: gameState.snakes.map(s => ({
+      id: s.id,
+      body: s.body.map(c => ({ ...c })),
+      direction: s.direction,
+      tokensSinceLock: s.tokensSinceLock ?? 0,
+      skillPoints: s.skillPoints ?? 0,
+      isAlive: s.isAlive,
+      stunTicks: s.stunTicks ?? 0,
+    })),
+  };
+}
+
+interface AdvanceOutcome {
+  sim: SimState;
+  /** Escalated SP the bot earned this ply (null if it ate nothing). */
+  botAteSP: number | null;
+  /** The token cell the bot ate this ply, if any. */
+  botAteCell: Position | null;
+  /** Opponent bodies after this ply (Change 2 projections). */
+  opponentBodies: Record<string, Position[]>;
+  /**
+   * The bot's head landed on an opponent's head this ply: 'WIN' if the
+   * standard tiebreak (SP, then length) favors the bot, else 'LOSS'
+   * (an exact tie kills both in the real engine). Nobody dies in-sim —
+   * the projection stays a body forecast, and Change 2 catches the
+   * difference — but route scoring prices the outcome.
+   */
+  botHeadOn: 'WIN' | 'LOSS' | null;
+}
+
+/**
+ * Advance every living snake one ply from the same snapshot (the real
+ * game moves simultaneously). Opponent moves come from their own
+ * scorer on the pre-move state, modeled at HARD — the strongest
+ * SP-seeking line we have, whoever the opponent really is. The
+ * projection is an expectation, not knowledge; Change 2 is the net
+ * for when it is wrong. A token landed on by exactly one head is
+ * eaten (grow, no tail pop); a token two heads land on goes to the
+ * head-on tiebreak winner, as the engine rules it.
+ */
+function advanceSim(
+  base: GameState,
+  sim: SimState,
+  gridSize: number,
+  botRole: string,
+  botDir: Direction,
+): AdvanceOutcome {
+  const view = simToGameState(base, sim);
+  const moves = new Map<string, Direction>();
+  moves.set(botRole, botDir);
+  for (const s of sim.snakes) {
+    if (s.id === botRole || !s.isAlive || s.stunTicks > 0) continue;
+    const dir = calculateAIMove(view, gridSize, s.id, 'HARD');
+    if (dir) moves.set(s.id, dir);
+  }
+
+  const tokenAt = new Map<string, Position>();
+  for (const t of sim.tokens) tokenAt.set(posKey(t), t);
+  const eatRequests = new Map<string, string[]>(); // tokenKey -> snake ids
+  const newHeads = new Map<string, Position>();
+  for (const s of sim.snakes) {
+    if (!s.isAlive) continue;
+    const dir = moves.get(s.id);
+    if (!dir || s.stunTicks > 0) {
+      newHeads.set(s.id, s.body[0]);
+      continue;
+    }
+    const nh = getNextHeadPosition(s.body[0], dir);
+    newHeads.set(s.id, nh);
+    const key = posKey(nh);
+    if (tokenAt.has(key)) {
+      const list = eatRequests.get(key) ?? [];
+      list.push(s.id);
+      eatRequests.set(key, list);
+    }
+  }
+  // Head-on cells and token claims: when exactly two opponents land
+  // on the same cell, the engine resolves it by tiebreak — the winner
+  // takes any token there. (Three or more heads: nobody eats; chaos
+  // is priced as a loss for the bot below, never modeled as a meal.)
+  const tiebreakBetween = (a: SimSnake, b: SimSnake): SimSnake | null => {
+    if (a.skillPoints !== b.skillPoints) return a.skillPoints > b.skillPoints ? a : b;
+    if (a.body.length !== b.body.length) return a.body.length > b.body.length ? a : b;
+    return null;
+  };
+  const simById = new Map(sim.snakes.map(s => [s.id, s]));
+  const eaters = new Map<string, string>(); // snakeId -> tokenKey
+  for (const [key, ids] of eatRequests) {
+    if (ids.length === 1) {
+      eaters.set(ids[0], key);
+    } else if (ids.length === 2) {
+      const a = simById.get(ids[0])!;
+      const b = simById.get(ids[1])!;
+      const winner = tiebreakBetween(a, b);
+      if (winner) eaters.set(winner.id, key);
+    }
+  }
+
+  // The bot's own head-on outcome this ply (for route pricing).
+  let botHeadOn: 'WIN' | 'LOSS' | null = null;
+  const botNewHead = newHeads.get(botRole);
+  if (botNewHead) {
+    const rivals = sim.snakes.filter(s =>
+      s.id !== botRole && s.isAlive && newHeads.get(s.id) &&
+      newHeads.get(s.id)!.x === botNewHead.x && newHeads.get(s.id)!.y === botNewHead.y);
+    if (rivals.length === 1) {
+      const botSim = simById.get(botRole)!;
+      botHeadOn = tiebreakBetween(botSim, rivals[0])?.id === botRole ? 'WIN' : 'LOSS';
+    } else if (rivals.length > 1) {
+      botHeadOn = 'LOSS';
+    }
+  }
+
+  let botAteSP: number | null = null;
+  let botAteCell: Position | null = null;
+  const eatenKeys = new Set<string>();
+  const nextSnakes: SimSnake[] = sim.snakes.map(s => {
+    if (!s.isAlive) return s;
+    const dir = moves.get(s.id);
+    if (!dir || s.stunTicks > 0) {
+      return { ...s, stunTicks: Math.max(0, s.stunTicks - 1) };
+    }
+    const nh = newHeads.get(s.id)!;
+    const body = [nh, ...s.body];
+    const ateKey = eaters.get(s.id);
+    let tsl = s.tokensSinceLock;
+    let sp = s.skillPoints;
+    if (ateKey) {
+      eatenKeys.add(ateKey);
+      tsl += 1;
+      sp += 1; // wallet: +1 per token; the escalated chain bonus lands at lock
+      if (s.id === botRole) {
+        botAteSP = tsl; // escalated: the n-th chain token pays n SP
+        botAteCell = tokenAt.get(ateKey) ?? null;
+      }
+    } else {
+      body.pop();
+    }
+    return { ...s, body, direction: dir, tokensSinceLock: tsl, skillPoints: sp };
+  });
+
+  const opponentBodies: Record<string, Position[]> = {};
+  for (const s of nextSnakes) {
+    if (s.id !== botRole && s.isAlive) {
+      opponentBodies[s.id] = s.body.map(c => ({ ...c }));
+    }
+  }
+  return {
+    sim: {
+      snakes: nextSnakes,
+      tokens: sim.tokens.filter(t => !eatenKeys.has(posKey(t))),
+    },
+    botAteSP,
+    botAteCell,
+    opponentBodies,
+    botHeadOn,
+  };
+}
+
+/**
+ * Change 2 check: has the world diverged from what the plan projected?
+ * Compares each projected snake's live body against the projection for
+ * the plies already executed. A projected snake that has since died is
+ * a divergence — the plan was built for a world that had them in it.
+ */
+export function planDiverged(
+  projections: Record<string, Position[]>[],
+  executedCount: number,
+  actualSnakes: Snake[],
+): boolean {
+  if (executedCount <= 0) return false;
+  const proj = projections[executedCount - 1];
+  if (!proj) return false;
+  for (const [id, body] of Object.entries(proj)) {
+    const actual = actualSnakes.find(s => s.id === id);
+    if (!actual || !actual.isAlive) return true;
+    if (actual.body.length !== body.length) return true;
+    for (let i = 0; i < body.length; i++) {
+      if (actual.body[i].x !== body[i].x || actual.body[i].y !== body[i].y) return true;
+    }
+  }
+  return false;
+}
+
+/** Token clusters: tokens linked within Manhattan 3 form one cluster. */
+function findClusters(tokens: Position[]): Position[][] {
+  const remaining = [...tokens];
+  const clusters: Position[][] = [];
+  while (remaining.length > 0) {
+    const cluster = [remaining.shift()!];
+    let grew = true;
+    while (grew) {
+      grew = false;
+      for (let i = remaining.length - 1; i >= 0; i--) {
+        if (cluster.some(c => Math.abs(c.x - remaining[i].x) + Math.abs(c.y - remaining[i].y) <= 3)) {
+          cluster.push(remaining.splice(i, 1)[0]);
+          grew = true;
+        }
+      }
+    }
+    clusters.push(cluster);
+  }
+  return clusters;
+}
+
+/** Escalated SP of eating `size` tokens in a row starting at chain depth startTsl. */
+function clusterChainValue(size: number, startTsl: number): number {
+  let total = 0;
+  for (let i = 1; i <= size; i++) total += startTsl + i;
+  return total;
+}
+
+interface PostureInfo {
+  posture: 'PROTECT' | 'CHASE' | null;
+  clearWin: boolean;
+}
+
+function computePosture(gameState: GameState, me: Snake, raceTurns: number): PostureInfo {
+  const opponents = gameState.snakes.filter(s => s.id !== me.id && s.isAlive && !sameTeam(me, s));
+  if (opponents.length === 0) return { posture: null, clearWin: false };
+  const bestScore = Math.max(...opponents.map(o => o.score));
+  const bestLength = Math.max(...opponents.map(o => o.body.length));
+  const turnsGone = raceTurns - gameState.phaseTurnsRemaining;
+  const late =
+    gameState.phase === 'SHRINKING' ||
+    gameState.ringInset > 0 ||
+    (gameState.phase === 'RACING' && turnsGone >= (raceTurns * 2) / 3);
+  if (!late) return { posture: null, clearWin: false };
+  const clearWin =
+    opponents.every(o => (me.skillPoints ?? 0) > (o.skillPoints ?? 0)) && me.body.length > bestLength;
+  // Protect gate: points lead AND no length deficit — a points lead on
+  // a shorter snake is fragile in shrink.
+  if (me.score > bestScore && me.body.length >= bestLength) {
+    return { posture: 'PROTECT', clearWin };
+  }
+  if (me.score < bestScore) return { posture: 'CHASE', clearWin };
+  return { posture: null, clearWin };
+}
+
+/**
+ * Dynamic lock rule, as the planner has always run it: lock only the
+ * first entry when the position after it leaves ≤ 1 safe escape; a
+ * dart first entry locks whole. Evaluated on the simulated position
+ * after entry 0 (Change 1's projected board, opponents advanced —
+ * strictly more informed than the old live-body count).
+ */
+function computeLockCount(
+  base: GameState,
+  simAfterFirst: SimState,
+  gridSize: number,
+  botRole: string,
+  plan: BufferEntry[],
+): number {
+  if (plan.length === 0) return 0;
+  if (plan[0].type === 'dart') return plan.length;
+  const view = simToGameState(base, simAfterFirst);
+  const me = view.snakes.find(s => s.id === botRole);
+  if (!me) return plan.length;
+  const headAfter = me.body[0];
+  const afterDir = me.direction;
+  const occupied = new Set<string>();
+  for (const s of view.snakes) {
+    for (const seg of s.body) occupied.add(posKey(seg));
+  }
+  const escapes = ALL_DIRECTIONS.filter(d => !isOppositeDirection(afterDir, d)).filter(d => {
+    const cell = getNextHeadPosition(headAfter, d);
+    return isCellInArena(cell, gridSize, view.ringInset) && !occupied.has(posKey(cell));
+  }).length;
+  return escapes <= 1 ? 1 : plan.length;
+}
+
+interface RouteState {
+  entries: BufferEntry[];
+  sim: SimState;
+  simAfterFirst: SimState | null;
+  score: number;
+  projections: Record<string, Position[]>[];
+  ateCells: Position[];
+  firstDirForced: boolean;
+}
+
+/**
+ * Build the bot's hidden plan (up to 3 entries), how much of it to
+ * lock, the per-entry opponent projections (Change 2), and the
+ * updated chain intent (Change 4, HARD only).
+ */
+export function buildAIPlan(args: {
+  gameState: GameState;
+  gridSize: number;
+  botRole: string;
+  difficulty: 'EASY' | 'MEDIUM' | 'HARD';
+  aiStyle?: string;
+  skillsAvailable?: GameState['skillsAvailable'];
+  raceTurns: number;
+  intent?: ChainIntent | null;
+}): AIPlanResult {
+  const { gameState, gridSize, botRole, difficulty, aiStyle } = args;
+  const me = gameState.snakes.find(s => s.id === botRole);
+  if (!me || !me.isAlive) {
+    return { plan: [], lockCount: 0, projections: [], intent: null, posture: null };
+  }
+  const planLen = Math.min(MAX_SIM_DEPTH, me.body.length);
+  const postureInfo = computePosture(gameState, me, args.raceTurns);
+  const isAvalena = (aiStyle || '').toLowerCase() === 'avalena';
+
+  // ---- Legacy greedy path: EASY and Avalena keep the old per-ply
+  // loop in shape (calculateAIAction per ply, dart gates), but the
+  // simulation underneath now advances every snake (Change 1).
+  if (difficulty === 'EASY' || isAvalena) {
+    let sim = initialSim(gameState);
+    let simAfterFirst: SimState | null = null;
+    const plan: BufferEntry[] = [];
+    const projections: Record<string, Position[]>[] = [];
+    let queuedDarts = 0;
+    for (let i = 0; i < planLen; i++) {
+      const simSnake = sim.snakes.find(s => s.id === botRole);
+      if (!simSnake || !simSnake.isAlive) break;
+      const view = simToGameState(gameState, sim);
+      const action = calculateAIAction(
+        view, gridSize, botRole, difficulty, aiStyle,
+        args.skillsAvailable ?? gameState.skillsAvailable,
+      );
+      if (!action.direction && !action.skill) break;
+      if (action.skill?.skillId === 'dart') {
+        const dartDir = action.skill.direction;
+        if (!isValidDartDirection(simSnake.direction, dartDir)) break;
+        if (!canAffordQueuedDart(me.skillPoints ?? 0, queuedDarts)) break;
+        queuedDarts++;
+        plan.push({ type: 'dart', direction: dartDir });
+        let outcome: AdvanceOutcome | null = null;
+        for (let step = 0; step < 3; step++) {
+          outcome = advanceSim(gameState, sim, gridSize, botRole, dartDir);
+          sim = outcome.sim;
+        }
+        projections.push(outcome!.opponentBodies);
+        if (!simAfterFirst) simAfterFirst = sim;
+        continue;
+      }
+      if (!action.direction) break;
+      const outcome = advanceSim(gameState, sim, gridSize, botRole, action.direction);
+      sim = outcome.sim;
+      plan.push({ type: 'move', direction: action.direction });
+      projections.push(outcome.opponentBodies);
+      if (!simAfterFirst) simAfterFirst = sim;
+    }
+    if (plan.length === 0) return finishPlan(gameState, gridSize, botRole, difficulty, aiStyle, null, postureInfo.posture);
+    const lockCount = computeLockCount(gameState, simAfterFirst ?? sim, gridSize, botRole, plan);
+    return { plan, lockCount, projections, intent: null, posture: postureInfo.posture };
+  }
+
+  // ---- Beam path: MEDIUM (within-plan chains) and HARD (+ intent).
+  const intent = difficulty === 'HARD' ? args.intent ?? null : null;
+  const startSim = initialSim(gameState);
+  let beam: RouteState[] = [{
+    entries: [], sim: startSim, simAfterFirst: null, score: 0,
+    projections: [], ateCells: [], firstDirForced: false,
+  }];
+  for (let ply = 0; ply < planLen; ply++) {
+    const next: RouteState[] = [];
+    for (const route of beam) {
+      const view = simToGameState(gameState, route.sim);
+      const viewMe = view.snakes.find(s => s.id === botRole);
+      if (!viewMe) continue;
+      const candidates = calculateAIMoveCandidates(view, gridSize, botRole, difficulty, aiStyle).slice(0, 2);
+      for (const cand of candidates) {
+        const outcome = advanceSim(gameState, route.sim, gridSize, botRole, cand.dir);
+        let score = route.score + cand.score;
+        // Per-ply safety against the SIMULATED bodies (Change 1's
+        // point): a head-on that only appears once the opponent has
+        // advanced is priced here, at the veto's own rate when lost.
+        if (outcome.botHeadOn === 'WIN') score += HEAD_ON_WIN_BONUS;
+        else if (outcome.botHeadOn === 'LOSS') score += IN_SIM_HEAD_ON_LOSS;
+        const ateCells = [...route.ateCells];
+        if (outcome.botAteSP !== null && outcome.botAteCell) {
+          const ateCell = outcome.botAteCell;
+          ateCells.push(ateCell);
+          score += outcome.botAteSP * CHAIN_SP_WEIGHT;
+          // Contested? An opponent head at least as close to the token
+          // on the pre-move board. Protect only pays for a clear win.
+          const contested = view.snakes.some(o =>
+            o.id !== botRole && o.isAlive && !sameTeam(viewMe, o) &&
+            Math.abs(o.body[0].x - ateCell.x) + Math.abs(o.body[0].y - ateCell.y) <=
+              Math.abs(viewMe.body[0].x - ateCell.x) + Math.abs(viewMe.body[0].y - ateCell.y));
+          if (contested && postureInfo.posture === 'PROTECT' && !postureInfo.clearWin) {
+            score -= outcome.botAteSP * CHAIN_SP_WEIGHT + PROTECT_CONTEST_PENALTY;
+          }
+          if (intent && intent.tokenKeys.includes(posKey(ateCell))) {
+            score += INTENT_CASH_BONUS;
+          }
+        }
+        if (intent) {
+          const headBefore = route.sim.snakes.find(s => s.id === botRole)!.body[0];
+          const headAfter = outcome.sim.snakes.find(s => s.id === botRole)!.body[0];
+          const distBefore = Math.abs(headBefore.x - intent.anchor.x) + Math.abs(headBefore.y - intent.anchor.y);
+          const distAfter = Math.abs(headAfter.x - intent.anchor.x) + Math.abs(headAfter.y - intent.anchor.y);
+          if (distAfter < distBefore) score += INTENT_STEP_BONUS;
+        }
+        next.push({
+          entries: [...route.entries, { type: 'move', direction: cand.dir }],
+          sim: outcome.sim,
+          simAfterFirst: route.simAfterFirst ?? outcome.sim,
+          score,
+          projections: [...route.projections, outcome.opponentBodies],
+          ateCells,
+          firstDirForced: route.entries.length === 0 ? candidates.length === 1 : route.firstDirForced,
+        });
+      }
+    }
+    if (next.length === 0) break;
+    next.sort((a, b) => b.score - a.score);
+    beam = next.slice(0, 2);
+  }
+
+  const playable = beam.filter(r => r.entries.length > 0);
+  if (playable.length === 0) {
+    return finishPlan(gameState, gridSize, botRole, difficulty, aiStyle, intent, postureInfo.posture);
+  }
+
+  // Setup evaluation (Change 4): a route that eats nothing but ends
+  // staged on a chainable cluster earns the cluster's discounted
+  // chain value — that is what lets positioning beat a stray single.
+  const setupOf = new Map<RouteState, Position[]>();
+  for (const route of playable) {
+    if (route.ateCells.length > 0) continue;
+    const view = simToGameState(gameState, route.sim);
+    const viewMe = view.snakes.find(s => s.id === botRole);
+    if (!viewMe) continue;
+    const area = floodFillArea(viewMe.body[0], view, gridSize, viewMe);
+    if (area < viewMe.body.length) continue; // staged inside a coffin is not a setup
+    for (const cluster of findClusters(route.sim.tokens)) {
+      if (cluster.length < 2) continue;
+      const nearest = Math.min(...cluster.map(t =>
+        Math.abs(t.x - viewMe.body[0].x) + Math.abs(t.y - viewMe.body[0].y)));
+      if (nearest > 3) continue;
+      route.score += clusterChainValue(cluster.length, viewMe.tokensSinceLock ?? 0) * CHAIN_SP_WEIGHT * SETUP_VALUE_DISCOUNT;
+      setupOf.set(route, cluster);
+      break;
+    }
+  }
+  playable.sort((a, b) => b.score - a.score);
+  let chosen = playable[0];
+
+  // Protect's exit margin (Change 5): if the best route ends boxed
+  // below length + 2, prefer a route that keeps the margin; if none
+  // does, keep the best anyway (least-bad beats frozen).
+  if (postureInfo.posture === 'PROTECT') {
+    const areaOf = (r: RouteState): number => {
+      const view = simToGameState(gameState, r.sim);
+      const viewMe = view.snakes.find(s => s.id === botRole);
+      return viewMe ? floodFillArea(viewMe.body[0], view, gridSize, viewMe) : 0;
+    };
+    const chosenMe = chosen.sim.snakes.find(s => s.id === botRole)!;
+    if (areaOf(chosen) < chosenMe.body.length + 2) {
+      const roomy = playable.filter(r => {
+        const m = r.sim.snakes.find(s => s.id === botRole)!;
+        return areaOf(r) >= m.body.length + 2;
+      });
+      if (roomy.length > 0) {
+        chosen = roomy.sort((a, b) => b.score - a.score)[0];
+      } else {
+        chosen = { ...chosen, score: chosen.score - PROTECT_AREA_PENALTY };
+      }
+    }
+  }
+
+  // Chain intent bookkeeping (HARD). Abandon on: a forced first move
+  // (survival override), the cluster being eaten out from under the
+  // setup, cashing it (served its purpose), or two locks in a row
+  // without progress. A setup route (re)creates the intent.
+  let nextIntent: ChainIntent | null = null;
+  if (difficulty === 'HARD') {
+    const setupCluster = setupOf.get(chosen);
+    if (chosen.firstDirForced) {
+      nextIntent = null;
+    } else if (setupCluster && chosen.ateCells.length === 0) {
+      const anchor = {
+        x: Math.round(setupCluster.reduce((a, t) => a + t.x, 0) / setupCluster.length),
+        y: Math.round(setupCluster.reduce((a, t) => a + t.y, 0) / setupCluster.length),
+      };
+      const endHead = chosen.sim.snakes.find(s => s.id === botRole)!.body[0];
+      nextIntent = {
+        tokenKeys: setupCluster.map(posKey),
+        anchor,
+        createdTick: gameState.tick,
+        locksWithoutProgress: 0,
+        lastDistance: Math.abs(endHead.x - anchor.x) + Math.abs(endHead.y - anchor.y),
+      };
+    } else if (intent) {
+      const clusterAlive = gameState.tokens.some(t => intent.tokenKeys.includes(posKey(t)));
+      const cashed = chosen.ateCells.some(c => intent.tokenKeys.includes(posKey(c)));
+      if (clusterAlive && !cashed) {
+        const headNow = me.body[0];
+        const distNow = Math.abs(headNow.x - intent.anchor.x) + Math.abs(headNow.y - intent.anchor.y);
+        const progressed = distNow < intent.lastDistance;
+        const locks = progressed ? 0 : intent.locksWithoutProgress + 1;
+        if (locks < 2) {
+          nextIntent = {
+            ...intent,
+            locksWithoutProgress: locks,
+            lastDistance: progressed ? distNow : intent.lastDistance,
+          };
+        }
+      }
+    }
+  }
+
+  const lockCount = computeLockCount(
+    gameState, chosen.simAfterFirst ?? chosen.sim, gridSize, botRole, chosen.entries,
+  );
+  return {
+    plan: chosen.entries,
+    lockCount,
+    projections: chosen.projections,
+    intent: nextIntent,
+    posture: postureInfo.posture,
+  };
+}
+
+/**
+ * Empty-plan fallback. When no route survives the vetoes the bot is
+ * in the scorer's trapped case, so the fallback IS the scorer's own
+ * pick (max flood-fill area, opponent body not excluded) — exactly
+ * what the pre-spec planner executed — projected one ply so Change
+ * 2 still has a body forecast for it.
+ */
+function finishPlan(
+  gameState: GameState,
+  gridSize: number,
+  botRole: string,
+  difficulty: 'EASY' | 'MEDIUM' | 'HARD',
+  aiStyle: string | undefined,
+  intent: ChainIntent | null,
+  posture: 'PROTECT' | 'CHASE' | null,
+): AIPlanResult {
+  const me = gameState.snakes.find(s => s.id === botRole);
+  if (!me) return { plan: [], lockCount: 0, projections: [], intent, posture };
+  const dir = calculateAIMove(gameState, gridSize, botRole, difficulty, aiStyle)
+    ?? ALL_DIRECTIONS.find(d => !isOppositeDirection(me.direction, d));
+  if (!dir) return { plan: [], lockCount: 0, projections: [], intent, posture };
+  const outcome = advanceSim(gameState, initialSim(gameState), gridSize, botRole, dir);
+  return {
+    plan: [{ type: 'move', direction: dir }],
+    lockCount: 1,
+    projections: [outcome.opponentBodies],
+    intent,
+    posture,
+  };
 }
