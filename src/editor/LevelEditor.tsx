@@ -900,6 +900,10 @@ export const LevelEditor: React.FC = () => {
                                 <option value="HEADHUNTER">HEADHUNTER</option>
                                 <option value="PATROL">PATROL</option>
                                 <option value="AVALENA">AVALENA</option>
+                                <option value="OPPORTUNIST">OPPORTUNIST</option>
+                                <option value="LEGACY_EASY">LEGACY EASY</option>
+                                <option value="LEGACY_MEDIUM">LEGACY MEDIUM</option>
+                                <option value="LEGACY_HARD">LEGACY HARD</option>
                               </select>
                             </label>
                           )}

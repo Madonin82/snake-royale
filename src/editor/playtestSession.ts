@@ -58,6 +58,14 @@ export function getCampaignPlaytestSettings(level: CampaignLevel): GameSettings 
     PATROL: 'MEDIUM',
     AVALENA: 'HARD',
     avalena: 'HARD',
+    OPPORTUNIST: 'HARD',
+    opportunist: 'HARD',
+    LEGACY_EASY: 'EASY',
+    legacy_easy: 'EASY',
+    LEGACY_MEDIUM: 'MEDIUM',
+    legacy_medium: 'MEDIUM',
+    LEGACY_HARD: 'HARD',
+    legacy_hard: 'HARD',
   } as const;
 
   const difficultyForStyle = (style: SpawnConfig['aiStyle']) => difficulty[style] ?? 'HARD';
