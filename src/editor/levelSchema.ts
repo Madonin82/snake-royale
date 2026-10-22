@@ -39,6 +39,7 @@ export interface CampaignLevel {
   phases: {
     raceTurns: number;            // turns in Phase 1 before shrink
     shrinkEveryTurns: number;    // ring closes every N turns in Phase 2
+    shrinkEnabled?: boolean;     // false = no shrink phase: after the race the match runs as territory (last survivor wins). Absent = on (older level JSON).
   };
 
   objectives: {

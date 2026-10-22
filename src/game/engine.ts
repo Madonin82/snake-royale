@@ -18,6 +18,7 @@ export const DEFAULT_SETTINGS: GameSettings = {
   thinkTimeSeconds: null,
   raceTurns: 60,
   shrinkEveryTurns: 8,
+  shrinkEnabled: true,
   raceDurationSeconds: 180, // 3 minutes
   shrinkIntervalSeconds: 10, // 10s per ring step
   shrinkWarningSeconds: 2,   // 2s telegraph
@@ -363,8 +364,17 @@ export function processGameTick(
     if (state.phase === 'RACING') {
       state.phaseTurnsRemaining = Math.max(0, state.phaseTurnsRemaining - 1);
       if (state.phaseTurnsRemaining <= 0) {
-        state.phase = 'SHRINKING';
-        state.phaseTurnsRemaining = settings.shrinkEveryTurns;
+        if (settings.shrinkEnabled === false) {
+          // No-shrink territory mode (editor toggle): the race is over,
+          // the ring never starts, and the match runs until one snake
+          // remains. Tokens already on the board stay edible; no new
+          // tokens spawn outside RACING.
+          state.phase = 'TERRITORY';
+          state.phaseTurnsRemaining = 0;
+        } else {
+          state.phase = 'SHRINKING';
+          state.phaseTurnsRemaining = settings.shrinkEveryTurns;
+        }
         state.isTelegraphingShrink = false;
       }
     } else if (state.phase === 'SHRINKING') {
@@ -399,9 +409,14 @@ export function processGameTick(
     }
   } else if (state.phase === 'RACING') {
     if (state.phaseTimeRemaining <= 0) {
-      state.phase = 'SHRINKING';
-      state.phaseTimeRemaining = 120 * 1000; // 2 minutes for shrink phase
-      state.phaseEndTime = Date.now() + 120 * 1000;
+      if (settings.shrinkEnabled === false) {
+        state.phase = 'TERRITORY';
+        state.phaseTimeRemaining = 0;
+      } else {
+        state.phase = 'SHRINKING';
+        state.phaseTimeRemaining = 120 * 1000; // 2 minutes for shrink phase
+        state.phaseEndTime = Date.now() + 120 * 1000;
+      }
     }
   }
 
@@ -835,6 +850,12 @@ export function processGameTick(
         const desiredCount = rules.count + state.round - 1;
         const newTokens = spawnTokens(desiredCount, settings.gridSize, state.ringInset, snakes, [], state.walls);
         state.tokens.push(...newTokens);
+      } else if (settings.shrinkEnabled === false) {
+        // Token supply exhausted with the shrink phase disabled: the
+        // race is over — territory mode, last survivor wins.
+        state.phase = 'TERRITORY';
+        state.phaseTurnsRemaining = 0;
+        state.isTelegraphingShrink = false;
       } else {
         state.phase = 'SHRINKING';
         if (settings.turnBased) {

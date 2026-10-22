@@ -50,7 +50,7 @@ export interface Snake {
   stunTicks?: number; // ticks remaining stunned — skips move while > 0
 }
 
-export type GamePhase = 'LOBBY' | 'RACING' | 'SHRINKING' | 'OVER';
+export type GamePhase = 'LOBBY' | 'RACING' | 'SHRINKING' | 'TERRITORY' | 'OVER';
 
 export interface GameSettings {
   gridSize: number; // 8 (default), 12, 16
@@ -59,6 +59,7 @@ export interface GameSettings {
   thinkTimeSeconds: number | null; // turn-based planning limit; null = infinite
   raceTurns: number; // turn-based: turns in Phase 1 before shrink starts
   shrinkEveryTurns: number; // turn-based: ring closes every N turns in Phase 2
+  shrinkEnabled?: boolean; // editor levels only: false = no shrink phase; after the race the match runs in TERRITORY until one snake remains (absent = true)
   raceDurationSeconds: number; // 180s (3m)
   shrinkIntervalSeconds: number; // 10s
   shrinkWarningSeconds: number; // 2s telegraph
