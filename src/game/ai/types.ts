@@ -45,6 +45,12 @@ export interface BrainProfile {
   fallbackClearHorizon?: number; // Change 7: ticks ahead the trapped fallback looks
   ringTelegraphAsWalls?: boolean; // Change 8: price the telegraphed ring as landed
   executionGuardLoss?: number; // Change 9: replaces inSimHeadOnLoss for guard profiles
+  // Changes 10–12 (v3 offense spec): also optional — absent means the
+  // brain plays the pre-offense game, exactly as before.
+  territoryWeight?: number; // Change 10: points per opponent flood cell removed at route end
+  territoryCap?: number; // Change 10: max territory bonus per route
+  exitCutBonus?: number; // Change 11: route-end bonus for leaving the opponent at 1 exit (2x at 0)
+  headOnBounty?: number; // Change 12: at HARD, a winning-tiebreak reachable step pays this instead of costing 10
 }
 
 export interface AIBrain {

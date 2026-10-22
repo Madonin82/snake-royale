@@ -146,6 +146,7 @@ export function rateAIMoves(
     }
 
     let headOnPenalty = 0;
+    let headOnBountyTotal = 0;
     let twoTickPenalty = 0;
     for (const opponent of livingOpponents) {
       const oppHead = opponent.body[0];
@@ -161,11 +162,24 @@ export function rateAIMoves(
           headOnPenalty = Math.max(headOnPenalty, 5);
         } else if (difficulty === 'MEDIUM') {
           headOnPenalty = Math.max(headOnPenalty, 15);
+        } else if (iWinTrade) {
+          // Change 12 (v3 offense spec): a reachable step the bot WINS on
+          // the tiebreak is a forcing trade, not a risk. Profiles with
+          // headOnBounty get paid for stepping onto the contested cell
+          // instead of paying the flat 10. The bounty is a separate
+          // additive term — the penalty accumulator starts at 0 and takes
+          // maxes, so it can never carry a negative "penalty". Absent
+          // field → today's 10 charge, unchanged.
+          if (profile.headOnBounty) {
+            headOnBountyTotal = Math.max(headOnBountyTotal, profile.headOnBounty);
+          } else {
+            headOnPenalty = Math.max(headOnPenalty, 10);
+          }
         } else {
           // Change 9 §7.2 (Changes 6–9 spec): guard profiles REPLACE the
           // losing-reach magnitude with executionGuardLoss — the two are
           // never stacked. Absent field → today's value, unchanged.
-          headOnPenalty = Math.max(headOnPenalty, iWinTrade ? 10 : Math.abs(profile.executionGuardLoss ?? profile.inSimHeadOnLoss));
+          headOnPenalty = Math.max(headOnPenalty, Math.abs(profile.executionGuardLoss ?? profile.inSimHeadOnLoss));
         }
       } else {
         const manDist = Math.abs(nextPos.x - oppHead.x) + Math.abs(nextPos.y - oppHead.y);
@@ -179,6 +193,7 @@ export function rateAIMoves(
       }
     }
     score -= (headOnPenalty + twoTickPenalty);
+    score += headOnBountyTotal;
 
     let proximityPenalty = 0;
     if ((gameState.snakes ?? []).length > 2) {
