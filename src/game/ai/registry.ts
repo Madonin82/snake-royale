@@ -3,14 +3,14 @@ import { opportunistBrain } from './brains/opportunist';
 import { avalenaBrain } from './brains/avalena';
 import { legacyBrain } from './brains/legacy';
 import { v2Brain } from './brains/v2';
-import { v3Brain } from './brains/v3';
+import { constrictorBrain } from './brains/constrictor';
 
 export const BRAINS: Record<string, AIBrain> = {
   opportunist: opportunistBrain,
   avalena: avalenaBrain,
   legacy: legacyBrain,
   v2: v2Brain,
-  v3: v3Brain,
+  constrictor: constrictorBrain,
 };
 
 export function getBrain(aiStyle?: string, difficulty?: 'EASY' | 'MEDIUM' | 'HARD'): { brain: AIBrain; effectiveDifficulty: 'EASY' | 'MEDIUM' | 'HARD' } {
@@ -23,14 +23,24 @@ export function getBrain(aiStyle?: string, difficulty?: 'EASY' | 'MEDIUM' | 'HAR
   if (norm === 'avalena') {
     return { brain: BRAINS['avalena'], effectiveDifficulty: difficulty || 'HARD' };
   }
-  if (norm === 'v3') {
-    return { brain: BRAINS['v3'], effectiveDifficulty: difficulty || 'MEDIUM' };
+  if (norm === 'constrictor' || norm === 'v3') {
+    // 'v3' was the brain's working id before batch 4 earned it the name
+    // Constrictor — kept resolving for saved levels and replays.
+    return { brain: BRAINS['constrictor'], effectiveDifficulty: difficulty || 'MEDIUM' };
   }
   if (norm === 'v2') {
     return { brain: BRAINS['v2'], effectiveDifficulty: difficulty || 'MEDIUM' };
   }
   if (norm === 'opportunist') {
     return { brain: BRAINS['opportunist'], effectiveDifficulty: difficulty || 'MEDIUM' };
+  }
+  // The main-game seat (Jimmy's ruling, 2026-10-22): Constrictor is the
+  // HARD bot. An unnamed seat at HARD — quickplay, where settings carry
+  // no aiStyle — gets the Constrictor. Every named style (including the
+  // editor's difficulty presets) and the EASY/MEDIUM seats resolve
+  // exactly as before.
+  if (!norm && difficulty === 'HARD') {
+    return { brain: BRAINS['constrictor'], effectiveDifficulty: 'HARD' };
   }
   return { brain: BRAINS['opportunist'], effectiveDifficulty: difficulty || 'MEDIUM' };
 }

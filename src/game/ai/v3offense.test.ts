@@ -8,11 +8,11 @@ import { floodFillArea } from './shared/rating';
 import { getBrain, listBrains } from './registry';
 import { OPPORTUNIST_PROFILE } from './brains/opportunist';
 import { V2_PROFILE } from './brains/v2';
-import { V3_PROFILE } from './brains/v3';
+import { CONSTRICTOR_PROFILE } from './brains/constrictor';
 import { GameState, Position, Snake } from '../../types/game';
 
 // Fixture tests for the Changes 10–12 offense spec (new brain forked
-// from v2, working id 'v3'). Jimmy's direction after batch 3: the bot
+// from v2, now the Constrictor; 'v3' was its working id). Jimmy's direction after batch 3: the bot
 // must learn the offensive half of the game — territory (use its body
 // to take the opponent's liberties and seal him off from tokens and
 // token re-spawns), exit-cutting (atari), and deliberate winning
@@ -43,7 +43,7 @@ function firstStep(st: GameState, style: string): string {
   return r.plan[0]?.direction ?? '(none)';
 }
 
-function firstStepWithProfile(st: GameState, profile: typeof V3_PROFILE): string {
+function firstStepWithProfile(st: GameState, profile: typeof CONSTRICTOR_PROFILE): string {
   const r = buildPlanWithProfile(
     { gameState: st, gridSize: 8, botRole: 'p2', difficulty: 'HARD', raceTurns: 20 },
     profile,
@@ -52,7 +52,7 @@ function firstStepWithProfile(st: GameState, profile: typeof V3_PROFILE): string
 }
 
 /** Flood area of the opponent at the end of the plan a profile commits to. */
-function endOpponentArea(st: GameState, profile: typeof V3_PROFILE): number {
+function endOpponentArea(st: GameState, profile: typeof CONSTRICTOR_PROFILE): number {
   const r = buildPlanWithProfile(
     { gameState: st, gridSize: 8, botRole: 'p2', difficulty: 'HARD', raceTurns: 20 },
     profile,
@@ -88,12 +88,12 @@ test('Change 12: v3 steps onto the contested cell it wins; v2 and the Opportunis
 });
 
 test('Change 12: revert proof — headOnBounty 0 restores the passive step', () => {
-  assert.equal(firstStepWithProfile(bounty, { ...V3_PROFILE, headOnBounty: 0 }), 'UP');
+  assert.equal(firstStepWithProfile(bounty, { ...CONSTRICTOR_PROFILE, headOnBounty: 0 }), 'UP');
 });
 
 test('Change 12: the bounty replaces the 10 charge with +150 at the rating level', () => {
   const v2c = calculateAIMoveCandidates(bounty, 8, 'p2', 'HARD', undefined, V2_PROFILE);
-  const v3c = calculateAIMoveCandidates(bounty, 8, 'p2', 'HARD', undefined, V3_PROFILE);
+  const v3c = calculateAIMoveCandidates(bounty, 8, 'p2', 'HARD', undefined, CONSTRICTOR_PROFILE);
   const v2Right = v2c.find(c => c.dir === 'RIGHT');
   const v3Right = v3c.find(c => c.dir === 'RIGHT');
   assert.ok(v2Right && v3Right);
@@ -114,7 +114,7 @@ const territory = state({
     snake('p2', [{ x: 4, y: 4 }, { x: 3, y: 4 }, { x: 2, y: 4 }, { x: 1, y: 4 }, { x: 0, y: 4 }, { x: 0, y: 5 }, { x: 0, y: 6 }, { x: 1, y: 6 }, { x: 2, y: 6 }, { x: 2, y: 5 }], 'RIGHT'),
   ],
 });
-const v3TerritoryOnly = { ...V3_PROFILE, exitCutBonus: 0 };
+const v3TerritoryOnly = { ...CONSTRICTOR_PROFILE, exitCutBonus: 0 };
 
 test('Change 10: v3 territory term seals the opponent (end flood ~29 vs ~51)', () => {
   assert.ok(endOpponentArea(territory, V2_PROFILE) >= 40);
@@ -139,7 +139,7 @@ const exitCut = state({
     snake('p2', [{ x: 1, y: 4 }, { x: 1, y: 5 }, { x: 2, y: 5 }, { x: 2, y: 6 }], 'UP', { skillPoints: 10 }),
   ],
 });
-const v3ExitOnly = { ...V3_PROFILE, territoryWeight: 0 };
+const v3ExitOnly = { ...CONSTRICTOR_PROFILE, territoryWeight: 0 };
 
 test('Change 11: v3 plugs the pocket mouth; v2 takes the passive west line', () => {
   assert.equal(firstStep(exitCut, 'v2'), 'LEFT');
@@ -152,19 +152,22 @@ test('Change 11: revert proof — exitCutBonus 0 restores the passive line', () 
 });
 
 // --- Registry / profile shape ------------------------------------------
-test('v3 brain: registered, forked from v2, offense fields set; frozen brains untouched', () => {
-  assert.ok(listBrains().some(b => b.id === 'v3'));
-  assert.equal(getBrain('v3', 'HARD').brain.id, 'v3');
-  assert.equal(getBrain('V3', 'HARD').brain.id, 'v3');
+test('Constrictor brain: registered under its earned name, forked from v2, offense fields set; frozen brains untouched', () => {
+  assert.ok(listBrains().some(b => b.id === 'constrictor'));
+  assert.equal(getBrain('constrictor', 'HARD').brain.id, 'constrictor');
+  assert.equal(getBrain('CONSTRICTOR', 'HARD').brain.id, 'constrictor');
+  // The working id stays as an alias for saved levels and replays.
+  assert.equal(getBrain('v3', 'HARD').brain.id, 'constrictor');
+  assert.equal(getBrain('V3', 'HARD').brain.id, 'constrictor');
   // Inherited survival terms ride along (fork, not a fresh brain).
-  assert.equal(V3_PROFILE.coffinPenaltyMax, V2_PROFILE.coffinPenaltyMax);
-  assert.equal(V3_PROFILE.executionGuardLoss, V2_PROFILE.executionGuardLoss);
-  assert.equal(V3_PROFILE.ringTelegraphAsWalls, true);
+  assert.equal(CONSTRICTOR_PROFILE.coffinPenaltyMax, V2_PROFILE.coffinPenaltyMax);
+  assert.equal(CONSTRICTOR_PROFILE.executionGuardLoss, V2_PROFILE.executionGuardLoss);
+  assert.equal(CONSTRICTOR_PROFILE.ringTelegraphAsWalls, true);
   // The offense terms.
-  assert.equal(V3_PROFILE.territoryWeight, 5);
-  assert.equal(V3_PROFILE.territoryCap, 300);
-  assert.equal(V3_PROFILE.exitCutBonus, 150);
-  assert.equal(V3_PROFILE.headOnBounty, 150);
+  assert.equal(CONSTRICTOR_PROFILE.territoryWeight, 5);
+  assert.equal(CONSTRICTOR_PROFILE.territoryCap, 300);
+  assert.equal(CONSTRICTOR_PROFILE.exitCutBonus, 150);
+  assert.equal(CONSTRICTOR_PROFILE.headOnBounty, 150);
   // Absent = neutral for every pre-existing brain.
   for (const p of [OPPORTUNIST_PROFILE, V2_PROFILE]) {
     assert.equal(p.territoryWeight, undefined);
