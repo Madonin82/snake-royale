@@ -2,6 +2,7 @@ import { GameState, Direction } from '../../types/game';
 import { AIActionResult, AIPlanResult, ChainIntent } from './types';
 import { getBrain } from './registry';
 import { planDiverged } from './planner';
+import { calculateAIMoveCandidates as calcCandidates } from './greedy';
 
 export type { AIActionResult, AIPlanResult, ChainIntent };
 export { planDiverged };
@@ -39,7 +40,6 @@ export function calculateAIMoveCandidates(
   aiStyle?: string,
 ): { dir: Direction; score: number }[] {
   const { brain, effectiveDifficulty } = getBrain(aiStyle, difficulty);
-  const { calculateAIMoveCandidates: calcCandidates } = require('./greedy');
   return calcCandidates(gameState, gridSize, botRole, effectiveDifficulty, aiStyle, brain.profile);
 }
 
