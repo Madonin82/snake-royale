@@ -58,6 +58,7 @@ export const Hud: React.FC<HudProps> = ({
   const seatTag = (seat: string): string => getSeatDisplayTag(seat, playMode, viewerSeat);
   const isRacing = gameState.phase === 'RACING';
   const isShrinking = gameState.phase === 'SHRINKING';
+  const isTerritory = gameState.phase === 'TERRITORY';
   const isMultiCardSide = gameState.snakes.length > 2;
   const { left: leftSnakes, right: rightSnakes } = splitPlayersTwoPerSide(gameState.snakes);
   const objectiveList = gameState.campaignObjectives
@@ -207,10 +208,12 @@ export const Hud: React.FC<HudProps> = ({
             ? `PHASE 1: TOKEN RACE`
             : gameState.phase === 'SHRINKING'
             ? `PHASE 2: SHRINK ARENA`
+            : gameState.phase === 'TERRITORY'
+            ? `TERRITORY: LAST SURVIVOR`
             : `MATCH OVER`}
         </span>
         <span className="shrink-0 whitespace-nowrap text-[10px] leading-tight bg-[#9BBC0F] px-1.5 py-0.5 [@media(max-height:540px)]:py-0 border border-[#0F380F] tabular-nums">
-          {isRacing ? `RND ${gameState.round} (${gameState.tokens.length} 💎)` : `RING ${gameState.ringInset}`}
+          {isRacing || isTerritory ? `RND ${gameState.round} (${gameState.tokens.length} 💎)` : `RING ${gameState.ringInset}`}
         </span>
       </div>
 
@@ -249,7 +252,7 @@ export const Hud: React.FC<HudProps> = ({
 
         <div className="whitespace-nowrap text-xs md:text-sm [@media(max-height:540px)]:text-[11px] leading-tight font-black tracking-widest bg-[#9BBC0F] px-2 py-0.5 [@media(max-height:540px)]:py-0 border border-[#0F380F] tabular-nums min-w-[8.5rem] text-center">
           {gameState.turnBased
-            ? `TURN ${gameState.tick} • ${gameState.phase === 'RACING' ? `${gameState.phaseTurnsRemaining} LEFT` : gameState.phase === 'SHRINKING' ? `RING IN ${gameState.phaseTurnsRemaining}` : 'OVER'}`
+            ? `TURN ${gameState.tick} • ${gameState.phase === 'RACING' ? `${gameState.phaseTurnsRemaining} LEFT` : gameState.phase === 'SHRINKING' ? `RING IN ${gameState.phaseTurnsRemaining}` : gameState.phase === 'TERRITORY' ? 'TERRITORY' : 'OVER'}`
             : `⏱️ ${formattedTime}`}
         </div>
 

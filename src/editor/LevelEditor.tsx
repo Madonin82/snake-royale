@@ -96,6 +96,7 @@ const DEFAULT_LEVEL: CampaignLevel = {
   phases: {
     raceTurns: 40,
     shrinkEveryTurns: 6,
+    shrinkEnabled: true,
   },
   objectives: {
     primary: 'SURVIVAL',
@@ -1074,6 +1075,34 @@ export const LevelEditor: React.FC = () => {
                   }
                   className="w-full bg-[#9BBC0F] border-2 border-[#0F380F] px-2 py-1 font-mono font-bold text-[#0F380F] outline-none"
                 />
+              </div>
+
+              <div className="col-span-2">
+                <label className="block font-black mb-1">SHRINK PHASE:</label>
+                <button
+                  type="button"
+                  onClick={() =>
+                    setLevel({
+                      ...level,
+                      phases: {
+                        ...level.phases,
+                        shrinkEnabled: !(level.phases.shrinkEnabled ?? true),
+                      },
+                    })
+                  }
+                  className={`w-full py-1 font-black border-2 border-[#0F380F] ${
+                    (level.phases.shrinkEnabled ?? true)
+                      ? 'bg-[#0F380F] text-[#9BBC0F]'
+                      : 'bg-[#9BBC0F] text-[#0F380F]'
+                  }`}
+                >
+                  {(level.phases.shrinkEnabled ?? true) ? 'ENABLED [ON]' : 'DISABLED [OFF]'}
+                </button>
+                {(level.phases.shrinkEnabled ?? true) ? null : (
+                  <span className="block mt-1 text-[9px] font-bold leading-snug">
+                    No shrink: after the token race the ring never closes and no new tokens spawn (tokens on the board stay edible). The match runs until one snake remains — last survivor wins.
+                  </span>
+                )}
               </div>
             </div>
 

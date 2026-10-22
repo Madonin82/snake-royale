@@ -35,7 +35,7 @@ export function isSkillUnlocked(
     return true;
   }
   if (mode === 'after_race') {
-    return state.phase === 'SHRINKING';
+    return state.phase === 'SHRINKING' || state.phase === 'TERRITORY';
   }
   if (mode.startsWith('after_turns:')) {
     const turns = Number(mode.slice('after_turns:'.length));
@@ -43,7 +43,7 @@ export function isSkillUnlocked(
       return state.tick >= turns;
     }
   }
-  return state.phase === 'SHRINKING';
+  return state.phase === 'SHRINKING' || state.phase === 'TERRITORY';
 }
 
 export function canActivateSkill(
