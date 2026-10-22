@@ -68,9 +68,9 @@ export interface GameSettings {
   botDifficulty: 'EASY' | 'MEDIUM' | 'HARD';
   levelId?: string;
   levelName?: string;
-  aiStyle?: 'GREEDY' | 'TURTLE' | 'CUTOFF' | 'HEADHUNTER' | 'PATROL' | 'AVALENA' | 'avalena' | 'OPPORTUNIST' | 'opportunist' | 'LEGACY_EASY' | 'legacy_easy' | 'LEGACY_MEDIUM' | 'legacy_medium' | 'LEGACY_HARD' | 'legacy_hard';
+  aiStyle?: 'GREEDY' | 'TURTLE' | 'CUTOFF' | 'HEADHUNTER' | 'PATROL' | 'AVALENA' | 'avalena' | 'OPPORTUNIST' | 'opportunist' | 'LEGACY_EASY' | 'legacy_easy' | 'LEGACY_MEDIUM' | 'legacy_medium' | 'LEGACY_HARD' | 'legacy_hard' | 'V2' | 'v2';
   campaignAiDifficulties?: Record<string, 'EASY' | 'MEDIUM' | 'HARD'>;
-  campaignAiStyles?: Record<string, 'GREEDY' | 'TURTLE' | 'CUTOFF' | 'HEADHUNTER' | 'PATROL' | 'AVALENA' | 'avalena' | 'OPPORTUNIST' | 'opportunist' | 'LEGACY_EASY' | 'legacy_easy' | 'LEGACY_MEDIUM' | 'legacy_medium' | 'LEGACY_HARD' | 'legacy_hard'>;
+  campaignAiStyles?: Record<string, 'GREEDY' | 'TURTLE' | 'CUTOFF' | 'HEADHUNTER' | 'PATROL' | 'AVALENA' | 'avalena' | 'OPPORTUNIST' | 'opportunist' | 'LEGACY_EASY' | 'legacy_easy' | 'LEGACY_MEDIUM' | 'legacy_medium' | 'LEGACY_HARD' | 'legacy_hard' | 'V2' | 'v2'>;
   skillsAvailable?: SkillsAvailableConfig;
   gestureSwipeEnabled?: boolean;
   gestureTapPathEnabled?: boolean;

@@ -37,6 +37,14 @@ export interface BrainProfile {
   threatNudge: { EASY: number; MEDIUM: number; HARD: number };
   chainCap: { EASY: number; MEDIUM: number; HARD: number };
   easyRandomSecondPick: number;
+  // Changes 6–9 (spec §3): all optional — absent means neutral, so the
+  // frozen brain literals (opportunist/legacy/avalena) typecheck and
+  // behave exactly as before without naming any of these fields.
+  coffinPenaltyMax?: number; // Change 6: margin penalty at margin 0
+  coffinMarginBand?: number; // Change 6: penalty reaches 0 at this margin
+  fallbackClearHorizon?: number; // Change 7: ticks ahead the trapped fallback looks
+  ringTelegraphAsWalls?: boolean; // Change 8: price the telegraphed ring as landed
+  executionGuardLoss?: number; // Change 9: replaces inSimHeadOnLoss for guard profiles
 }
 
 export interface AIBrain {

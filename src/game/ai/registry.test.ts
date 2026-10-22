@@ -18,6 +18,23 @@ test('registry: unknown style falls back to Opportunist without throwing', () =>
   assert.equal(resolved.brain.id, 'opportunist');
 });
 
+test('registry: v2 brain resolves in both cases and carries the Changes 6-9 terms; opportunist stays neutral', () => {
+  assert.equal(getBrain('v2').brain.id, 'v2');
+  assert.equal(getBrain('V2').brain.id, 'v2');
+  const v2 = getBrain('v2').brain.profile;
+  assert.equal(v2.coffinPenaltyMax, 400);
+  assert.equal(v2.coffinMarginBand, 6);
+  assert.equal(v2.fallbackClearHorizon, 8);
+  assert.equal(v2.ringTelegraphAsWalls, true);
+  assert.equal(v2.executionGuardLoss, -10000);
+  const opp = getBrain('opportunist').brain.profile;
+  assert.equal(opp.coffinPenaltyMax, undefined);
+  assert.equal(opp.coffinMarginBand, undefined);
+  assert.equal(opp.fallbackClearHorizon, undefined);
+  assert.equal(opp.ringTelegraphAsWalls, undefined);
+  assert.equal(opp.executionGuardLoss, undefined);
+});
+
 test('frozen-profile test: opportunist profile matches the frozen specification', () => {
   const resolved = getBrain('opportunist');
   assert.deepEqual(resolved.brain.profile, OPPORTUNIST_PROFILE);

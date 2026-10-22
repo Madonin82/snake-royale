@@ -3,9 +3,26 @@ import { AIActionResult, AIPlanResult, ChainIntent } from './types';
 import { getBrain } from './registry';
 import { planDiverged } from './planner';
 import { calculateAIMoveCandidates as calcCandidates } from './greedy';
+import { imminentStepLosingReachable as guardCheck } from './shared/rating';
 
 export type { AIActionResult, AIPlanResult, ChainIntent };
 export { planDiverged };
+
+/**
+ * Change 9 §7.3 (Changes 6–9 spec): execution-time reachability guard,
+ * resolved against the brain the given style selects. Inert (false) for
+ * every brain whose profile does not carry executionGuardLoss.
+ */
+export function imminentStepLosingReachable(
+  gameState: GameState,
+  gridSize: number,
+  botRole: string,
+  nextDir: Direction,
+  aiStyle?: string,
+): boolean {
+  const { brain } = getBrain(aiStyle);
+  return guardCheck(gameState, gridSize, botRole, nextDir, brain.profile);
+}
 
 export function calculateAIAction(
   gameState: GameState,
