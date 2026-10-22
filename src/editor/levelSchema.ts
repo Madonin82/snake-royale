@@ -3,7 +3,7 @@ import { Position, Direction, SkillId, SkillsAvailableConfig } from '../types/ga
 export const SKILL_IDS: readonly SkillId[] = ['dart', 'rattle'] as const;
 
 export type CampaignTokenMode = 'ESCALATING' | 'FIXED' | 'FIXED_SET';
-export type CampaignAiStyle = 'GREEDY' | 'TURTLE' | 'CUTOFF' | 'HEADHUNTER' | 'PATROL' | 'AVALENA' | 'avalena' | 'OPPORTUNIST' | 'opportunist' | 'LEGACY_EASY' | 'legacy_easy' | 'LEGACY_MEDIUM' | 'legacy_medium' | 'LEGACY_HARD' | 'legacy_hard' | 'V2' | 'v2';
+export type CampaignAiStyle = 'GREEDY' | 'TURTLE' | 'CUTOFF' | 'HEADHUNTER' | 'PATROL' | 'AVALENA' | 'avalena' | 'OPPORTUNIST' | 'opportunist' | 'LEGACY_EASY' | 'legacy_easy' | 'LEGACY_MEDIUM' | 'legacy_medium' | 'LEGACY_HARD' | 'legacy_hard' | 'V2' | 'v2' | 'V3' | 'v3';
 
 export interface SpawnConfig {
   enabled?: boolean;

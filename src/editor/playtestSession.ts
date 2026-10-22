@@ -62,6 +62,8 @@ export function getCampaignPlaytestSettings(level: CampaignLevel): GameSettings 
     opportunist: 'HARD',
     V2: 'HARD',
     v2: 'HARD',
+    V3: 'HARD',
+    v3: 'HARD',
     LEGACY_EASY: 'EASY',
     legacy_easy: 'EASY',
     LEGACY_MEDIUM: 'MEDIUM',

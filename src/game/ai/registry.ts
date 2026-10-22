@@ -3,12 +3,14 @@ import { opportunistBrain } from './brains/opportunist';
 import { avalenaBrain } from './brains/avalena';
 import { legacyBrain } from './brains/legacy';
 import { v2Brain } from './brains/v2';
+import { v3Brain } from './brains/v3';
 
 export const BRAINS: Record<string, AIBrain> = {
   opportunist: opportunistBrain,
   avalena: avalenaBrain,
   legacy: legacyBrain,
   v2: v2Brain,
+  v3: v3Brain,
 };
 
 export function getBrain(aiStyle?: string, difficulty?: 'EASY' | 'MEDIUM' | 'HARD'): { brain: AIBrain; effectiveDifficulty: 'EASY' | 'MEDIUM' | 'HARD' } {
@@ -20,6 +22,9 @@ export function getBrain(aiStyle?: string, difficulty?: 'EASY' | 'MEDIUM' | 'HAR
   }
   if (norm === 'avalena') {
     return { brain: BRAINS['avalena'], effectiveDifficulty: difficulty || 'HARD' };
+  }
+  if (norm === 'v3') {
+    return { brain: BRAINS['v3'], effectiveDifficulty: difficulty || 'MEDIUM' };
   }
   if (norm === 'v2') {
     return { brain: BRAINS['v2'], effectiveDifficulty: difficulty || 'MEDIUM' };

@@ -1,8 +1,8 @@
 import { BufferEntry, Direction, GameState, Position, Snake } from '../../types/game';
-import { getNextHeadPosition, isOppositeDirection } from '../engine';
+import { getNextHeadPosition, isCellInArena, isOppositeDirection } from '../engine';
 import { canAffordQueuedDart, isValidDartDirection } from '../skills';
 import { AIPlanResult, BrainProfile, ChainIntent } from './types';
-import { initialSim, simToGameState, posKey, sameTeam, AdvanceOutcome, SimState, SimSnake, ALL_DIRECTIONS, tiebreakWinner } from './shared/sim';
+import { initialSim, simToGameState, posKey, sameTeam, AdvanceOutcome, SimState, SimSnake, ALL_DIRECTIONS, getOpponentBodyThreat, tiebreakWinner } from './shared/sim';
 import { computePosture, computeLockCount, findClusters, clusterChainValue } from './shared/posture';
 import { floodFillArea } from './shared/rating';
 import { calculateAIAction, calculateAIMoveCandidates, calculateAIMove } from './greedy';
@@ -127,6 +127,11 @@ interface RouteState {
   projections: Record<string, Position[]>[];
   ateCells: Position[];
   firstDirForced: boolean;
+  // Change 10 (v3 offense spec): the most trapped opponent's flood
+  // area (liberties) at the route's low-water mark, and how much
+  // territory bonus the route has already collected toward the cap.
+  oppArea: number;
+  territoryPaid: number;
 }
 
 export function planDiverged(
@@ -169,6 +174,47 @@ function applyLandedRingInset(view: GameState, base: GameState, gridSize: number
     view.isTelegraphingShrink = false;
     view.telegraphRingInset = view.ringInset;
   }
+}
+
+/**
+ * Changes 10–11 (v3 offense spec): an opponent's exits in a given
+ * state — non-reverse steps to a cell that is in-arena, non-wall, not
+ * in any snake's body-threat set, AND with room to live after the step
+ * (flood from the cell at least the opponent's length). A step into a
+ * dead-end nook is not an exit. One exit is atari; zero is a sealed
+ * group.
+ */
+function opponentExitCount(view: GameState, opp: Snake, gridSize: number): number {
+  const head = opp.body[0];
+  const blocked = new Set<string>();
+  for (const s of view.snakes) {
+    for (const key of getOpponentBodyThreat(s, view.tokens ?? [])) blocked.add(key);
+  }
+  if (view.walls) for (const w of view.walls) blocked.add(posKey(w));
+  let exits = 0;
+  for (const d of ALL_DIRECTIONS) {
+    if (isOppositeDirection(opp.direction, d)) continue;
+    const cell = getNextHeadPosition(head, d);
+    if (!isCellInArena(cell, gridSize, view.ringInset)) continue;
+    if (blocked.has(posKey(cell))) continue;
+    if (floodFillArea(cell, view, gridSize, opp, view.ringInset) < opp.body.length) continue;
+    exits++;
+  }
+  return exits;
+}
+
+/**
+ * Change 10 (v3 offense spec): the smallest flood area among the
+ * living opponents in a view — the most trapped opponent's liberties.
+ * A dead or absent opponent contributes 0.
+ */
+function minOpponentArea(view: GameState, me: Snake, botRole: string, gridSize: number): number {
+  let min = Number.POSITIVE_INFINITY;
+  for (const s of view.snakes) {
+    if (s.id === botRole || !s.isAlive || sameTeam(me, s)) continue;
+    min = Math.min(min, floodFillArea(s.body[0], view, gridSize, s, view.ringInset));
+  }
+  return min;
 }
 
 export function buildAIPlan(
@@ -239,9 +285,12 @@ export function buildAIPlan(
 
   const intent = (profile.enableIntent && difficulty === 'HARD') ? args.intent ?? null : null;
   const startSim = initialSim(gameState);
+  const territoryWeight = profile.territoryWeight ?? 0;
   let beam: RouteState[] = [{
     entries: [], sim: startSim, simAfterFirst: null, score: 0,
     projections: [], ateCells: [], firstDirForced: false,
+    oppArea: territoryWeight > 0 ? minOpponentArea(gameState, me, botRole, gridSize) : Number.POSITIVE_INFINITY,
+    territoryPaid: 0,
   }];
   for (let ply = 0; ply < planLen; ply++) {
     const next: RouteState[] = [];
@@ -279,6 +328,29 @@ export function buildAIPlan(
           const distAfter = Math.abs(headAfter.x - intent.anchor.x) + Math.abs(headAfter.y - intent.anchor.y);
           if (distAfter < distBefore) score += profile.intentStepBonus;
         }
+        // Change 10 (v3 offense spec): territory, priced per ply as
+        // liberties actually come off the most trapped opponent (a new
+        // low-water mark for his flood area), accumulated up to the
+        // profile cap. Priced incrementally so the beam can climb the
+        // gradient instead of only discovering the seal at route end.
+        let oppArea = route.oppArea;
+        let territoryPaid = route.territoryPaid;
+        if (territoryWeight > 0 && Number.isFinite(route.oppArea)) {
+          const endView = simToGameState(gameState, outcome.sim);
+          applyLandedRingInset(endView, gameState, gridSize, ply + 1, profile);
+          const newOppArea = minOpponentArea(endView, viewMe, botRole, gridSize);
+          if (Number.isFinite(newOppArea) && newOppArea < oppArea) {
+            const bonus = Math.min(
+              (profile.territoryCap ?? Number.POSITIVE_INFINITY) - territoryPaid,
+              territoryWeight * (oppArea - newOppArea),
+            );
+            if (bonus > 0) {
+              score += bonus;
+              territoryPaid += bonus;
+            }
+            oppArea = newOppArea;
+          }
+        }
         next.push({
           entries: [...route.entries, { type: 'move', direction: cand.dir }],
           sim: outcome.sim,
@@ -287,6 +359,8 @@ export function buildAIPlan(
           projections: [...route.projections, outcome.opponentBodies],
           ateCells,
           firstDirForced: route.entries.length === 0 ? candidates.length === 1 : route.firstDirForced,
+          oppArea,
+          territoryPaid,
         });
       }
     }
@@ -320,6 +394,37 @@ export function buildAIPlan(
     }
   }
   playable.sort((a, b) => b.score - a.score);
+
+  // Change 11 (v3 offense spec): exit-cut (atari), priced at route
+  // end. Territory (Change 10) is priced per ply inside the beam
+  // above; what remains for route end is the tactical fact of the
+  // opponent's exits in the position the route buys — one exit pays
+  // the bonus, zero pays double. Measured in the same place the
+  // PROTECT end-check below reads end areas.
+  const exitCutBonus = profile.exitCutBonus ?? 0;
+  if (exitCutBonus > 0) {
+    const opponents = gameState.snakes.filter(s => s.id !== botRole && s.isAlive && !sameTeam(me, s));
+    if (opponents.length > 0) {
+      for (const route of playable) {
+        const view = simToGameState(gameState, route.sim);
+        applyLandedRingInset(view, gameState, gridSize, route.entries.length - 1, profile);
+        let fewestExits = Number.POSITIVE_INFINITY;
+        for (const opp of opponents) {
+          const viewOpp = view.snakes.find(s => s.id === opp.id);
+          if (!viewOpp || !viewOpp.isAlive) {
+            fewestExits = 0;
+            continue;
+          }
+          fewestExits = Math.min(fewestExits, opponentExitCount(view, viewOpp, gridSize));
+        }
+        if (fewestExits <= 1) {
+          route.score += fewestExits === 0 ? exitCutBonus * 2 : exitCutBonus;
+        }
+      }
+      playable.sort((a, b) => b.score - a.score);
+    }
+  }
+
   let chosen = playable[0];
 
   if (postureInfo.posture === 'PROTECT') {
