@@ -1284,6 +1284,7 @@ const GameApp: React.FC<{ campaignPlaytestLevel: CampaignLevel | null }> = ({ ca
                 snake.id,
                 nextEntry.direction,
                 s.campaignAiStyles?.[snake.id] ?? s.aiStyle,
+                s.campaignAiDifficulties?.[snake.id] ?? s.botDifficulty,
               );
             if (!diverged && !guardFires) {
               continue; // Locked plan still executing — don't wipe it.

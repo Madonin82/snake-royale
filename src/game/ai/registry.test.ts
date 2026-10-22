@@ -35,6 +35,24 @@ test('registry: v2 brain resolves in both cases and carries the Changes 6-9 term
   assert.equal(opp.executionGuardLoss, undefined);
 });
 
+test('promotion (Jimmy, 2026-10-22): the unnamed HARD seat is the Constrictor; every other seat is unchanged', () => {
+  // Quickplay carries no aiStyle — HARD there is the main-game seat.
+  assert.equal(getBrain(undefined, 'HARD').brain.id, 'constrictor');
+  assert.equal(getBrain('', 'HARD').brain.id, 'constrictor');
+  assert.equal(getBrain(undefined, 'HARD').effectiveDifficulty, 'HARD');
+  // EASY / MEDIUM / unspecified seats stay on the Opportunist.
+  assert.equal(getBrain(undefined, 'MEDIUM').brain.id, 'opportunist');
+  assert.equal(getBrain(undefined, 'EASY').brain.id, 'opportunist');
+  assert.equal(getBrain(undefined).brain.id, 'opportunist');
+  // Named styles resolve by name at any difficulty — including the
+  // editor's difficulty presets and the Opportunist itself at HARD.
+  assert.equal(getBrain('GREEDY', 'HARD').brain.id, 'opportunist');
+  assert.equal(getBrain('HEADHUNTER', 'HARD').brain.id, 'opportunist');
+  assert.equal(getBrain('opportunist', 'HARD').brain.id, 'opportunist');
+  // Unknown styles keep the old fallback even at HARD (named != unnamed).
+  assert.equal(getBrain('nonexistent_style_xyz', 'HARD').brain.id, 'opportunist');
+});
+
 test('frozen-profile test: opportunist profile matches the frozen specification', () => {
   const resolved = getBrain('opportunist');
   assert.deepEqual(resolved.brain.profile, OPPORTUNIST_PROFILE);

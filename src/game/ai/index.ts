@@ -19,8 +19,12 @@ export function imminentStepLosingReachable(
   botRole: string,
   nextDir: Direction,
   aiStyle?: string,
+  difficulty?: 'EASY' | 'MEDIUM' | 'HARD',
 ): boolean {
-  const { brain } = getBrain(aiStyle);
+  // Resolve the brain the same way the seat itself resolves (style +
+  // difficulty), so the guard checks against the profile actually
+  // playing — e.g. the unnamed HARD seat, which is the Constrictor.
+  const { brain } = getBrain(aiStyle, difficulty);
   return guardCheck(gameState, gridSize, botRole, nextDir, brain.profile);
 }
 
