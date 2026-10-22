@@ -16,7 +16,7 @@ import {
 } from './game/engine';
 import { resolveInitialSettings, saveStoredUserSettings } from './game/settingsStorage';
 import { canActivateSkill, canAffordQueuedDart, canAffordQueuedRattle, canAffordQueuedSkill, canQueueRattleWithLength, isValidDartDirection, SKILLS } from './game/skills';
-import { buildAIPlan, calculateAIAction, calculateAIMove, planDiverged } from './game/ai';
+import { buildAIPlan, calculateAIAction, calculateAIMove, imminentStepLosingReachable, planDiverged } from './game/ai';
 import type { ChainIntent } from './game/ai';
 import { cloneGameState, toCompactGameState } from './game/aiBridge';
 import { shouldApplyRtdbBridgeCommand } from './game/aiBridgeRtdb';
@@ -1266,7 +1266,26 @@ const GameApp: React.FC<{ campaignPlaytestLevel: CampaignLevel | null }> = ({ ca
             // the plies already executed, drop the plan and replan
             // from the live board below.
             const proj = planProjectionsRef.current[snake.id];
-            if (!proj || !planDiverged(proj.bodiesByPly, proj.lockedCount - buf.length, current.snakes)) {
+            const diverged = !!proj && planDiverged(proj.bodiesByPly, proj.lockedCount - buf.length, current.snakes);
+            // Change 9 §7.3 (Changes 6–9 spec): execution-time guard.
+            // A brain whose profile carries executionGuardLoss also
+            // drops its locked plan when the imminent buffered step
+            // lands on a cell an opponent can now reach with a losing
+            // tiebreak — a post-lock deviation planDiverged cannot see,
+            // because the opponent is still ON its projected body (it
+            // deviates on the same tick the step executes). Inert for
+            // every other brain. Move entries only: a dart's landing
+            // is a 3-step outcome, not a one-ply fact.
+            const nextEntry = buf[0];
+            const guardFires = nextEntry?.type === 'move' &&
+              imminentStepLosingReachable(
+                current,
+                s.gridSize,
+                snake.id,
+                nextEntry.direction,
+                s.campaignAiStyles?.[snake.id] ?? s.aiStyle,
+              );
+            if (!diverged && !guardFires) {
               continue; // Locked plan still executing — don't wipe it.
             }
             delete planProjectionsRef.current[snake.id];

@@ -3,7 +3,7 @@ import { getNextHeadPosition, isCellInArena, isOppositeDirection } from '../engi
 import { canActivateSkill } from '../skills';
 import { AIActionResult, BrainProfile } from './types';
 import { ALL_DIRECTIONS, getOpponentBodyThreat, getOpponentThreatCells, posKey, sameTeam } from './shared/sim';
-import { floodFillArea, rateAIMoves } from './shared/rating';
+import { fallbackClearInfo, floodFillArea, rateAIMoves } from './shared/rating';
 
 export function calculateAIAction(
   gameState: GameState,
@@ -246,17 +246,45 @@ export function calculateAIMove(
   const currentDir = me.direction;
 
   if (ratedMoves.length === 0) {
-    let bestDir: Direction | null = null;
-    let bestArea = -1;
+    // Trapped fallback. The candidate legality here is the historical one
+    // (NOT the Change 8 effective inset): a fallback step into the
+    // telegraph band can still be the least-bad option — the horizon
+    // model below prices the landing ring explicitly.
+    const candidates: { dir: Direction; nextPos: Position }[] = [];
     for (const dir of validDirs) {
       const nextPos = getNextHeadPosition(head, dir);
       if (!isCellInArena(nextPos, gridSize, gameState.ringInset)) continue;
       if (gameState.walls?.some(wall => wall.x === nextPos.x && wall.y === nextPos.y)) continue;
       if (me.body.slice(0, -1).some((s: Position) => s.x === nextPos.x && s.y === nextPos.y)) continue;
-      const area = floodFillArea(nextPos, gameState, gridSize, me);
+      candidates.push({ dir, nextPos });
+    }
+    // Change 7 (Changes 6–9 spec): profiles with fallbackClearHorizon
+    // rank the fallback steps by time-to-clear — how soon the space
+    // around the step fits the body again as tails vacate (ties: larger
+    // area at the clearing tick, then larger area now). Largest-area-now
+    // cannot tell a sealed pocket from a door about to open.
+    const horizon = profile.fallbackClearHorizon ?? 0;
+    if (horizon > 0 && candidates.length > 0) {
+      const ranked = candidates.map(c => ({
+        dir: c.dir,
+        info: fallbackClearInfo(c.nextPos, gameState, gridSize, me, horizon),
+      }));
+      ranked.sort((a, b) => {
+        const ta = a.info.clearTick ?? Number.POSITIVE_INFINITY;
+        const tb = b.info.clearTick ?? Number.POSITIVE_INFINITY;
+        if (ta !== tb) return ta - tb;
+        if (a.info.areaAtClear !== b.info.areaAtClear) return b.info.areaAtClear - a.info.areaAtClear;
+        return b.info.areaNow - a.info.areaNow;
+      });
+      return ranked[0].dir;
+    }
+    let bestDir: Direction | null = null;
+    let bestArea = -1;
+    for (const c of candidates) {
+      const area = floodFillArea(c.nextPos, gameState, gridSize, me);
       if (area > bestArea) {
         bestArea = area;
-        bestDir = dir;
+        bestDir = c.dir;
       }
     }
     return bestDir ?? validDirs[0] ?? currentDir;

@@ -148,6 +148,29 @@ export function planDiverged(
   return false;
 }
 
+/**
+ * Change 8 (Changes 6–9 spec), within-plan half: for ringTelegraphAsWalls
+ * profiles, a ply that executes on or after a pending shrink's landing
+ * tick is priced against the LANDED ring, not the ring as it stands at
+ * formation — a plan must not route its later steps through ground the
+ * ring has already claimed by the time those steps execute. Mutates the
+ * fresh sim view only; the base state is untouched. When the game is
+ * already telegraphing, rateAIMoves' effective inset covers every ply
+ * and this agrees with it (landed inset == telegraphRingInset).
+ */
+function applyLandedRingInset(view: GameState, base: GameState, gridSize: number, ply: number, profile: BrainProfile): void {
+  if (!profile.ringTelegraphAsWalls) return;
+  if (base.phase !== 'SHRINKING') return;
+  const maxInset = Math.floor(gridSize / 2) - 1;
+  if (base.ringInset >= maxInset) return;
+  const remaining = base.phaseTurnsRemaining ?? Number.POSITIVE_INFINITY;
+  if (ply + 1 >= remaining) {
+    view.ringInset = base.ringInset + 1;
+    view.isTelegraphingShrink = false;
+    view.telegraphRingInset = view.ringInset;
+  }
+}
+
 export function buildAIPlan(
   args: {
     gameState: GameState;
@@ -180,6 +203,7 @@ export function buildAIPlan(
       const simSnake = sim.snakes.find(s => s.id === botRole);
       if (!simSnake || !simSnake.isAlive) break;
       const view = simToGameState(gameState, sim);
+      applyLandedRingInset(view, gameState, gridSize, i, profile);
       const action = calculateAIAction(
         view, gridSize, botRole, difficulty, aiStyle,
         args.skillsAvailable ?? gameState.skillsAvailable,
@@ -223,6 +247,7 @@ export function buildAIPlan(
     const next: RouteState[] = [];
     for (const route of beam) {
       const view = simToGameState(gameState, route.sim);
+      applyLandedRingInset(view, gameState, gridSize, ply, profile);
       const viewMe = view.snakes.find(s => s.id === botRole);
       if (!viewMe) continue;
       const candidates = calculateAIMoveCandidates(view, gridSize, botRole, difficulty, aiStyle, profile).slice(0, profile.beamCandidates);
@@ -279,9 +304,10 @@ export function buildAIPlan(
   for (const route of playable) {
     if (route.ateCells.length > 0) continue;
     const view = simToGameState(gameState, route.sim);
+    applyLandedRingInset(view, gameState, gridSize, route.entries.length - 1, profile);
     const viewMe = view.snakes.find(s => s.id === botRole);
     if (!viewMe) continue;
-    const area = floodFillArea(viewMe.body[0], view, gridSize, viewMe);
+    const area = floodFillArea(viewMe.body[0], view, gridSize, viewMe, view.ringInset);
     if (area < viewMe.body.length) continue;
     for (const cluster of findClusters(route.sim.tokens)) {
       if (cluster.length < 2) continue;
@@ -299,8 +325,9 @@ export function buildAIPlan(
   if (postureInfo.posture === 'PROTECT') {
     const areaOf = (r: RouteState): number => {
       const view = simToGameState(gameState, r.sim);
+      applyLandedRingInset(view, gameState, gridSize, r.entries.length - 1, profile);
       const viewMe = view.snakes.find(s => s.id === botRole);
-      return viewMe ? floodFillArea(viewMe.body[0], view, gridSize, viewMe) : 0;
+      return viewMe ? floodFillArea(viewMe.body[0], view, gridSize, viewMe, view.ringInset) : 0;
     };
     const chosenMe = chosen.sim.snakes.find(s => s.id === botRole)!;
     if (areaOf(chosen) < chosenMe.body.length + 2) {
