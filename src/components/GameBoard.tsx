@@ -125,18 +125,8 @@ export const GameBoard: React.FC<GameBoardProps> = ({
     }
 
     // Rattle walls: tail-sized solid black square (distinct from full-cell walls and hollow attached tail tips)
-    // Fuse countdown: big number centered in the wall cell (3 → 2 → 1 → BOOM)
     for (const wall of gameState.rattleWalls ?? []) {
       renderRattleWall(ctx, wall.x * cellSize, wall.y * cellSize, cellSize);
-      if (wall.fuseTicks > 0) {
-        ctx.save();
-        ctx.fillStyle = '#FFFFFF';
-        ctx.font = `bold ${Math.floor(cellSize * 0.6)}px monospace`;
-        ctx.textAlign = 'center';
-        ctx.textBaseline = 'middle';
-        ctx.fillText(String(wall.fuseTicks), wall.x * cellSize + cellSize / 2, wall.y * cellSize + cellSize / 2);
-        ctx.restore();
-      }
     }
 
     // 5. Render Tokens (Escalating Round Tokens)
@@ -275,9 +265,6 @@ export const GameBoard: React.FC<GameBoardProps> = ({
         : isFirst
           ? GAMEBOY_COLORS.LIGHT
           : GAMEBOY_COLORS.LIGHTEST;
-      // Stunned snakes render dimmed for the tick.
-      const isStunned = (snake.stunTicks ?? 0) > 0;
-      if (isStunned) ctx.globalAlpha = 0.5;
       renderSnake(
         ctx,
         snake,
@@ -287,7 +274,6 @@ export const GameBoard: React.FC<GameBoardProps> = ({
         snake.id,
         isAnimatingFatalMove,
       );
-      if (isStunned) ctx.globalAlpha = 1;
     }
 
     // 8. Persistent red direction arrow on dead snake head cell for the rest of the match
@@ -343,45 +329,6 @@ export const GameBoard: React.FC<GameBoardProps> = ({
             cellSize - inset * 2
           );
         });
-      }
-      ctx.restore();
-    }
-
-    // 8d. Detonation sequence + stun zone flash
-    // During the 300ms hitstop after a detonation: red center (0-100ms) →
-    // white 3x3 (100-200ms) → amber 3x3 (200-300ms). After hitstop, amber
-    // fades over the 1-turn stun duration.
-    if (gameState.stunZones && gameState.stunZones.length > 0) {
-      ctx.save();
-      const detonationElapsed = gameState.detonationAt ? Date.now() - gameState.detonationAt : Infinity;
-      let fillStyle = 'rgba(255, 193, 7, 0.6)'; // Amber #FFC107 (default: post-blast stun zone)
-      if (detonationElapsed < 100) {
-        // Phase 1: bomb arms — red center cell only
-        fillStyle = 'rgba(255, 0, 0, 0.8)'; // Red #FF0000
-        const centerCell = gameState.stunZones[Math.floor(gameState.stunZones.length / 2)];
-        if (centerCell) {
-          const cx = Math.max(0, Math.min(gridSize - 1, centerCell.x));
-          const cy = Math.max(0, Math.min(gridSize - 1, centerCell.y));
-          ctx.fillStyle = fillStyle;
-          ctx.fillRect(cx * cellSize, cy * cellSize, cellSize, cellSize);
-        }
-      } else if (detonationElapsed < 200) {
-        // Phase 2: blast wave — white 3x3
-        fillStyle = 'rgba(255, 255, 255, 0.9)'; // White #FFFFFF
-        ctx.fillStyle = fillStyle;
-        for (const cell of gameState.stunZones) {
-          const cx = Math.max(0, Math.min(gridSize - 1, cell.x));
-          const cy = Math.max(0, Math.min(gridSize - 1, cell.y));
-          ctx.fillRect(cx * cellSize, cy * cellSize, cellSize, cellSize);
-        }
-      } else {
-        // Phase 3: stun zone settles — amber 3x3
-        ctx.fillStyle = fillStyle;
-        for (const cell of gameState.stunZones) {
-          const cx = Math.max(0, Math.min(gridSize - 1, cell.x));
-          const cy = Math.max(0, Math.min(gridSize - 1, cell.y));
-          ctx.fillRect(cx * cellSize, cy * cellSize, cellSize, cellSize);
-        }
       }
       ctx.restore();
     }

@@ -1,8 +1,6 @@
 import { Direction, GameState, Snake, SkillId } from '../types/game';
 import { isOppositeDirection } from './engine';
 
-export const MIN_RATTLE_LENGTH = 3;
-
 export interface SkillDefinition {
   id: SkillId;
   name: string;
@@ -20,7 +18,9 @@ export const SKILLS: Record<SkillId, SkillDefinition> = {
     id: 'rattle',
     name: 'RATTLE',
     cost: 1,
-    minLength: MIN_RATTLE_LENGTH,
+    // A drop needs a body segment to give up: length >= 2 (the snake
+    // drops to a bare head at length 1 and can drop no further).
+    minLength: 2,
   },
 };
 
@@ -94,7 +94,10 @@ export function canAffordQueuedRattle(skillPoints: number | undefined, queuedSki
 
 export function canQueueRattleWithLength(bodyLength: number | undefined, queuedRattles: number = 0): boolean {
   const len = bodyLength ?? 0;
-  return len - queuedRattles >= MIN_RATTLE_LENGTH;
+  // Queue-time floor (Jimmy, 2026-10-23): each queued drop spends one
+  // segment, and a drop is only legal while a segment remains to give —
+  // the snake may queue down toward a bare head (length 1), never past it.
+  return len - queuedRattles >= 2;
 }
 
 export function isValidDartDirection(facing: Direction, chosenDir: Direction): boolean {

@@ -25,13 +25,16 @@ function asPositionArray(value: unknown): Position[] {
 }
 
 function asRattleWallArray(value: unknown): RattleWall[] {
-  if (Array.isArray(value)) return value as RattleWall[];
+  // Older states carried a fuseTicks on each rattle wall (pre tail-drop
+  // rework) — strip everything but the cell so legacy data loads clean.
+  const toCell = (w: RattleWall): RattleWall => ({ x: w.x, y: w.y });
+  if (Array.isArray(value)) return (value as RattleWall[]).map(toCell);
   if (value && typeof value === 'object') {
     const record = value as Record<string, RattleWall>;
     return Object.keys(record)
       .filter(k => /^\d+$/.test(k))
       .sort((a, b) => Number(a) - Number(b))
-      .map(k => record[k]);
+      .map(k => toCell(record[k]));
   }
   return [];
 }
@@ -61,15 +64,23 @@ function asSnakeArray(value: unknown): Snake[] {
 export function normalizeGameState(state: GameState): GameState {
   if (!state || typeof state !== 'object') return state;
   const snakes = asSnakeArray((state as GameState).snakes);
+  // Legacy stun-era fields (removed in the tail-drop rework) may ride in
+  // on old saves/replays — drop them so nothing downstream sees them.
+  const { stunZones: _stunZones, detonationAt: _detonationAt, ...rest } =
+    state as GameState & { stunZones?: unknown; detonationAt?: unknown };
   return {
-    ...state,
+    ...rest,
     tokens: asPositionArray((state as GameState).tokens),
     ...(state.walls === undefined ? {} : { walls: asPositionArray(state.walls) }),
     ...(state.rattleWalls === undefined ? {} : { rattleWalls: asRattleWallArray(state.rattleWalls) }),
-    snakes: snakes.map((snake, index) => ({
-      ...snake,
-      id: snake.id || `p${index + 1}`,
-      body: asPositionArray(snake.body),
-    })),
+    snakes: snakes.map((snake, index) => {
+      const { stunTicks: _stunTicks, ...cleanSnake } =
+        snake as Snake & { stunTicks?: unknown };
+      return {
+        ...cleanSnake,
+        id: snake.id || `p${index + 1}`,
+        body: asPositionArray(snake.body),
+      };
+    }),
   };
 }
