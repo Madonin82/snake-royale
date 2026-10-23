@@ -98,7 +98,6 @@ export interface SimSnake {
   tokensSinceLock: number;
   skillPoints: number;
   isAlive: boolean;
-  stunTicks: number;
   teamId?: string;
 }
 
@@ -144,7 +143,6 @@ export function initialSim(gameState: GameState): SimState {
       tokensSinceLock: s.tokensSinceLock ?? 0,
       skillPoints: s.skillPoints ?? 0,
       isAlive: s.isAlive,
-      stunTicks: s.stunTicks ?? 0,
       teamId: s.teamId,
     })),
   };

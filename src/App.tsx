@@ -83,10 +83,10 @@ function computePreviewPlan(
         body.pop();
       }
     } else if (entry.type === 'rattle') {
-      if (body.length >= 3) {
+      if (body.length >= 2) {
         const detachedTail = body.pop();
         if (detachedTail) {
-          rattleWalls.push({ x: detachedTail.x, y: detachedTail.y, fuseTicks: 3 });
+          rattleWalls.push({ x: detachedTail.x, y: detachedTail.y });
         }
       }
       const nextHead = getNextHeadPosition(body[0], entry.direction);
@@ -1356,10 +1356,6 @@ const GameApp: React.FC<{ campaignPlaytestLevel: CampaignLevel | null }> = ({ ca
     }
     for (const snake of current.snakes) {
       if (!snake.isAlive) continue;
-      // Stun delays the buffer — do NOT pop the entry. The entry stays
-      // until the snake actually moves. Otherwise the stun eats the first
-      // move and the rest of the queue executes from the wrong position.
-      if ((snake.stunTicks ?? 0) > 0) continue;
       const buffer = moveBuffersRef.current[snake.id] ?? [];
       const entry = buffer.shift();
       if (entry) {
@@ -2065,22 +2061,6 @@ const GameApp: React.FC<{ campaignPlaytestLevel: CampaignLevel | null }> = ({ ca
       }
       const snake = current.snakes.find(s => s.id === seat);
       if (!snake || !snake.isAlive) {
-        finish(true);
-        return;
-      }
-
-      // Stun: the engine skips a stunned snake's move and decrements
-      // stunTicks. Don't pop the entry (buffer preserved, like the
-      // simultaneous model) — burn one tick to tick the stun down,
-      // then end execution; the player plans with the entry still queued.
-      if ((snake.stunTicks ?? 0) > 0) {
-        const frozen = new Set(current.snakes.filter(s => s.id !== seat && s.isAlive).map(s => s.id));
-        const { nextState, events } = processGameTick(current, settingsRef.current, 0, { frozenSnakeIds: frozen });
-        playTickEvents(events);
-        stateRef.current = nextState;
-        setGameState(nextState);
-        setMatchHistory(prev => [...prev, nextState]);
-        dispatchAiState(nextState);
         finish(true);
         return;
       }

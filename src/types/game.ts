@@ -19,13 +19,12 @@ export interface Position {
   y: number;
 }
 
-// RattleWall: a wall (x, y, blocks movement, renders as wall) + a fuse.
-// Dropped by Rattle, counts down 3 → 2 → 1, detonates a 3x3 stun on 0.
-// Wall stays permanent after detonation.
+// RattleWall: a wall cell (x, y, blocks movement, renders as wall).
+// Dropped by Rattle — the snake's detached tail segment. Permanent for
+// the match from the drop tick; also mirrored into GameState.walls.
 export interface RattleWall {
   x: number;
   y: number;
-  fuseTicks: number; // turns until detonation (3 on drop, decrement each turn)
 }
 
 export interface Snake {
@@ -47,7 +46,6 @@ export interface Snake {
   killedBy?: string;
   tokensSinceLock?: number;
   spEarned?: number; // gross SP income this match — never decreases
-  stunTicks?: number; // ticks remaining stunned — skips move while > 0
 }
 
 export type GamePhase = 'LOBBY' | 'RACING' | 'SHRINKING' | 'TERRITORY' | 'OVER';
@@ -127,8 +125,6 @@ export interface GameState {
   readyConfirmed?: Record<string, boolean>;
   skillsAvailable?: SkillsAvailableConfig;
   dartTrail?: Array<{ snakeId: string; cells: Position[] }>;
-  stunZones?: Position[]; // 3x3 cells flashing amber on rattle stun — fades over stun duration
-  detonationAt?: number; // timestamp (ms) when a rattle wall detonated — drives the 3-phase blast visual
   teamProtection?: boolean;
 }
 

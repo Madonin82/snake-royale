@@ -99,13 +99,14 @@ test('isValidDartDirection: rejects backward, allows forward/left/right', () => 
 test('rattle skill definition: costs 1 SP and requires length >= 3', () => {
   assert.equal(SKILLS.rattle.id, 'rattle');
   assert.equal(SKILLS.rattle.cost, 1);
-  assert.equal(SKILLS.rattle.minLength, 3);
+  assert.equal(SKILLS.rattle.minLength, 2);
 });
 
-test('canActivateSkill for rattle: requires 1+ SP and body length >= 3', () => {
+test('canActivateSkill for rattle: requires 1+ SP and body length >= 2', () => {
   const state = makeState({ phase: 'SHRINKING' });
   const len3Body = [{ x: 2, y: 2 }, { x: 1, y: 2 }, { x: 0, y: 2 }];
   const len2Body = [{ x: 2, y: 2 }, { x: 1, y: 2 }];
+  const len1Body = [{ x: 2, y: 2 }];
 
   assert.equal(
     canActivateSkill(makeSnake({ equippedSkill: 'rattle', skillPoints: 1, body: len3Body }) as any, state, 'immediate'),
@@ -115,16 +116,28 @@ test('canActivateSkill for rattle: requires 1+ SP and body length >= 3', () => {
     canActivateSkill(makeSnake({ equippedSkill: 'rattle', skillPoints: 0, body: len3Body }) as any, state, 'immediate'),
     false,
   );
+  // Length 2 can drop (down to a bare head); length 1 has nothing to give.
   assert.equal(
     canActivateSkill(makeSnake({ equippedSkill: 'rattle', skillPoints: 5, body: len2Body }) as any, state, 'immediate'),
+    true,
+  );
+  assert.equal(
+    canActivateSkill(makeSnake({ equippedSkill: 'rattle', skillPoints: 5, body: len1Body }) as any, state, 'immediate'),
     false,
   );
   assert.equal(canAffordQueuedRattle(2, 0), true);
   assert.equal(canAffordQueuedRattle(2, 1), true);
   assert.equal(canAffordQueuedRattle(1, 1), false);
+  // Queue-time floor: len - queued >= 2 — drops may be chained down
+  // toward a bare head, never past it.
   assert.equal(canQueueRattleWithLength(3, 0), true);
-  assert.equal(canQueueRattleWithLength(3, 1), false);
-  assert.equal(canQueueRattleWithLength(2, 0), false);
+  assert.equal(canQueueRattleWithLength(3, 1), true);
+  assert.equal(canQueueRattleWithLength(3, 2), false);
+  assert.equal(canQueueRattleWithLength(2, 0), true);
+  assert.equal(canQueueRattleWithLength(2, 1), false);
+  assert.equal(canQueueRattleWithLength(1, 0), false);
+  assert.equal(canQueueRattleWithLength(5, 3), true);
+  assert.equal(canQueueRattleWithLength(5, 4), false);
   assert.equal(isValidRattleDirection('RIGHT', 'UP'), true);
   assert.equal(isValidRattleDirection('RIGHT', 'LEFT'), false);
 });

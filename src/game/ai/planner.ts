@@ -18,7 +18,7 @@ export function advanceSim(
   const moves = new Map<string, Direction>();
   moves.set(botRole, botDir);
   for (const s of sim.snakes) {
-    if (s.id === botRole || !s.isAlive || s.stunTicks > 0) continue;
+    if (s.id === botRole || !s.isAlive) continue;
     const dir = calculateAIMove(view, gridSize, s.id, 'HARD');
     if (dir) moves.set(s.id, dir);
   }
@@ -30,7 +30,7 @@ export function advanceSim(
   for (const s of sim.snakes) {
     if (!s.isAlive) continue;
     const dir = moves.get(s.id);
-    if (!dir || s.stunTicks > 0) {
+    if (!dir) {
       newHeads.set(s.id, s.body[0]);
       continue;
     }
@@ -79,8 +79,8 @@ export function advanceSim(
   const nextSnakes: SimSnake[] = sim.snakes.map(s => {
     if (!s.isAlive) return s;
     const dir = moves.get(s.id);
-    if (!dir || s.stunTicks > 0) {
-      return { ...s, stunTicks: Math.max(0, s.stunTicks - 1) };
+    if (!dir) {
+      return s;
     }
     const nh = newHeads.get(s.id)!;
     const body = [nh, ...s.body];
