@@ -91,7 +91,7 @@ export function computePreviewPlan(
       for (let p = 0; p < primes && body.length >= 2; p++) {
         const detachedTail = body.pop();
         if (detachedTail) {
-          rattleWalls.push({ x: detachedTail.x, y: detachedTail.y });
+          rattleWalls.push({ x: detachedTail.x, y: detachedTail.y, ownerId: snake.id });
           darkCells.add(`${detachedTail.x},${detachedTail.y}`);
         }
       }
@@ -108,7 +108,7 @@ export function computePreviewPlan(
   for (let p = 0; p < pendingPrimes && body.length >= 2; p++) {
     const detachedTail = body.pop();
     if (detachedTail) {
-      rattleWalls.push({ x: detachedTail.x, y: detachedTail.y });
+      rattleWalls.push({ x: detachedTail.x, y: detachedTail.y, ownerId: snake.id });
       darkCells.add(`${detachedTail.x},${detachedTail.y}`);
     }
   }

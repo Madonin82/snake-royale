@@ -541,12 +541,12 @@ test('rattle detaches tail tip into permanent wall, moves 1 cell in chosen direc
   assert.deepEqual(afterP1.body, [{ x: 2, y: 3 }, { x: 2, y: 4 }]);
   assert.equal(afterP1.body.length, 2);
   assert.equal(afterP1.skillPoints, 3);
-  assert.deepEqual(nextState.rattleWalls, [{ x: 0, y: 4 }]);
+  assert.deepEqual(nextState.rattleWalls, [{ x: 0, y: 4, ownerId: 'p1' }]);
   assert.ok(nextState.walls?.some(w => w.x === 0 && w.y === 4));
 
   // Wall persists unchanged on subsequent ticks.
   const { nextState: tick2 } = processGameTick(nextState, settings, 0);
-  assert.deepEqual(tick2.rattleWalls, [{ x: 0, y: 4 }]);
+  assert.deepEqual(tick2.rattleWalls, [{ x: 0, y: 4, ownerId: 'p1' }]);
   assert.ok(tick2.walls?.some(w => w.x === 0 && w.y === 4));
 });
 
@@ -586,7 +586,7 @@ test('chained rattles drop down to a bare head, then fizzle with no charge', () 
   assert.equal(view(t4).body.length, 1);
   assert.deepEqual(view(t4).body[0], { x: 3, y: 5 });
   assert.equal(view(t4).skillPoints, 1);
-  assert.deepEqual(t4.rattleWalls, [{ x: 0, y: 4 }, { x: 2, y: 4 }, { x: 4, y: 4 }, { x: 3, y: 3 }]);
+  assert.deepEqual(t4.rattleWalls, [{ x: 0, y: 4, ownerId: 'p1' }, { x: 2, y: 4, ownerId: 'p1' }, { x: 4, y: 4, ownerId: 'p1' }, { x: 3, y: 3, ownerId: 'p1' }]);
   for (const w of [{ x: 0, y: 4 }, { x: 2, y: 4 }, { x: 4, y: 4 }, { x: 3, y: 3 }]) {
     assert.ok(t4.walls?.some(wall => wall.x === w.x && wall.y === w.y));
   }
@@ -623,7 +623,7 @@ test('dropped rattle wall never detonates: a snake beside it takes every turn, w
 
   assert.equal(queueSnakeSkill(p1, { skillId: 'rattle', direction: 'UP' }), true);
   const { nextState: tick1 } = processGameTick(state, settings, 0);
-  assert.deepEqual(tick1.rattleWalls, [{ x: 0, y: 4 }]);
+  assert.deepEqual(tick1.rattleWalls, [{ x: 0, y: 4, ownerId: 'p1' }]);
   assert.deepEqual(tick1.snakes.find(s => s.id === 'p2')!.body[0], { x: 1, y: 4 });
 
   // Steer p1 out of the way; p2 keeps climbing straight through where
@@ -644,7 +644,7 @@ test('dropped rattle wall never detonates: a snake beside it takes every turn, w
   assert.equal(tick5P2.isAlive, true);
   assert.equal(tick5.snakes.find(s => s.id === 'p1')!.isAlive, true);
   // The wall never changed, and no stun-era fields ever appear.
-  assert.deepEqual(tick5.rattleWalls, [{ x: 0, y: 4 }]);
+  assert.deepEqual(tick5.rattleWalls, [{ x: 0, y: 4, ownerId: 'p1' }]);
   assert.ok(tick5.walls?.some(w => w.x === 0 && w.y === 4));
   assert.equal((tick5 as any).stunZones, undefined);
   assert.equal((tick5 as any).detonationAt, undefined);
@@ -706,7 +706,7 @@ test('hitting a rattle wall kills both opponents and the placer', () => {
   assert.deepEqual(afterP2.deathPosition, { x: 2, y: 4 });
 });
 
-test('placer hitting their own rattle wall dies with WALL reason', () => {
+test('placer re-eats their own just-detached rattle wall (re-eat buff, 2026-10-24)', () => {
   const state = createInitialState();
   const settings = { ...DEFAULT_SETTINGS, skillsAvailable: 'immediate' as const };
   state.tokens = [];
@@ -722,13 +722,19 @@ test('placer hitting their own rattle wall dies with WALL reason', () => {
   p1.equippedSkill = 'rattle';
   p1.skillPoints = 2;
 
-  // Rattle LEFT moves head into (1,2), where tail tip just detached into a wall
+  // Rattle LEFT moves head into (1,2), where tail tip just detached
+  // into a wall. Before the re-eat buff this killed the placer; now
+  // the placer eats its own wall: length and SP are refunded, the
+  // wall clears, and the snake survives.
   queueSnakeSkill(p1, { skillId: 'rattle', direction: 'LEFT' });
   const { nextState } = processGameTick(state, settings, 0);
   const afterP1 = nextState.snakes.find(snake => snake.id === 'p1')!;
-  assert.equal(afterP1.isAlive, false);
-  assert.equal(afterP1.deathReason, 'WALL');
-  assert.deepEqual(afterP1.deathPosition, { x: 1, y: 2 });
+  assert.equal(afterP1.isAlive, true);
+  assert.deepEqual(afterP1.body[0], { x: 1, y: 2 });
+  assert.equal(afterP1.body.length, 4); // 4 - 1 detach + 1 eat
+  assert.equal(afterP1.skillPoints, 2); // 2 - 1 detach + 1 eat
+  assert.equal(nextState.rattleWalls.length, 0);
+  assert.equal(nextState.walls?.length ?? 0, 0);
 });
 
 test('darting through a rattle wall cell kills the darter', () => {

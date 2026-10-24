@@ -83,9 +83,9 @@ test('Acceptance 1: Prime 3 + direction step detaches 3 contiguous walls, net le
   // 3 contiguous permanent walls placed at old tail tip positions in order: (4,9), (4,8), (4,7)
   assert.equal(result.nextState.rattleWalls.length, 3);
   assert.deepEqual(result.nextState.rattleWalls, [
-    { x: 4, y: 9 },
-    { x: 4, y: 8 },
-    { x: 4, y: 7 },
+    { x: 4, y: 9, ownerId: 'p1' },
+    { x: 4, y: 8, ownerId: 'p1' },
+    { x: 4, y: 7, ownerId: 'p1' },
   ]);
   assert.deepEqual(result.nextState.walls, [
     { x: 4, y: 9 },
@@ -150,7 +150,7 @@ test('Acceptance 2: Multi-detach plan executes detaches at their respective tick
   assert.equal(state.snakes[0].body.length, 6);
   assert.equal(state.snakes[0].skillPoints, 4);
   assert.equal(state.rattleWalls.length, 1);
-  assert.deepEqual(state.rattleWalls[0], { x: 5, y: 11 });
+  assert.deepEqual(state.rattleWalls[0], { x: 5, y: 11, ownerId: 'p1' });
 
   // Tick 2: Plain move UP
   queueSnakeDirection(state.snakes[0], 'UP');
