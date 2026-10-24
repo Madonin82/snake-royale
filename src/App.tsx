@@ -5,6 +5,7 @@ import { onValue, ref } from 'firebase/database';
 import {
   createInitialState,
   DEFAULT_SETTINGS,
+  getBufferCapacity,
   getHitstopForTransition,
   getNextHeadPosition,
   HitstopInfo,
@@ -36,6 +37,7 @@ import {
   MatchIdentity,
 } from './game/networkProtocol';
 import { normalizeGameState } from './game/normalize';
+import { undoPlan, clearPlan, lockPlan } from './game/primePlan';
 import { exportReplayToFile, parseAndValidateReplayData, TurnDecision } from './game/replayFile';
 import {
   adoptThinkTimeSnapshot,
@@ -67,13 +69,15 @@ import {
 } from './editor/playtestSession';
 import { ArrowLeft, Volume2, VolumeX } from 'lucide-react';
 
-function computePreviewPlan(
+export function computePreviewPlan(
   snake: any,
   buffer: BufferEntry[],
-): { body: Position[]; rattleWalls: RattleWall[] } {
-  if (buffer.length === 0) return { body: snake.body, rattleWalls: [] };
+  pendingPrimes: number = 0,
+): { body: Position[]; rattleWalls: RattleWall[]; walls: RattleWall[]; darkCells: Set<string> } {
   const body: Position[] = [...snake.body.map((seg: any) => ({ ...seg }))];
   const rattleWalls: RattleWall[] = [];
+  const darkCells = new Set<string>();
+
   for (const entry of buffer) {
     if (entry.type === 'dart') {
       // Dart: 1 normal cell + 2 dart cells in the chosen direction
@@ -83,10 +87,12 @@ function computePreviewPlan(
         body.pop();
       }
     } else if (entry.type === 'rattle') {
-      if (body.length >= 2) {
+      const primes = entry.primes ?? 1;
+      for (let p = 0; p < primes && body.length >= 2; p++) {
         const detachedTail = body.pop();
         if (detachedTail) {
           rattleWalls.push({ x: detachedTail.x, y: detachedTail.y });
+          darkCells.add(`${detachedTail.x},${detachedTail.y}`);
         }
       }
       const nextHead = getNextHeadPosition(body[0], entry.direction);
@@ -98,10 +104,19 @@ function computePreviewPlan(
       body.pop();
     }
   }
-  return { body, rattleWalls };
+
+  for (let p = 0; p < pendingPrimes && body.length >= 2; p++) {
+    const detachedTail = body.pop();
+    if (detachedTail) {
+      rattleWalls.push({ x: detachedTail.x, y: detachedTail.y });
+      darkCells.add(`${detachedTail.x},${detachedTail.y}`);
+    }
+  }
+
+  return { body, rattleWalls, walls: rattleWalls, darkCells };
 }
 
-function computeCommittedPath(snake: any, buffer: BufferEntry[]): Position[] {
+export function computeCommittedPath(snake: any, buffer: BufferEntry[]): Position[] {
   if (buffer.length === 0) return [];
   let body = [...snake.body.map((seg: any) => ({ ...seg }))];
   const path: Position[] = [];
@@ -115,7 +130,8 @@ function computeCommittedPath(snake: any, buffer: BufferEntry[]): Position[] {
         body.pop();
       }
     } else if (entry.type === 'rattle') {
-      if (body.length >= 3) {
+      const primes = entry.primes ?? 1;
+      for (let p = 0; p < primes && body.length >= 2; p++) {
         body.pop();
       }
       const nextHead = getNextHeadPosition(body[0], entry.direction);
@@ -509,6 +525,9 @@ const GameApp: React.FC<{ campaignPlaytestLevel: CampaignLevel | null }> = ({ ca
   const [choosingSkillMap, setChoosingSkillMap] = useState<Record<string, boolean>>({});
   const choosingSkillMapRef = useRef(choosingSkillMap);
   choosingSkillMapRef.current = choosingSkillMap;
+  const [pendingPrimesMap, setPendingPrimesMap] = useState<Record<string, number>>({});
+  const pendingPrimesMapRef = useRef(pendingPrimesMap);
+  pendingPrimesMapRef.current = pendingPrimesMap;
 
   // Mouse seat binding & desktop mouse controls
   const [mouseSeat, setMouseSeat] = useState<'p1' | 'p2'>('p1');
@@ -585,6 +604,9 @@ const GameApp: React.FC<{ campaignPlaytestLevel: CampaignLevel | null }> = ({ ca
     const emptyBuffers = Object.fromEntries(stateRef.current.snakes.map(snake => [snake.id, []]));
     moveBuffersRef.current = emptyBuffers;
     setMoveBuffers(emptyBuffers);
+    const emptyPrimes = Object.fromEntries(stateRef.current.snakes.map(snake => [snake.id, 0]));
+    pendingPrimesMapRef.current = emptyPrimes;
+    setPendingPrimesMap(emptyPrimes);
   }, []);
 
   // TURN-BASED MOVE LOCKS
@@ -740,18 +762,18 @@ const GameApp: React.FC<{ campaignPlaytestLevel: CampaignLevel | null }> = ({ ca
       const showP2 = playMode === 'LOCAL_2P' || viewerSeat === 'p2';
       const previewRattleWalls: RattleWall[] = [];
 
-      if (showP1 && !locks.p1 && moveBuffers.p1.length > 0) {
+      if (showP1 && !locks.p1 && (moveBuffers.p1.length > 0 || (pendingPrimesMap.p1 ?? 0) > 0)) {
         const snake = stateCopy.snakes.find(candidate => candidate.id === 'p1');
         if (snake) {
-          const preview = computePreviewPlan(snake, moveBuffers.p1);
+          const preview = computePreviewPlan(snake, moveBuffers.p1, pendingPrimesMap.p1 ?? 0);
           snake.body = preview.body;
           previewRattleWalls.push(...preview.rattleWalls);
         }
       }
-      if (showP2 && !locks.p2 && moveBuffers.p2.length > 0) {
+      if (showP2 && !locks.p2 && (moveBuffers.p2.length > 0 || (pendingPrimesMap.p2 ?? 0) > 0)) {
         const snake = stateCopy.snakes.find(candidate => candidate.id === 'p2');
         if (snake) {
-          const preview = computePreviewPlan(snake, moveBuffers.p2);
+          const preview = computePreviewPlan(snake, moveBuffers.p2, pendingPrimesMap.p2 ?? 0);
           snake.body = preview.body;
           previewRattleWalls.push(...preview.rattleWalls);
         }
@@ -762,7 +784,7 @@ const GameApp: React.FC<{ campaignPlaytestLevel: CampaignLevel | null }> = ({ ca
       }
     }
     return stateCopy;
-  }, [replayActive, matchHistory, replayIdx, gameState, moveBuffers, locks, settings.turnBased, playMode, viewerSeat, pendingScore, pendingSp]);
+  }, [replayActive, matchHistory, replayIdx, gameState, moveBuffers, locks, settings.turnBased, playMode, viewerSeat, pendingScore, pendingSp, pendingPrimesMap]);
 
   const lockedPaths = useMemo(() => {
     if (!settings.turnBased || replayActive) return undefined;
@@ -956,6 +978,48 @@ const GameApp: React.FC<{ campaignPlaytestLevel: CampaignLevel | null }> = ({ ca
     if (current.phase === 'OVER' || inLobby || inOnlineLobby) return;
     const targetKey = getTargetKey(playerSlot);
     if (hotseatBlocksInput(targetKey)) return;
+    const snake = current.snakes.find(s => s.id === targetKey);
+    if (!snake || !snake.isAlive) return;
+
+    if (settingsRef.current.turnBased && snake.equippedSkill === 'rattle') {
+      if (locksRef.current[targetKey]) return;
+      const skillsAvail = current.skillsAvailable ?? settingsRef.current.skillsAvailable;
+      if (!canActivateSkill(snake, current, skillsAvail)) {
+        soundEngine.playDenied();
+        return;
+      }
+      const buf = moveBuffersRef.current[targetKey] ?? [];
+      if (buf.length >= getBufferCapacity(snake)) {
+        soundEngine.playDenied();
+        return;
+      }
+      const bufferedPrimes = buf.reduce((acc, entry) => {
+        if (typeof entry !== 'string' && entry.type === 'rattle') {
+          return acc + (entry.primes ?? 1);
+        }
+        return acc;
+      }, 0);
+      const currentPending = pendingPrimesMapRef.current[targetKey] ?? 0;
+      const totalPrimes = bufferedPrimes + currentPending;
+
+      if (!canAffordQueuedRattle(snake.skillPoints, totalPrimes)) {
+        soundEngine.playDenied();
+        return;
+      }
+      if (!canQueueRattleWithLength(snake.body.length, totalPrimes)) {
+        soundEngine.playDenied();
+        return;
+      }
+
+      soundEngine.playTick();
+      setPendingPrimesMap(prev => {
+        const updated = { ...prev, [targetKey]: (prev[targetKey] ?? 0) + 1 };
+        pendingPrimesMapRef.current = updated;
+        return updated;
+      });
+      return;
+    }
+
     if (choosingSkillMapRef.current[targetKey]) {
       soundEngine.playTick();
       setChoosingSkillMap(prev => {
@@ -965,8 +1029,6 @@ const GameApp: React.FC<{ campaignPlaytestLevel: CampaignLevel | null }> = ({ ca
       });
       return;
     }
-    const snake = current.snakes.find(s => s.id === targetKey);
-    if (!snake || !snake.isAlive) return;
 
     const skillsAvail = current.skillsAvailable ?? settingsRef.current.skillsAvailable;
     if (!canActivateSkill(snake, current, skillsAvail)) {
@@ -976,7 +1038,7 @@ const GameApp: React.FC<{ campaignPlaytestLevel: CampaignLevel | null }> = ({ ca
     if (settingsRef.current.turnBased) {
       if (locksRef.current[targetKey]) return;
       const buf = moveBuffersRef.current[targetKey] ?? [];
-      if (buf.length >= snake.body.length) {
+      if (buf.length >= getBufferCapacity(snake)) {
         soundEngine.playDenied();
         return;
       }
@@ -989,13 +1051,6 @@ const GameApp: React.FC<{ campaignPlaytestLevel: CampaignLevel | null }> = ({ ca
       if (!canAffordQueuedSkill(snake.skillPoints, skillId, queuedSkills)) {
         soundEngine.playDenied();
         return;
-      }
-      if (snake.equippedSkill === 'rattle') {
-        const queuedRattles = buf.filter(entry => typeof entry !== 'string' && entry.type === 'rattle').length;
-        if (!canQueueRattleWithLength(snake.body.length, queuedRattles)) {
-          soundEngine.playDenied();
-          return;
-        }
       }
     }
 
@@ -1016,24 +1071,34 @@ const GameApp: React.FC<{ campaignPlaytestLevel: CampaignLevel | null }> = ({ ca
     if (playMode === 'ONLINE_JOIN' && seat !== (onlineRole ?? 'p2')) return false;
     if (playMode === 'ONLINE_SPECTATOR') return false;
     if (locks[seat]) return false;
-    if (choosingSkillMap[seat]) return false;
     const snake = gameState.snakes.find(s => s.id === seat);
     if (!snake || !snake.isAlive || !snake.equippedSkill) return false;
     if (!canActivateSkill(snake, gameState, gameState.skillsAvailable ?? settings.skillsAvailable)) {
       return false;
     }
     const buf = moveBuffers[seat] ?? [];
-    if (buf.length >= snake.body.length) return false;
+    if (buf.length >= getBufferCapacity(snake)) return false;
     const skillId = snake.equippedSkill;
     if (!skillId) return false;
+
+    if (skillId === 'rattle') {
+      const bufferedPrimes = buf.reduce((acc, e) => {
+        if (typeof e !== 'string' && e.type === 'rattle') {
+          return acc + (e.primes ?? 1);
+        }
+        return acc;
+      }, 0);
+      const totalPrimes = bufferedPrimes + (pendingPrimesMap[seat] ?? 0);
+      if (!canAffordQueuedRattle(snake.skillPoints, totalPrimes)) return false;
+      if (!canQueueRattleWithLength(snake.body.length, totalPrimes)) return false;
+      return true;
+    }
+
+    if (choosingSkillMap[seat]) return false;
     const queued = buf.filter(e => typeof e !== 'string' && e.type === skillId).length;
     if (!canAffordQueuedSkill(snake.skillPoints, skillId, queued)) return false;
-    if (snake.equippedSkill === 'rattle') {
-      const queuedRattles = buf.filter(e => typeof e !== 'string' && e.type === 'rattle').length;
-      if (!canQueueRattleWithLength(snake.body.length, queuedRattles)) return false;
-    }
     return true;
-  }, [settings.turnBased, settings.skillsAvailable, gameState, inLobby, inOnlineLobby, replayActive, playMode, onlineRole, locks, choosingSkillMap, moveBuffers]);
+  }, [settings.turnBased, settings.skillsAvailable, gameState, inLobby, inOnlineLobby, replayActive, playMode, onlineRole, locks, choosingSkillMap, moveBuffers, pendingPrimesMap]);
 
   const setLock = useCallback((who: string, isAuto = false) => {
     const mode = playModeRef.current;
@@ -1048,6 +1113,8 @@ const GameApp: React.FC<{ campaignPlaytestLevel: CampaignLevel | null }> = ({ ca
       )
     ) return false;
 
+    pendingPrimesMapRef.current = { ...pendingPrimesMapRef.current, [who]: 0 };
+    setPendingPrimesMap(prev => ({ ...prev, [who]: 0 }));
     thinkTimeEndsRef.current = { ...thinkTimeEndsRef.current, [who]: null };
     lastThinkTimeTickRef.current = { ...lastThinkTimeTickRef.current, [who]: null };
     notifiedPlanningWindowRef.current = { ...notifiedPlanningWindowRef.current, [who]: false };
@@ -1370,7 +1437,7 @@ const GameApp: React.FC<{ campaignPlaytestLevel: CampaignLevel | null }> = ({ ca
           }
         } else if (entry.type === 'rattle') {
           if (entry.direction) {
-            queueSnakeSkill(snake, { skillId: 'rattle', direction: entry.direction });
+            queueSnakeSkill(snake, { skillId: 'rattle', direction: entry.direction, primes: entry.primes ?? 1 });
           } else {
             queueSnakeDirection(snake, snake.direction);
           }
@@ -1668,10 +1735,13 @@ const GameApp: React.FC<{ campaignPlaytestLevel: CampaignLevel | null }> = ({ ca
     if (!settingsRef.current.turnBased) return;
     if (locksRef.current[targetKey]) return;
 
-    const buf = [...moveBuffersRef.current[targetKey]];
-    if (buf.length === 0) return;
-    buf.pop();
-    moveBuffersRef.current = { ...moveBuffersRef.current, [targetKey]: buf };
+    const curBuf = moveBuffersRef.current[targetKey] ?? [];
+    const curPending = pendingPrimesMapRef.current[targetKey] ?? 0;
+    if (curBuf.length === 0 && curPending === 0) return;
+    const { buffer: nextBuf, pendingPrimes: nextPending } = undoPlan(curBuf, curPending);
+    pendingPrimesMapRef.current = { ...pendingPrimesMapRef.current, [targetKey]: nextPending };
+    setPendingPrimesMap({ ...pendingPrimesMapRef.current });
+    moveBuffersRef.current = { ...moveBuffersRef.current, [targetKey]: nextBuf };
     setMoveBuffers({ ...moveBuffersRef.current });
     soundEngine.playTick();
   }, [inLobby, inOnlineLobby, getTargetKey]);
@@ -1690,7 +1760,10 @@ const GameApp: React.FC<{ campaignPlaytestLevel: CampaignLevel | null }> = ({ ca
         return updated;
       });
     }
-    moveBuffersRef.current = { ...moveBuffersRef.current, [targetKey]: [] };
+    const cleared = clearPlan();
+    pendingPrimesMapRef.current = { ...pendingPrimesMapRef.current, [targetKey]: cleared.pendingPrimes };
+    setPendingPrimesMap({ ...pendingPrimesMapRef.current });
+    moveBuffersRef.current = { ...moveBuffersRef.current, [targetKey]: cleared.buffer };
     setMoveBuffers({ ...moveBuffersRef.current });
     soundEngine.playTick();
   }, [inLobby, inOnlineLobby, getTargetKey]);
@@ -1711,6 +1784,9 @@ const GameApp: React.FC<{ campaignPlaytestLevel: CampaignLevel | null }> = ({ ca
         return updated;
       });
     }
+    const locked = lockPlan(moveBuffersRef.current[targetKey] ?? [], pendingPrimesMapRef.current[targetKey] ?? 0);
+    pendingPrimesMapRef.current = { ...pendingPrimesMapRef.current, [targetKey]: locked.pendingPrimes };
+    setPendingPrimesMap({ ...pendingPrimesMapRef.current });
     const buf = moveBuffersRef.current[targetKey];
     if (buf.length === 0 || locksRef.current[targetKey]) return;
 
@@ -1768,7 +1844,7 @@ const GameApp: React.FC<{ campaignPlaytestLevel: CampaignLevel | null }> = ({ ca
       if (settingsRef.current.turnBased) {
         if (locksRef.current[targetKey]) return false;
         const buf = [...moveBuffersRef.current[targetKey]];
-        if (buf.length >= currentSnake.body.length) return false;
+        if (buf.length >= getBufferCapacity(currentSnake)) return false;
         // Item 1: validate against the last queued entry's direction — the same
         // ruler regular moves use — not the snake's current heading.
         const lastEntry = buf.length > 0 ? buf[buf.length - 1] : null;
@@ -1786,17 +1862,29 @@ const GameApp: React.FC<{ campaignPlaytestLevel: CampaignLevel | null }> = ({ ca
           soundEngine.playDenied();
           return false;
         }
-        if (skillId === 'rattle') {
-          const queuedRattles = buf.filter(entry => typeof entry !== 'string' && entry.type === 'rattle').length;
-          if (!canQueueRattleWithLength(currentSnake.body.length, queuedRattles)) {
-            soundEngine.playDenied();
-            return false;
+        if (skillId === 'dart') {
+          soundEngine.playTick();
+          buf.push({ type: 'dart', direction: dir });
+          moveBuffersRef.current = { ...moveBuffersRef.current, [targetKey]: buf };
+          setMoveBuffers({ ...moveBuffersRef.current });
+        } else if (skillId === 'rattle') {
+          // Restored from main: a choosing-mode rattle direction still
+          // queues a rattle step. Main pushed it with no primes (1 by
+          // default); here it carries any pending primes, else 1.
+          const pending = pendingPrimesMapRef.current[targetKey] ?? 0;
+          const primes = pending > 0 ? pending : 1;
+          soundEngine.playTick();
+          buf.push({ type: 'rattle', direction: dir, primes });
+          if (pending > 0) {
+            setPendingPrimesMap(prev => {
+              const updated = { ...prev, [targetKey]: 0 };
+              pendingPrimesMapRef.current = updated;
+              return updated;
+            });
           }
+          moveBuffersRef.current = { ...moveBuffersRef.current, [targetKey]: buf };
+          setMoveBuffers({ ...moveBuffersRef.current });
         }
-        soundEngine.playTick();
-        buf.push({ type: skillId, direction: dir });
-        moveBuffersRef.current = { ...moveBuffersRef.current, [targetKey]: buf };
-        setMoveBuffers({ ...moveBuffersRef.current });
       } else {
         if (!isValidDartDirection(currentSnake.direction, dir)) {
           soundEngine.playDenied();
@@ -1823,13 +1911,24 @@ const GameApp: React.FC<{ campaignPlaytestLevel: CampaignLevel | null }> = ({ ca
       if (locksRef.current[targetKey]) return false;
 
       const buf = [...moveBuffersRef.current[targetKey]];
-      if (buf.length >= currentSnake.body.length) return false;
+      if (buf.length >= getBufferCapacity(currentSnake)) return false;
 
       const lastEntry = buf.length > 0 ? buf[buf.length - 1] : null;
       const lastDir = lastEntry ? lastEntry.direction : currentSnake.direction;
       if (isOppositeDirection(lastDir, dir)) return false;
 
-      buf.push({ type: 'move', direction: dir });
+      const pendingPrimes = pendingPrimesMapRef.current[targetKey] ?? 0;
+      if (pendingPrimes > 0) {
+        buf.push({ type: 'rattle', direction: dir, primes: pendingPrimes });
+        setPendingPrimesMap(prev => {
+          const updated = { ...prev, [targetKey]: 0 };
+          pendingPrimesMapRef.current = updated;
+          return updated;
+        });
+      } else {
+        buf.push({ type: 'move', direction: dir });
+      }
+
       moveBuffersRef.current = { ...moveBuffersRef.current, [targetKey]: buf };
       setMoveBuffers({ ...moveBuffersRef.current });
       return true;
@@ -1908,14 +2007,14 @@ const GameApp: React.FC<{ campaignPlaytestLevel: CampaignLevel | null }> = ({ ca
       if (moveType === 'move') {
         if (
           settingsRef.current.turnBased &&
-          moveBuffersRef.current[seat].length >= snake.body.length
+          moveBuffersRef.current[seat].length >= getBufferCapacity(snake)
         ) break;
         if (handleDirectionInput(slot, direction, seat)) accepted.push(move);
       } else if (moveType === 'dart' || moveType === 'rattle') {
         if (settingsRef.current.turnBased) {
           if (locksRef.current[seat]) break;
           const buf = [...moveBuffersRef.current[seat]];
-          if (buf.length >= snake.body.length) break;
+          if (buf.length >= getBufferCapacity(snake)) break;
 
           const lastEntry = buf.length > 0 ? buf[buf.length - 1] : null;
           const lastDir = lastEntry && typeof lastEntry !== 'string' ? lastEntry.direction : snake.direction;
@@ -1923,26 +2022,38 @@ const GameApp: React.FC<{ campaignPlaytestLevel: CampaignLevel | null }> = ({ ca
             continue;
           }
 
-          const queuedSkills = buf.filter(entry => typeof entry !== 'string' && (entry.type === 'dart' || entry.type === 'rattle')).length;
           if (moveType === 'dart') {
+            const queuedSkills = buf.filter(entry => typeof entry !== 'string' && entry.type === 'dart').length;
             if (!canAffordQueuedDart(snake.skillPoints, queuedSkills)) {
               continue;
             }
+            soundEngine.playTick();
+            buf.push({ type: 'dart', direction });
+            moveBuffersRef.current = { ...moveBuffersRef.current, [seat]: buf };
+            setMoveBuffers({ ...moveBuffersRef.current });
+            accepted.push(move);
           } else {
-            if (!canAffordQueuedRattle(snake.skillPoints, queuedSkills)) {
+            const primes = (!isString && typeof move.primes === 'number') ? move.primes : 1;
+            const queuedPrimes = buf.reduce((acc, entry) => {
+              if (typeof entry !== 'string' && entry.type === 'rattle') {
+                return acc + (entry.primes ?? 1);
+              }
+              return acc;
+            }, 0);
+            const totalPrimesAfter = queuedPrimes + primes;
+            if (!canAffordQueuedRattle(snake.skillPoints, totalPrimesAfter - 1)) {
               continue;
             }
-            const queuedRattles = buf.filter(entry => typeof entry !== 'string' && entry.type === 'rattle').length;
-            if (!canQueueRattleWithLength(snake.body.length, queuedRattles)) {
+            if (!canQueueRattleWithLength(snake.body.length, totalPrimesAfter - 1)) {
               continue;
             }
-          }
 
-          soundEngine.playTick();
-          buf.push({ type: moveType, direction });
-          moveBuffersRef.current = { ...moveBuffersRef.current, [seat]: buf };
-          setMoveBuffers({ ...moveBuffersRef.current });
-          accepted.push(move);
+            soundEngine.playTick();
+            buf.push({ type: 'rattle', direction, primes });
+            moveBuffersRef.current = { ...moveBuffersRef.current, [seat]: buf };
+            setMoveBuffers({ ...moveBuffersRef.current });
+            accepted.push(move);
+          }
         } else {
           if (!isValidDartDirection(snake.direction, direction)) continue;
           if (moveType === 'rattle' && snake.body.length < 3) continue;
@@ -2074,7 +2185,7 @@ const GameApp: React.FC<{ campaignPlaytestLevel: CampaignLevel | null }> = ({ ca
       if (entry.type === 'move') {
         queueSnakeDirection(testSnake, entry.direction);
       } else {
-        queueSnakeSkill(testSnake, { skillId: entry.type, direction: entry.direction });
+        queueSnakeSkill(testSnake, { skillId: entry.type, direction: entry.direction, primes: entry.primes });
       }
       const frozen = new Set(current.snakes.filter(s => s.id !== seat && s.isAlive).map(s => s.id));
       const testResult = processGameTick(testState, settingsRef.current, 0, { frozenSnakeIds: frozen });
@@ -2097,7 +2208,7 @@ const GameApp: React.FC<{ campaignPlaytestLevel: CampaignLevel | null }> = ({ ca
       if (entry.type === 'move') {
         queueSnakeDirection(realSnake, entry.direction);
       } else {
-        queueSnakeSkill(realSnake, { skillId: entry.type, direction: entry.direction });
+        queueSnakeSkill(realSnake, { skillId: entry.type, direction: entry.direction, primes: entry.primes });
       }
       const prevState = stateRef.current;
       const { nextState, events } = processGameTick(prevState, settingsRef.current, 0, { frozenSnakeIds: frozen });
@@ -2348,7 +2459,7 @@ const GameApp: React.FC<{ campaignPlaytestLevel: CampaignLevel | null }> = ({ ca
 
     if (settingsRef.current.gestureTapPathEnabled === false) return;
 
-    const remainingRoom = snake.body.length - buf.length;
+    const remainingRoom = getBufferCapacity(snake) - buf.length;
     if (remainingRoom <= 0) {
       flashDeniedCell(cell);
       return;
@@ -3034,14 +3145,17 @@ const GameApp: React.FC<{ campaignPlaytestLevel: CampaignLevel | null }> = ({ ca
             const snake = current.snakes.find(candidate => candidate.id === key);
             if (!snake) break;
             const buf = [...moveBuffersRef.current[key]];
-            if (buf.length < snake.body.length) {
+            if (buf.length < getBufferCapacity(snake)) {
               const lastEntry = buf.length > 0 ? buf[buf.length - 1] : null;
               const lastDir = lastEntry ? lastEntry.direction : snake.direction;
               if (!isOppositeDirection(lastDir, msg.dir)) {
                 const rawType = msg.entryType ?? msg.moveType ?? (msg.entry?.type);
                 const entryType: 'move' | 'dart' | 'rattle' =
                   (rawType === 'dart' || rawType === 'rattle' || rawType === 'move') ? rawType : 'move';
-                buf.push({ type: entryType, direction: msg.dir });
+                const primes = entryType === 'rattle'
+                  ? (msg.primes ?? msg.entry?.primes ?? 1)
+                  : undefined;
+                buf.push(primes !== undefined ? { type: entryType, direction: msg.dir, primes } : { type: entryType, direction: msg.dir });
                 moveBuffersRef.current = { ...moveBuffersRef.current, [key]: buf };
                 setMoveBuffers({ ...moveBuffersRef.current });
               }
@@ -3741,6 +3855,7 @@ const GameApp: React.FC<{ campaignPlaytestLevel: CampaignLevel | null }> = ({ ca
                   }
                 }}
                 choosingSkillMap={choosingSkillMap}
+                pendingPrimesMap={pendingPrimesMap}
                 canUseSkill={canUseSkillForSeat}
                 settings={settings}
                 onCardSwipe={(seat, dir) => handleDirectionInput(seat === 'p2' ? 2 : 1, dir, seat)}
@@ -3854,6 +3969,7 @@ const GameApp: React.FC<{ campaignPlaytestLevel: CampaignLevel | null }> = ({ ca
                     onClear={() => handleBufferClear(controlsSlot)}
                     onSkill={() => handleSkillButton(controlsSlot)}
                     choosingSkill={Boolean(choosingSkillMap[getTargetKey(controlsSlot)])}
+                    pendingPrimes={pendingPrimesMap[getTargetKey(controlsSlot)] ?? 0}
                     equippedSkill={controlsSnake?.equippedSkill ?? null}
                     canUseSkill={(() => {
                       const seat = getTargetKey(controlsSlot);
@@ -3862,15 +3978,7 @@ const GameApp: React.FC<{ campaignPlaytestLevel: CampaignLevel | null }> = ({ ca
                         return false;
                       }
                       if (settings.turnBased && snake) {
-                        const buf = moveBuffers[seat] ?? [];
-                        const skillId = snake.equippedSkill;
-                        if (!skillId) return false;
-                        const queued = buf.filter(e => e.type === skillId).length;
-                        if (!canAffordQueuedSkill(snake.skillPoints, skillId, queued)) return false;
-                        if (snake.equippedSkill === 'rattle') {
-                          const queuedRattles = buf.filter(e => e.type === 'rattle').length;
-                          if (!canQueueRattleWithLength(snake.body.length, queuedRattles)) return false;
-                        }
+                        return canUseSkillForSeat(seat);
                       }
                       return true;
                     })()}
@@ -3879,7 +3987,7 @@ const GameApp: React.FC<{ campaignPlaytestLevel: CampaignLevel | null }> = ({ ca
                       : [controlsSnake.queuedDirection]
                         .filter((direction): direction is Direction => direction !== null)
                         .map((direction): BufferEntry => ({ type: 'move', direction }))}
-                    queueLimit={controlsSnake.body.length}
+                    queueLimit={getBufferCapacity(controlsSnake)}
                     locked={locks[getTargetKey(controlsSlot)]}
                     turnBased={settings.turnBased}
                     localTwoPlayer={playMode === 'LOCAL_2P'}

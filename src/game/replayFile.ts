@@ -1,5 +1,5 @@
 import { BufferEntry, Direction, GameState, GameSettings } from '../types/game';
-import { normalizeGameState } from './normalize';
+import { normalizeGameState, normalizeBufferEntry } from './normalize';
 
 export interface TurnDecision {
   tick: number;
@@ -176,7 +176,12 @@ export function parseAndValidateReplayData(rawText: string): {
     if (!validDecisions || !validAgentDriven) {
       throw new Error("That file isn't a Snake Royale replay");
     }
-    decisions = obj.decisions;
+    decisions = obj.decisions.map((decision: TurnDecision) => ({
+      ...decision,
+      queue: Array.isArray(decision.queue)
+        ? decision.queue.map(entry => (typeof entry === 'string' ? entry : normalizeBufferEntry(entry)))
+        : [],
+    }));
     agentDriven = obj.agentDriven;
   }
 

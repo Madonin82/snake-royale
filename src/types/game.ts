@@ -7,11 +7,13 @@ export type SkillsAvailableConfig = 'immediate' | 'after_race' | `after_turns:${
 export interface PendingSkill {
   skillId: SkillId;
   direction: Direction;
+  primes?: number;
 }
 
 export interface BufferEntry {
   type: 'move' | 'dart' | 'rattle';
   direction: Direction;
+  primes?: number;
 }
 
 export interface Position {
@@ -39,6 +41,8 @@ export interface Snake {
   color: string; // Game Boy shade
   equippedSkill: SkillId | null;
   pendingSkill?: PendingSkill | null;
+  startLength?: number;
+  startingScore?: number;
   teamId?: string;
   deathReason?: 'WALL' | 'SELF' | 'OPPONENT' | 'SHRINK' | 'HEAD_ON';
   deathPosition?: Position;

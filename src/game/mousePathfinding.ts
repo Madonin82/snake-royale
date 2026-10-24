@@ -30,6 +30,7 @@ export function computeVirtualHead(
       }
       vDir = entry.direction;
     } else if (entry.type === 'rattle') {
+      vPos = getNextHeadPosition(vPos, entry.direction);
       vDir = entry.direction;
     }
   }
