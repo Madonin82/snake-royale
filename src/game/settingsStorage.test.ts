@@ -89,6 +89,37 @@ test('recovering from invalid JSON falls back gracefully', () => {
   assert.equal(loaded.gestureSwipeEnabled, true);
 });
 
+test('playtest-only fields in stored settings are stripped on load (editor leak, 2026-10-24)', () => {
+  const storage = new MockStorage();
+  // Simulate storage poisoned by a pre-fix playtest mount: the level's
+  // bot AI rode along into the player's stored settings.
+  const poisoned: GameSettings = {
+    ...DEFAULT_SETTINGS,
+    gridSize: 12,
+    botDifficulty: 'HARD',
+    levelId: 'editor-level-1',
+    levelName: 'My Test Level',
+    campaignAiStyles: { p2: 'OPPORTUNIST' },
+    campaignAiDifficulties: { p2: 'EASY' },
+  };
+  saveStoredUserSettings(poisoned, storage);
+
+  const loaded = getStoredUserSettings(storage);
+  // The level's identity and per-seat bot overrides are gone, so a
+  // solo game can no longer silently run the level's bot.
+  assert.equal(loaded.levelId, undefined);
+  assert.equal(loaded.levelName, undefined);
+  assert.equal(loaded.campaignAiStyles, undefined);
+  assert.equal(loaded.campaignAiDifficulties, undefined);
+  // Legitimate solo choices survive the strip.
+  assert.equal(loaded.gridSize, 12);
+  assert.equal(loaded.botDifficulty, 'HARD');
+  // And no level AI style survives: the player's own aiStyle is
+  // unset here, so at game start the registry default (Constrictor
+  // at HARD) applies — not the level's OPPORTUNIST.
+  assert.equal(loaded.aiStyle, undefined);
+});
+
 test('precedence: campaign/level settings > stored user settings > DEFAULT_SETTINGS', () => {
   const storage = new MockStorage();
   const userSettings: GameSettings = {
