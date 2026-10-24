@@ -124,9 +124,14 @@ export const GameBoard: React.FC<GameBoardProps> = ({
       ctx.fillRect(wall.x * cellSize + 4, wall.y * cellSize + 4, cellSize - 8, cellSize - 8);
     }
 
-    // Rattle walls: tail-sized solid black square (distinct from full-cell walls and hollow attached tail tips)
+    // Rattle walls: tail-sized solid square in the owner's snake color,
+    // so you can tell who dropped a wall at a glance. Ownerless walls
+    // (old states) fall back to the darkest shade.
     for (const wall of gameState.rattleWalls ?? []) {
-      renderRattleWall(ctx, wall.x * cellSize, wall.y * cellSize, cellSize);
+      const owner = wall.ownerId
+        ? gameState.snakes.find(snake => snake.id === wall.ownerId)
+        : undefined;
+      renderRattleWall(ctx, wall.x * cellSize, wall.y * cellSize, cellSize, owner?.color);
     }
 
     // 5. Render Tokens (Escalating Round Tokens)
@@ -763,10 +768,10 @@ function renderShrunkWallCell(ctx: CanvasRenderingContext2D, x: number, y: numbe
   ctx.fillRect(x + 12, y + 12, cellSize - 24, cellSize - 24);
 }
 
-function renderRattleWall(ctx: CanvasRenderingContext2D, x: number, y: number, cellSize: number) {
+function renderRattleWall(ctx: CanvasRenderingContext2D, x: number, y: number, cellSize: number, color?: string) {
   const tSize = cellSize * 0.55;
   const tOff = (cellSize - tSize) / 2;
-  ctx.fillStyle = GAMEBOY_COLORS.DARKEST;
+  ctx.fillStyle = color ?? GAMEBOY_COLORS.DARKEST;
   ctx.fillRect(x + tOff, y + tOff, tSize, tSize);
 }
 

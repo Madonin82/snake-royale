@@ -596,7 +596,7 @@ export function processGameTick(
             const detachedTail = snakes[idx].body.pop();
             if (detachedTail) {
               detached++;
-              const wallCell = { x: detachedTail.x, y: detachedTail.y };
+              const wallCell = { x: detachedTail.x, y: detachedTail.y, ownerId: snakes[idx].id };
               state.walls = [...(state.walls ?? []), { x: wallCell.x, y: wallCell.y }];
               state.rattleWalls = [...(state.rattleWalls ?? []), wallCell];
             }
@@ -611,15 +611,24 @@ export function processGameTick(
     const nextHeads = snakes.map((snake, idx) =>
       movingIndices.includes(idx) ? getNextHeadPosition(snake.body[0], snake.direction) : snake.body[0],
     );
+    // Re-eat: a head moving into a rattle wall it dropped itself does
+    // not die — it eats the wall (+1 length, +1 SP, cell clears). Any
+    // other wall (opponent's, or ownerless from an old state) is lethal.
+    const willEatOwnWall = nextHeads.map((head, idx) =>
+      movingIndices.includes(idx) &&
+      (state.rattleWalls ?? []).some(wall => wall.x === head.x && wall.y === head.y && wall.ownerId === snakes[idx].id),
+    );
     const willGrow = nextHeads.map((head, idx) =>
-      movingIndices.includes(idx) && state.tokens.some(token => token.x === head.x && token.y === head.y),
+      movingIndices.includes(idx) &&
+      (state.tokens.some(token => token.x === head.x && token.y === head.y) || willEatOwnWall[idx]),
     );
     const deaths = snakes.map(() => ({ wall: false, self: false, body: false, headOn: false, killerId: undefined as string | undefined }));
 
     for (const i of movingIndices) {
       const snake = snakes[i];
       const head = nextHeads[i];
-      deaths[i].wall = !isCellInArena(head, settings.gridSize, state.ringInset) || isPermanentWall(head);
+      deaths[i].wall = !isCellInArena(head, settings.gridSize, state.ringInset) ||
+        (isPermanentWall(head) && !willEatOwnWall[i]);
       const selfBody = willGrow[i] ? snake.body : snake.body.slice(0, -1);
       deaths[i].self = selfBody.some(segment => segment.x === head.x && segment.y === head.y);
       for (let j = 0; j < snakes.length; j++) {
@@ -759,6 +768,28 @@ export function processGameTick(
           state.campaignObjectives.p1TokensCollected += 1;
         }
         stepConsumedTokenIndices.add(tokenIndex);
+      }
+      // Re-eat (full refund of one prime, and nothing else): no score,
+      // no tokensSinceLock step, no spEarned — the SP was earned once
+      // already, spent on the prime, and is simply handed back. The
+      // cell clears for everyone once eaten. A cell cannot hold both
+      // a token and a wall, so this never runs on a token step.
+      if (willEatOwnWall[i]) {
+        snakes[i].skillPoints = (snakes[i].skillPoints ?? 0) + 1;
+        ateThisStep = true;
+        const head = nextHeads[i];
+        const hadOwnWall = (state.rattleWalls ?? []).some(
+          wall => wall.x === head.x && wall.y === head.y && wall.ownerId === snakes[i].id,
+        );
+        if (hadOwnWall) {
+          state.rattleWalls = (state.rattleWalls ?? []).filter(
+            wall => !(wall.x === head.x && wall.y === head.y && wall.ownerId === snakes[i].id),
+          );
+          // The mirror entry in walls is the only walls entry at this
+          // cell: a rattle wall is born from a body cell, never from
+          // a level wall cell.
+          state.walls = (state.walls ?? []).filter(wall => !(wall.x === head.x && wall.y === head.y));
+        }
       }
       snakes[i].body.unshift(nextHeads[i]);
       if (!ateThisStep) {

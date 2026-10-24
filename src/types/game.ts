@@ -23,10 +23,17 @@ export interface Position {
 
 // RattleWall: a wall cell (x, y, blocks movement, renders as wall).
 // Dropped by Rattle — the snake's detached tail segment. Permanent for
-// the match from the drop tick; also mirrored into GameState.walls.
+// the match from the drop tick, unless its owner re-eats it; also
+// mirrored into GameState.walls.
+// ownerId: the snake that dropped it. Only that snake can re-eat it
+// (+1 length, +1 SP, cell clears); for every other snake it is lethal
+// like any wall, and it renders in the owner's snake color. Walls
+// without an ownerId (old replays, pre-ownership states) are lethal
+// to everyone and render in the darkest shade.
 export interface RattleWall {
   x: number;
   y: number;
+  ownerId?: string;
 }
 
 export interface Snake {

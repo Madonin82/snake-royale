@@ -26,8 +26,12 @@ function asPositionArray(value: unknown): Position[] {
 
 function asRattleWallArray(value: unknown): RattleWall[] {
   // Older states carried a fuseTicks on each rattle wall (pre tail-drop
-  // rework) — strip everything but the cell so legacy data loads clean.
-  const toCell = (w: RattleWall): RattleWall => ({ x: w.x, y: w.y });
+  // rework) — strip everything but the cell and its owner, so legacy
+  // data loads clean and ownership survives a load. Walls without an
+  // ownerId stay ownerless: lethal to everyone, never re-eatable.
+  const toCell = (w: RattleWall): RattleWall => (
+    typeof w.ownerId === 'string' ? { x: w.x, y: w.y, ownerId: w.ownerId } : { x: w.x, y: w.y }
+  );
   if (Array.isArray(value)) return (value as RattleWall[]).map(toCell);
   if (value && typeof value === 'object') {
     const record = value as Record<string, RattleWall>;
