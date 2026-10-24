@@ -469,9 +469,15 @@ const GameApp: React.FC<{ campaignPlaytestLevel: CampaignLevel | null }> = ({ ca
     resolveInitialSettings(initialCampaignSettings)
   );
 
+  // Playtest settings must never reach localStorage: a playtest mount
+  // would otherwise overwrite the player's real solo settings with the
+  // level's grid size, race turns, bot difficulty and AI style, and the
+  // next solo game would silently run the level's settings instead of
+  // the player's. Playtest settings live only in this mount's state.
   useEffect(() => {
+    if (campaignPlaytestLevel) return;
     saveStoredUserSettings(settings);
-  }, [settings]);
+  }, [settings, campaignPlaytestLevel]);
 
   const [playMode, setPlayMode] = useState<PlayMode>('SOLO_AI');
   const [inLobby, setInLobby] = useState<boolean>(!campaignPlaytestLevel);

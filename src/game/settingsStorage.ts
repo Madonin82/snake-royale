@@ -63,9 +63,27 @@ export function getStoredUserSettings(storage: Storage | undefined = typeof loca
     if (!raw) return baseDefaults;
     const parsed = JSON.parse(raw);
     if (parsed && typeof parsed === 'object') {
+      // Playtest-only fields are never user preferences: they can only
+      // have arrived here from a level-editor playtest mount (before
+      // the save guard in App.tsx), and left in place they would make
+      // a solo game run a level's bot AI instead of the player's own
+      // settings. Strip them on load so already-poisoned storage
+      // self-cleans the next time the main game mounts; the save
+      // effect then writes the cleaned settings back. Deliberately
+      // NOT stripped: gridSize, raceTurns, shrink, botDifficulty,
+      // aiStyle, skillsAvailable — those are also legitimate solo
+      // choices, so a level's values there cannot be told apart from
+      // the player's and must be reset by hand once, in Settings.
+      const {
+        levelId: _levelId,
+        levelName: _levelName,
+        campaignAiStyles: _campaignAiStyles,
+        campaignAiDifficulties: _campaignAiDifficulties,
+        ...userSettings
+      } = parsed as GameSettings;
       return {
         ...baseDefaults,
-        ...parsed,
+        ...userSettings,
       };
     }
   } catch {
