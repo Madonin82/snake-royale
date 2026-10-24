@@ -190,6 +190,8 @@ export function createCampaignPlaytestState(
       skillPoints: spawn.startingSkillPoints ?? 0,
       equippedSkill: spawn.equippedSkill ?? (avalena ? 'dart' : null),
       pendingSkill: null,
+      startLength: body.length,
+      startingScore: spawn.startingScore ?? 0,
     };
   });
   const occupied = new Set(snakes.flatMap(snake => snake.body.map(position => `${position.x},${position.y}`)));
@@ -340,6 +342,8 @@ export function createMultiplayerCustomLevelState(
       isAlive: true,
       equippedSkill: spawn.equippedSkill ?? (isAvalenaStyle(spawn.aiStyle) ? 'dart' : null),
       pendingSkill: null,
+      startLength: body.length,
+      startingScore: spawn.startingScore ?? 0,
     };
   });
 

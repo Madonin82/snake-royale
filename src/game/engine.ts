@@ -2,7 +2,7 @@ import { Direction, GamePhase, GameSettings, GameState, PendingSkill, Position, 
 import { soundEngine } from '../audio/soundEngine';
 import { createInitialThinkTimeValues } from './thinkTime';
 import { recordFirstToResults, recordSurviveResults } from './objectives';
-import { canActivateSkill, isValidDartDirection, SKILLS } from './skills';
+import { canActivateSkill, isSkillUnlocked, isValidDartDirection, SKILLS } from './skills';
 
 export const GAMEBOY_COLORS = {
   DARKEST: '#0F380F',   // P1 snake, closed ring, borders, deep text
@@ -53,6 +53,14 @@ export function getNextHeadPosition(head: Position, dir: Direction): Position {
   }
 }
 
+export function getBufferCapacity(snake: Snake | undefined | null): number {
+  if (!snake) return 0;
+  if (snake.startLength !== undefined && snake.startingScore !== undefined) {
+    return Math.max(1, snake.startLength + (snake.score - snake.startingScore));
+  }
+  return snake.body.length;
+}
+
 export function createInitialState(
   settings: GameSettings = DEFAULT_SETTINGS,
   playerNames?: { p1?: string; p2?: string }
@@ -77,6 +85,8 @@ export function createInitialState(
     color: GAMEBOY_COLORS.DARKEST,
     equippedSkill: null,
     pendingSkill: null,
+    startLength: 3,
+    startingScore: 0,
     tokensSinceLock: 0,
     spEarned: 0,
   };
@@ -97,6 +107,8 @@ export function createInitialState(
     color: GAMEBOY_COLORS.DARK,
     equippedSkill: null,
     pendingSkill: null,
+    startLength: 3,
+    startingScore: 0,
     tokensSinceLock: 0,
     spEarned: 0,
   };
@@ -212,14 +224,24 @@ export function queueSnakeSkill(snake: Snake, skill: PendingSkill | null): boole
   if (snake.equippedSkill && snake.equippedSkill !== skill.skillId) {
     return false;
   }
+  const def = SKILLS[skill.skillId];
+  if (!def || (snake.skillPoints ?? 0) < def.cost) {
+    return false;
+  }
+  // Rattle needs a body segment to give up: a bare head cannot prime.
+  // (Restored from main — Gemini's version dropped this gate, which
+  // broke the length-1 queue-refusal tests.)
+  if (skill.skillId === 'rattle' && (!Array.isArray(snake.body) || snake.body.length < 2)) {
+    return false;
+  }
   const effectiveFacing = snake.queuedDirection || snake.direction;
   if (!isValidDartDirection(effectiveFacing, skill.direction)) {
     return false;
   }
-  if (skill.skillId === 'rattle' && (!Array.isArray(snake.body) || snake.body.length < 2)) {
-    return false;
-  }
-  snake.pendingSkill = { ...skill };
+  snake.pendingSkill = {
+    ...skill,
+    primes: skill.primes !== undefined ? skill.primes : (skill.skillId === 'rattle' ? 1 : undefined),
+  };
   return true;
 }
 
@@ -458,7 +480,7 @@ export function processGameTick(
   // Determine which snakes are executing Dart or Rattle this tick (evaluated before phase transition or after? Wait: if after_race unlocks when shrink phase starts, state.phase is already updated in step 1 or already SHRINKING at start of turn)
   // Check both currentState (at planning time) and state (at resolution time) so if unlocked at planning time or resolution time it works cleanly.
   const activeDarts = new Map<string, Direction>();
-  const activeRattles = new Map<string, Direction>();
+  const activeRattles = new Map<string, { direction: Direction; primes: number }>();
   for (const snake of snakes) {
     if (snake.queuedDirection) {
       snake.direction = snake.queuedDirection;
@@ -479,17 +501,33 @@ export function processGameTick(
       }
     } else if (snake.pendingSkill && snake.pendingSkill.skillId === 'rattle') {
       const rattleDir = snake.pendingSkill.direction;
+      const primes = snake.pendingSkill.primes ?? 1;
       snake.pendingSkill = null;
-      const unlockedNow = canActivateSkill(snake, currentState, effectiveSkillsAvailable) ||
-        canActivateSkill(snake, state, effectiveSkillsAvailable);
+      // Activation requires the skill to be unlocked AND affordable
+      // against the prime count, not the flat skill cost: a 3-prime
+      // step needs 3 SP, not 1. Gemini's version checked unlock only,
+      // so a forced rattle with 0 SP would detach for free.
+      // Unlock is checked with isSkillUnlocked, not canActivateSkill:
+      // canActivateSkill also enforces minLength 2, which would make
+      // a length-1 fizzle indistinguishable from "never unlocked"
+      // and the snake would move straight instead of taking its
+      // step's direction. A fizzle (length 1, or fewer SP than
+      // primes) charges 0 SP, places no wall, and the move still
+      // happens in the chosen direction. A never-unlocked rattle
+      // does none of that: the snake moves straight, as on main.
+      const unlockedNow = isSkillUnlocked(currentState, effectiveSkillsAvailable) ||
+        isSkillUnlocked(state, effectiveSkillsAvailable);
       if (
         snake.equippedSkill === 'rattle' &&
         rattleDir &&
-        snake.body.length >= 2 &&
         unlockedNow &&
         isValidDartDirection(snake.direction, rattleDir)
       ) {
-        activeRattles.set(snake.id, rattleDir);
+        if (snake.body.length >= 2 && (snake.skillPoints ?? 0) >= primes) {
+          activeRattles.set(snake.id, { direction: rattleDir, primes });
+        } else {
+          snake.direction = rattleDir;
+        }
       }
     } else if (snake.pendingSkill) {
       snake.pendingSkill = null;
@@ -504,6 +542,7 @@ export function processGameTick(
   let totalTokensConsumedCount = 0;
   const dartTrail: Array<{ snakeId: string; cells: Position[] }> = [];
   const dartTrailMap = new Map<string, Position[]>();
+  const actualRattleDeductions = new Map<string, number>();
 
   // SNIPE RULE helpers: a darting head that meets an opponent's head is lethal
   // only when the darter is strictly ahead on BOTH skill points and length —
@@ -549,15 +588,21 @@ export function processGameTick(
         if (dartDir) {
           snakes[idx].direction = dartDir;
         }
-        const rattleDir = activeRattles.get(snakes[idx].id);
-        if (rattleDir) {
-          snakes[idx].direction = rattleDir;
-          const detachedTail = snakes[idx].body.pop();
-          if (detachedTail) {
-            // The dropped segment is a permanent wall from this tick.
-            const wallCell = { x: detachedTail.x, y: detachedTail.y };
-            state.walls = [...(state.walls ?? []), { x: wallCell.x, y: wallCell.y }];
-            state.rattleWalls = [...(state.rattleWalls ?? []), wallCell];
+        const rattle = activeRattles.get(snakes[idx].id);
+        if (rattle) {
+          snakes[idx].direction = rattle.direction;
+          let detached = 0;
+          for (let p = 0; p < rattle.primes && snakes[idx].body.length >= 2; p++) {
+            const detachedTail = snakes[idx].body.pop();
+            if (detachedTail) {
+              detached++;
+              const wallCell = { x: detachedTail.x, y: detachedTail.y };
+              state.walls = [...(state.walls ?? []), { x: wallCell.x, y: wallCell.y }];
+              state.rattleWalls = [...(state.rattleWalls ?? []), wallCell];
+            }
+          }
+          if (detached > 0) {
+            actualRattleDeductions.set(snakes[idx].id, detached);
           }
         }
       }
@@ -738,8 +783,9 @@ export function processGameTick(
     if (activeDarts.has(snake.id)) {
       snake.skillPoints = Math.max(0, (snake.skillPoints ?? 0) - SKILLS.dart.cost);
     }
-    if (activeRattles.has(snake.id)) {
-      snake.skillPoints = Math.max(0, (snake.skillPoints ?? 0) - SKILLS.rattle.cost);
+    const rattleDeduction = actualRattleDeductions.get(snake.id);
+    if (rattleDeduction && rattleDeduction > 0) {
+      snake.skillPoints = Math.max(0, (snake.skillPoints ?? 0) - rattleDeduction);
     }
   }
 

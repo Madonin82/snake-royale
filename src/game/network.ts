@@ -1054,6 +1054,7 @@ export class NetworkManager {
       : {
           type: input.type === 'dart' || input.type === 'rattle' || input.type === 'move' ? input.type : 'move',
           direction: input.direction,
+          ...(input.primes !== undefined ? { primes: input.primes } : {}),
         };
 
     const roomId = this.roomId;
@@ -1071,6 +1072,7 @@ export class NetworkManager {
       role,
       dir: entry.direction,
       entryType: entry.type,
+      ...(entry.primes !== undefined ? { primes: entry.primes } : {}),
       tick: currentTick,
       clientTime,
     };
@@ -1088,6 +1090,7 @@ export class NetworkManager {
         inputSequence,
         dir: entry.direction,
         entryType: entry.type,
+        ...(entry.primes !== undefined ? { primes: entry.primes } : {}),
         tick: currentTick,
         clientTime,
       }).catch(error => this.reportTransportError('Writing input to RTDB', error));

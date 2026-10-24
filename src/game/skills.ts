@@ -1,5 +1,7 @@
 import { Direction, GameState, Snake, SkillId } from '../types/game';
-import { isOppositeDirection } from './engine';
+import { isOppositeDirection, getBufferCapacity } from './engine';
+
+export { getBufferCapacity };
 
 export interface SkillDefinition {
   id: SkillId;

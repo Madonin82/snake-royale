@@ -4,7 +4,7 @@ import { Activity, Gamepad, Wifi } from 'lucide-react';
 import { getCampaignObjectiveProgress, isCampaignObjectiveComplete } from '../game/objectives';
 import { getPlayerColorPalette, getSeatDisplayTag, splitPlayersTwoPerSide } from '../game/playerColors';
 
-import { canActivateSkill, canAffordQueuedSkill, canQueueRattleWithLength } from '../game/skills';
+import { canActivateSkill, canAffordQueuedSkill, canAffordQueuedRattle, canQueueRattleWithLength, getBufferCapacity } from '../game/skills';
 
 interface HudProps {
   gameState: GameState;
@@ -29,6 +29,7 @@ interface HudProps {
   onCardSwipe?: (seat: 'p1' | 'p2', dir: Direction) => void;
   choosingSkillMap?: Record<string, boolean>;
   canUseSkill?: (seat: string) => boolean;
+  pendingPrimesMap?: Record<string, number>;
 }
 
 export const Hud: React.FC<HudProps> = ({
@@ -53,6 +54,7 @@ export const Hud: React.FC<HudProps> = ({
   onCardSwipe,
   choosingSkillMap,
   canUseSkill: canUseSkillProp,
+  pendingPrimesMap,
 }) => {
   // Who is "you" on this screen, per seat — drives the (YOU) tags without redundant (BOT N) tags.
   const seatTag = (seat: string): string => getSeatDisplayTag(seat, playMode, viewerSeat);
@@ -150,20 +152,26 @@ export const Hud: React.FC<HudProps> = ({
     if (!canActivateSkill(snake, gameState, gameState.skillsAvailable)) return false;
 
     const buf = moveBuffers?.[who] ?? [];
-    if (buf.length >= snake.body.length) return false;
+    const capacity = getBufferCapacity(snake);
+    if (buf.length >= capacity) return false;
     const skillId = snake.equippedSkill;
     if (!skillId) return false;
-    const queued = buf.filter(e => typeof e !== 'string' && e.type === skillId).length;
-    if (!canAffordQueuedSkill(snake.skillPoints, skillId, queued)) return false;
     if (snake.equippedSkill === 'rattle') {
-      const queuedRattles = buf.filter(e => typeof e !== 'string' && e.type === 'rattle').length;
-      if (!canQueueRattleWithLength(snake.body.length, queuedRattles)) return false;
+      const queuedPrimes = buf.reduce((acc, e) => acc + (typeof e !== 'string' && e.type === 'rattle' ? (e.primes ?? 1) : 0), 0) + (pendingPrimesMap?.[who] ?? 0);
+      if (!canAffordQueuedRattle(snake.skillPoints, queuedPrimes)) return false;
+      if (!canQueueRattleWithLength(snake.body.length, queuedPrimes)) return false;
+    } else {
+      const queued = buf.filter(e => typeof e !== 'string' && e.type === skillId).length;
+      if (!canAffordQueuedSkill(snake.skillPoints, skillId, queued)) return false;
     }
     return true;
   };
 
   const renderSkillBadge = (who: string, skill: string) => {
     const usable = isSkillUsable(who);
+    const pendingPrimes = pendingPrimesMap?.[who] ?? 0;
+    const isPriming = skill === 'rattle' && pendingPrimes > 0;
+    const label = isPriming ? `${pendingPrimes} primed, ${pendingPrimes} SP escrowed` : `⚡${skill}`;
     return (
       <button
         type="button"
@@ -177,7 +185,7 @@ export const Hud: React.FC<HudProps> = ({
         }`}
         title={`Equipped Skill: ${skill.toUpperCase()} (2 SP)`}
       >
-        ⚡{skill}
+        {label}
       </button>
     );
   };
@@ -468,7 +476,7 @@ export const Hud: React.FC<HudProps> = ({
               <div className="flex items-center gap-1.5 min-w-0">
                 <span className="truncate">
                   {canSeeMoves
-                    ? `QUEUE (${buffer.length}/${snake.body.length})`
+                    ? `QUEUE (${buffer.length}/${getBufferCapacity(snake)})`
                     : 'MOVE QUEUE'}
                 </span>
                 {mouseHints?.badge}
@@ -501,7 +509,7 @@ export const Hud: React.FC<HudProps> = ({
                 buffer.map((entry, idx) => {
                   const dir = entry.direction;
                   const arrow = dir === 'UP' ? '↑' : dir === 'DOWN' ? '↓' : dir === 'LEFT' ? '←' : '→';
-                  const label = entry.type === 'dart' || entry.type === 'rattle' ? `⚡${arrow}` : arrow;
+                  const label = entry.type === 'rattle' ? `⚡×${entry.primes ?? 1}${arrow}` : entry.type === 'dart' ? `⚡${arrow}` : arrow;
                   return (
                     <span key={idx} className={`px-1 py-0.5 ${palette.badgeBg} text-[10px] leading-tight font-bold border border-[#0F380F] shrink-0`}>
                       {label}
@@ -588,7 +596,7 @@ export const Hud: React.FC<HudProps> = ({
         <div className="flex-1 min-h-0 overflow-hidden bg-[#8BAC0F]/20 border border-dashed border-[#0F380F]/40 p-1.5 [@media(max-height:540px)]:p-1 flex flex-col justify-start">
           <div className="text-[9px] font-bold opacity-75 mb-1 flex justify-between items-center shrink-0 min-h-[16px] tabular-nums">
             <div className="flex items-center gap-1.5 min-w-0">
-              <span className="truncate">{canSeeMoves ? `QUEUE (${buffer.length}/${snake.body.length})` : 'QUEUE'}</span>
+              <span className="truncate">{canSeeMoves ? `QUEUE (${buffer.length}/${getBufferCapacity(snake)})` : 'QUEUE'}</span>
               {mouseHints?.badge}
             </div>
             {locked && <span className="text-[8px] px-1 bg-[#0F380F] text-[#9BBC0F] shrink-0">LOCKED</span>}
@@ -617,7 +625,7 @@ export const Hud: React.FC<HudProps> = ({
               buffer.map((entry, idx) => {
                 const dir = entry.direction;
                 const arrow = dir === 'UP' ? '↑' : dir === 'DOWN' ? '↓' : dir === 'LEFT' ? '←' : '→';
-                const label = entry.type === 'dart' || entry.type === 'rattle' ? `⚡${arrow}` : arrow;
+                const label = entry.type === 'rattle' ? `⚡×${entry.primes ?? 1}${arrow}` : entry.type === 'dart' ? `⚡${arrow}` : arrow;
                 return (
                   <span key={idx} className={`px-1 py-0.5 ${palette.badgeBg} text-[10px] leading-tight font-bold border border-[#0F380F] shrink-0`}>
                     {label}
@@ -699,7 +707,7 @@ export const Hud: React.FC<HudProps> = ({
                   buffer.map((entry, idx) => {
                     const dir = entry.direction;
                     const arrow = dir === 'UP' ? '↑' : dir === 'DOWN' ? '↓' : dir === 'LEFT' ? '←' : '→';
-                    const label = entry.type === 'dart' || entry.type === 'rattle' ? `⚡${arrow}` : arrow;
+                    const label = entry.type === 'rattle' ? `⚡×${entry.primes ?? 1}${arrow}` : entry.type === 'dart' ? `⚡${arrow}` : arrow;
                     return (
                       <span key={idx} className="px-1 py-0.5 bg-[#0F380F] text-[#9BBC0F] text-[10px] font-black shrink-0">
                         {label}
@@ -828,18 +836,18 @@ export const Hud: React.FC<HudProps> = ({
           <button
             type="button"
             onClick={onP2Undo}
-            disabled={!gameState.turnBased || isLocked('p2') || (moveBuffers?.p2?.length ?? 0) === 0}
+            disabled={!gameState.turnBased || isLocked('p2') || ((moveBuffers?.p2?.length ?? 0) === 0 && (pendingPrimesMap?.p2 ?? 0) === 0)}
             className="shrink-0 h-9 [@media(max-height:540px)]:h-7 border-2 border-[#0F380F] bg-[#306230] px-2.5 text-[11px] font-black text-[#9BBC0F] disabled:opacity-40 cursor-pointer flex items-center justify-center"
           >
             P2 UNDO
           </button>
           <div className="flex min-w-0 min-h-9 [@media(max-height:540px)]:min-h-7 flex-1 items-center gap-1 border-2 border-dashed border-[#0F380F] bg-[#8BAC0F] px-2 py-1 text-[10px] font-bold text-[#0F380F] tabular-nums">
-            <span className="shrink-0">P2 {moveBuffers?.p2?.length ?? 0}/{gameState.snakes.find(snake => snake.id === 'p2')?.body.length ?? 0}</span>
+            <span className="shrink-0">P2 {moveBuffers?.p2?.length ?? 0}/{getBufferCapacity(gameState.snakes.find(snake => snake.id === 'p2'))}</span>
             <span className="flex min-w-0 flex-1 flex-wrap gap-0.5 content-start portrait:overflow-y-auto portrait:max-h-[44px]">
               {(moveBuffers?.p2 ?? []).map((entry, index) => {
                 const dir = entry.direction;
                 const arrow = dir === 'UP' ? '↑' : dir === 'DOWN' ? '↓' : dir === 'LEFT' ? '←' : '→';
-                const label = entry.type === 'dart' || entry.type === 'rattle' ? `⚡${arrow}` : arrow;
+                const label = entry.type === 'rattle' ? `⚡×${entry.primes ?? 1}${arrow}` : entry.type === 'dart' ? `⚡${arrow}` : arrow;
                 return (
                   <span key={`${dir}-${index}`} className="shrink-0 bg-[#0F380F] px-1 py-0.5 leading-none text-[#9BBC0F]">
                     {label}

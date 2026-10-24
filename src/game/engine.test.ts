@@ -770,12 +770,16 @@ test('rattle cannot activate at length 1 or with fewer than 1 SP, and fizzles wi
   // Rejected at queue time at length 1.
   assert.equal(queueSnakeSkill(p1, { skillId: 'rattle', direction: 'UP' }), false);
   // Even if forced onto pendingSkill, it fizzles on tick: no SP spent,
-  // no wall — but the snake still takes its move (edge ruling, 2026-10-23).
+  // no wall — but the snake still takes its move. Under prime-and-detach
+  // a rattle step IS a move step, so the fizzle move goes in the
+  // step's direction (UP, to (2,3)) — not straight ahead as the
+  // PR #128 single-skill fizzle did. The detach is what fizzles,
+  // not the move.
   p1.pendingSkill = { skillId: 'rattle', direction: 'UP' };
   const resLen1 = processGameTick(state, settings, 0).nextState;
   const afterLen1 = resLen1.snakes.find(s => s.id === 'p1')!;
   assert.equal(afterLen1.body.length, 1);
-  assert.deepEqual(afterLen1.body[0], { x: 3, y: 4 });
+  assert.deepEqual(afterLen1.body[0], { x: 2, y: 3 });
   assert.equal(afterLen1.skillPoints, 4);
   assert.equal(resLen1.rattleWalls ?? undefined, undefined);
 
@@ -790,8 +794,11 @@ test('rattle cannot activate at length 1 or with fewer than 1 SP, and fizzles wi
   assert.equal(resNoDir.rattleWalls ?? undefined, undefined);
 
   // Rattle with < 1 SP fizzles cleanly
+  p1.body = [{ x: 2, y: 4 }, { x: 1, y: 4 }, { x: 0, y: 4 }];
+  p1.direction = 'RIGHT';
   p1.skillPoints = 0;
-  queueSnakeSkill(p1, { skillId: 'rattle', direction: 'UP' });
+  assert.equal(queueSnakeSkill(p1, { skillId: 'rattle', direction: 'UP' }), false);
+  p1.pendingSkill = { skillId: 'rattle', direction: 'UP' };
   const resLowSp = processGameTick(state, settings, 0).nextState;
   const afterLowSp = resLowSp.snakes.find(s => s.id === 'p1')!;
   assert.equal(afterLowSp.body.length, 3);

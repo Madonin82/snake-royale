@@ -67,19 +67,19 @@ test('computeVirtualHead: advances through moves, darts, and rattles correctly',
   ]);
   assert.deepEqual(v4, { pos: { x: 2, y: -1 }, dir: 'UP' });
 
-  // Rattle doesn't advance pos, but updates dir
+  // Rattle advances 1 cell in direction and updates dir
   const v5 = computeVirtualHead(snake, [
     { type: 'rattle', direction: 'DOWN' },
   ]);
-  assert.deepEqual(v5, { pos: { x: 2, y: 2 }, dir: 'DOWN' });
+  assert.deepEqual(v5, { pos: { x: 2, y: 3 }, dir: 'DOWN' });
 
-  // Combination: move RIGHT (3,2) -> rattle UP (3,2, dir UP) -> move UP (3,1)
+  // Combination: move RIGHT (3,2) -> rattle UP (3,1, dir UP) -> move UP (3,0)
   const v6 = computeVirtualHead(snake, [
     { type: 'move', direction: 'RIGHT' },
     { type: 'rattle', direction: 'UP' },
     { type: 'move', direction: 'UP' },
   ]);
-  assert.deepEqual(v6, { pos: { x: 3, y: 1 }, dir: 'UP' });
+  assert.deepEqual(v6, { pos: { x: 3, y: 0 }, dir: 'UP' });
 });
 
 test('getObstacleSet: indexes walls, rattle walls, and all snakes bodies', () => {
