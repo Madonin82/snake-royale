@@ -656,6 +656,9 @@ const GameApp: React.FC<{ campaignPlaytestLevel: CampaignLevel | null }> = ({ ca
   hotseatExecutingRef.current = hotseatExecuting;
   const hotseatChainRef = useRef<boolean>(false);
   const hotseatStepTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // Timer for the hotseat round playback chain (P2's viewing). Separate
+  // from the live chain's step timer; quit clears both.
+  const hotseatReplayTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   // Hotseat simultaneous-resolution (v2): a round replay owed to one seat.
   // Set when a live round resolves (the seat that did not trigger it still
   // has to watch it); consumed at that seat's unlock, which plays it back
@@ -969,24 +972,6 @@ const GameApp: React.FC<{ campaignPlaytestLevel: CampaignLevel | null }> = ({ ca
     }
     if (emitState) dispatchAiState();
   }, [applyThinkTransition, dispatchAiState, isBuiltInAiActive, maybeOpenPlanningSessions]);
-
-  // Hotseat round replay finish: when a hotseat replay ends — either the
-  // driver stopped at the last recorded state, or the player exited the
-  // replay early — close the replay and open planning for the replaying
-  // seat. Pausing mid-replay does not finish it (still active, idx short
-  // of the end), so the player can resume watching.
-  useEffect(() => {
-    const pending = hotseatReplayRef.current;
-    if (!pending) return;
-    const endedNaturally = !replayPlaying && replayIdx >= matchHistory.length - 1;
-    const exitedEarly = !replayActive;
-    if (!endedNaturally && !exitedEarly) return;
-    hotseatReplayRef.current = null;
-    setReplayActive(false);
-    setReplayPlaying(false);
-    setHotseatExecuting(false);
-    commitLocks({ ...locksRef.current, [pending.seat]: false });
-  }, [replayActive, replayPlaying, replayIdx, matchHistory.length, commitLocks]);
 
   const getTargetKey = useCallback((
     playerSlot: 1 | 2,
@@ -2295,24 +2280,84 @@ const GameApp: React.FC<{ campaignPlaytestLevel: CampaignLevel | null }> = ({ ca
     step();
   }, [aiMode, commitLocks, dispatchAiState, playTickEvents, triggerHitstop]);
 
+  // P2's viewing of a resolved round (v2): NOT the post-match replay UI.
+  // It steps through the round's recorded matchHistory states with the
+  // normal board and HUD — exactly like watching a live resolution —
+  // paced by the same hitstop + 550ms beat the live chain uses. Nothing
+  // is re-executed: no engine ticks, no token/SP effects, no new history
+  // entries. The walk ends on the last recorded state, which IS the live
+  // settled board, so live state is exactly where it was when playback
+  // finishes and planning opens for this seat. Hidden plans stay hidden:
+  // the HUD only ever shows the active seat's queue, so the other seat's
+  // locked next-round plan never appears during playback.
+  const playHotseatRoundReplay = useCallback((seat: 'p1' | 'p2') => {
+    const pending = hotseatReplayRef.current;
+    if (!pending || pending.seat !== seat) return;
+    if (hotseatExecutingRef.current) return;
+    // Snapshot the round's frames up front: playback never appends to
+    // matchHistory, so this slice is stable for the whole viewing.
+    const frames = matchHistoryRef.current.slice(pending.startIdx);
+    if (frames.length <= 1) {
+      // No ticks to show (defensive: a real round always has >= 1 tick).
+      hotseatReplayRef.current = null;
+      setHotseatExecuting(false);
+      commitLocks({ ...locksRef.current, [seat]: false });
+      return;
+    }
+    setHotseatExecuting(true);
+
+    const show = (state: GameState) => {
+      stateRef.current = state;
+      setGameState(state);
+    };
+
+    const finish = () => {
+      hotseatReplayRef.current = null;
+      setHotseatExecuting(false);
+      commitLocks({ ...locksRef.current, [seat]: false });
+    };
+
+    // Show the pre-round board first, then step forward one recorded
+    // state per beat — the same rhythm as the live chain.
+    show(frames[0]);
+    let idx = 0;
+    const advance = () => {
+      // Quit clears the pending record; stop the chain if it went away.
+      if (hotseatReplayRef.current !== pending) return;
+      if (idx >= frames.length - 1) {
+        finish();
+        return;
+      }
+      const prev = frames[idx];
+      const next = frames[idx + 1];
+      idx++;
+      triggerHitstop(prev, next, () => {
+        hotseatReplayTimerRef.current = setTimeout(() => {
+          hotseatReplayTimerRef.current = null;
+          show(next);
+          advance();
+        }, 550);
+      });
+    };
+    advance();
+  }, [commitLocks, triggerHitstop]);
+
   // Unlock resolution (v2): tap head while locked, after the PIN check.
-  // - If a round replay is owed to this seat, start it: visual-only
-  //   playback of the last resolved round from matchHistory. Planning
-  //   opens when the replay finishes (see the finish effect above).
+  // - If a round playback is owed to this seat, play it: live-style
+  //   playback of the last resolved round's recorded states, on the
+  //   normal board at the live beat (see playHotseatRoundReplay). Planning
+  //   opens when the playback reaches the settled board.
   // - Otherwise, if both seats hold locked plans, resolve the round live.
   // - Otherwise there is nothing to watch and nothing to resolve; the
   //   seat just stays locked (unreachable in the normal alternating flow).
   const resolveHotseatUnlock = useCallback((seat: 'p1' | 'p2') => {
     const pending = hotseatReplayRef.current;
     if (pending && pending.seat === seat) {
-      setReplayIdx(pending.startIdx);
-      setReplayActive(true);
-      setReplayPlaying(true);
-      setHotseatExecuting(true);
+      playHotseatRoundReplay(seat);
       return;
     }
     executeHotseatRound(seat);
-  }, [executeHotseatRound]);
+  }, [executeHotseatRound, playHotseatRoundReplay]);
 
   // Tap head while locked = unlock. PIN pad if a PIN is set, otherwise
   // resolve the unlock (live round, or a replay owed to this seat).
@@ -2746,12 +2791,14 @@ const GameApp: React.FC<{ campaignPlaytestLevel: CampaignLevel | null }> = ({ ca
     setHotseatActiveSeat('p1');
     setHotseatExecuting(false);
     hotseatReplayRef.current = null;
-    setReplayActive(false);
-    setReplayPlaying(false);
     hotseatChainRef.current = false;
     if (hotseatStepTimerRef.current) {
       clearTimeout(hotseatStepTimerRef.current);
       hotseatStepTimerRef.current = null;
+    }
+    if (hotseatReplayTimerRef.current) {
+      clearTimeout(hotseatReplayTimerRef.current);
+      hotseatReplayTimerRef.current = null;
     }
     if (campaignPlaytestLevel) {
       window.location.hash = '#/level-editor';
