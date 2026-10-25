@@ -89,12 +89,15 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
   };
 
   type SettingsRow = 'STYLE' | 'TURNS' | 'GRID' | 'TICKS' | 'THINK_TIME' | 'SOUND' | 'CRT' | 'RESET' | 'CONTROLS' | 'ACCOUNT' | 'ADMIN' | 'CLOSE';
+  type SettingsRow = 'STYLE' | 'TURNS' | 'SHRINK' | 'SHRINK_EVERY' | 'GRID' | 'TICKS' | 'THINK_TIME' | 'SOUND' | 'CRT' | 'CONTROLS' | 'ACCOUNT' | 'ADMIN' | 'CLOSE';
 
   const baseRows: SettingsRow[] = isOnlineGuest
     ? ['SOUND', 'CRT', 'CONTROLS', 'ACCOUNT', 'CLOSE']
     : settings.turnBased
     ? ['STYLE', 'TURNS', 'GRID', 'THINK_TIME', 'SOUND', 'CRT', 'RESET', 'CONTROLS', 'ACCOUNT', 'CLOSE']
     : ['STYLE', 'GRID', 'TICKS', 'SOUND', 'CRT', 'RESET', 'CONTROLS', 'ACCOUNT', 'CLOSE'];
+    ? ['STYLE', 'TURNS', 'SHRINK', 'SHRINK_EVERY', 'GRID', 'THINK_TIME', 'SOUND', 'CRT', 'CONTROLS', 'ACCOUNT', 'CLOSE']
+    : ['STYLE', 'GRID', 'TICKS', 'SOUND', 'CRT', 'CONTROLS', 'ACCOUNT', 'CLOSE'];
 
   const rows: SettingsRow[] = (signedInUser && ADMIN_UIDS.includes(signedInUser.uid))
     ? [...baseRows.slice(0, -1), 'ADMIN', 'CLOSE']
@@ -268,6 +271,20 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
             }
             break;
           }
+          case 'SHRINK': {
+            if (!isOnlineGuest) {
+              onUpdateSettings({ shrinkEnabled: !(settings.shrinkEnabled ?? true) });
+            }
+            break;
+          }
+          case 'SHRINK_EVERY': {
+            if (!isOnlineGuest) {
+              const shrinkOpts = [1, 2, 4, 6, 8, 12];
+              const next = shrinkOpts[(shrinkOpts.indexOf(settings.shrinkEveryTurns) + 1) % shrinkOpts.length];
+              onUpdateSettings({ shrinkEveryTurns: next });
+            }
+            break;
+          }
           case 'GRID': {
             if (!isOnlineGuest) {
               const gridOpts = [8, 12, 16];
@@ -334,6 +351,22 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
               if (idx < 0) idx = turnOpts.length - 1;
               if (idx >= turnOpts.length) idx = 0;
               onUpdateSettings({ raceTurns: turnOpts[idx] });
+            }
+            break;
+          }
+          case 'SHRINK': {
+            if (!isOnlineGuest) {
+              onUpdateSettings({ shrinkEnabled: !(settings.shrinkEnabled ?? true) });
+            }
+            break;
+          }
+          case 'SHRINK_EVERY': {
+            if (!isOnlineGuest) {
+              const shrinkOpts = [1, 2, 4, 6, 8, 12];
+              let idx = shrinkOpts.indexOf(settings.shrinkEveryTurns) + dir;
+              if (idx < 0) idx = shrinkOpts.length - 1;
+              if (idx >= shrinkOpts.length) idx = 0;
+              onUpdateSettings({ shrinkEveryTurns: shrinkOpts[idx] });
             }
             break;
           }
@@ -520,6 +553,89 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                     }`}
                   >
                     {turns} {turns === 90 ? '★' : ''}
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* Shrink phase on/off (turn-based only) */}
+          {!isOnlineGuest && settings.turnBased && (
+            <div
+              className={`flex flex-col gap-1 p-1.5 border transition-all ${
+                currentRow === 'SHRINK'
+                  ? 'bg-[#8BAC0F] border-[#0F380F] ring-2 ring-[#0F380F]'
+                  : 'border-transparent'
+              }`}
+              onClick={() => setFocusIndex(rows.indexOf('SHRINK'))}
+            >
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-1 opacity-90">
+                  {currentRow === 'SHRINK' && <span className="animate-pulse">►</span>}
+                  <Grid className="w-3.5 h-3.5" />
+                  <span>SHRINK PHASE:</span>
+                </div>
+                {currentRow === 'SHRINK' && (
+                  <span className="text-[9px] bg-[#0F380F] text-[#9BBC0F] px-1 font-bold">[◄ ►] TOGGLE</span>
+                )}
+              </div>
+              <div className="grid grid-cols-2 gap-1">
+                <button
+                  onClick={() => onUpdateSettings({ shrinkEnabled: true })}
+                  className={`py-1 border border-[#0F380F] font-black cursor-pointer ${
+                    (settings.shrinkEnabled ?? true)
+                      ? 'bg-[#0F380F] text-[#9BBC0F]'
+                      : 'bg-[#8BAC0F] hover:bg-[#9BBC0F]'
+                  }`}
+                >
+                  ON ★
+                </button>
+                <button
+                  onClick={() => onUpdateSettings({ shrinkEnabled: false })}
+                  className={`py-1 border border-[#0F380F] font-black cursor-pointer ${
+                    !(settings.shrinkEnabled ?? true)
+                      ? 'bg-[#0F380F] text-[#9BBC0F]'
+                      : 'bg-[#8BAC0F] hover:bg-[#9BBC0F]'
+                  }`}
+                >
+                  OFF
+                </button>
+              </div>
+            </div>
+          )}
+
+          {/* Ring closes every N turns (turn-based only) */}
+          {!isOnlineGuest && settings.turnBased && (
+            <div
+              className={`flex flex-col gap-1 p-1.5 border transition-all ${
+                currentRow === 'SHRINK_EVERY'
+                  ? 'bg-[#8BAC0F] border-[#0F380F] ring-2 ring-[#0F380F]'
+                  : 'border-transparent'
+              }`}
+              onClick={() => setFocusIndex(rows.indexOf('SHRINK_EVERY'))}
+            >
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-1 opacity-90">
+                  {currentRow === 'SHRINK_EVERY' && <span className="animate-pulse">►</span>}
+                  <Grid className="w-3.5 h-3.5" />
+                  <span>RING CLOSES EVERY (TURNS):</span>
+                </div>
+                {currentRow === 'SHRINK_EVERY' && (
+                  <span className="text-[9px] bg-[#0F380F] text-[#9BBC0F] px-1 font-bold">[◄ ►] CYCLE</span>
+                )}
+              </div>
+              <div className="grid grid-cols-6 gap-1">
+                {[1, 2, 4, 6, 8, 12].map((turns) => (
+                  <button
+                    key={turns}
+                    onClick={() => onUpdateSettings({ shrinkEveryTurns: turns })}
+                    className={`py-1 border border-[#0F380F] font-black cursor-pointer ${
+                      settings.shrinkEveryTurns === turns
+                        ? 'bg-[#0F380F] text-[#9BBC0F]'
+                        : 'bg-[#8BAC0F] hover:bg-[#9BBC0F]'
+                    }`}
+                  >
+                    {turns} {turns === 8 ? '★' : ''}
                   </button>
                 ))}
               </div>
