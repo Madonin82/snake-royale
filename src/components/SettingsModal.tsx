@@ -88,16 +88,13 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
     }
   };
 
-  type SettingsRow = 'STYLE' | 'TURNS' | 'GRID' | 'TICKS' | 'THINK_TIME' | 'SOUND' | 'CRT' | 'RESET' | 'CONTROLS' | 'ACCOUNT' | 'ADMIN' | 'CLOSE';
-  type SettingsRow = 'STYLE' | 'TURNS' | 'SHRINK' | 'SHRINK_EVERY' | 'GRID' | 'TICKS' | 'THINK_TIME' | 'SOUND' | 'CRT' | 'CONTROLS' | 'ACCOUNT' | 'ADMIN' | 'CLOSE';
+  type SettingsRow = 'STYLE' | 'TURNS' | 'SHRINK' | 'SHRINK_EVERY' | 'GRID' | 'TICKS' | 'THINK_TIME' | 'SOUND' | 'CRT' | 'RESET' | 'CONTROLS' | 'ACCOUNT' | 'ADMIN' | 'CLOSE';
 
   const baseRows: SettingsRow[] = isOnlineGuest
     ? ['SOUND', 'CRT', 'CONTROLS', 'ACCOUNT', 'CLOSE']
     : settings.turnBased
-    ? ['STYLE', 'TURNS', 'GRID', 'THINK_TIME', 'SOUND', 'CRT', 'RESET', 'CONTROLS', 'ACCOUNT', 'CLOSE']
+    ? ['STYLE', 'TURNS', 'SHRINK', 'SHRINK_EVERY', 'GRID', 'THINK_TIME', 'SOUND', 'CRT', 'RESET', 'CONTROLS', 'ACCOUNT', 'CLOSE']
     : ['STYLE', 'GRID', 'TICKS', 'SOUND', 'CRT', 'RESET', 'CONTROLS', 'ACCOUNT', 'CLOSE'];
-    ? ['STYLE', 'TURNS', 'SHRINK', 'SHRINK_EVERY', 'GRID', 'THINK_TIME', 'SOUND', 'CRT', 'CONTROLS', 'ACCOUNT', 'CLOSE']
-    : ['STYLE', 'GRID', 'TICKS', 'SOUND', 'CRT', 'CONTROLS', 'ACCOUNT', 'CLOSE'];
 
   const rows: SettingsRow[] = (signedInUser && ADMIN_UIDS.includes(signedInUser.uid))
     ? [...baseRows.slice(0, -1), 'ADMIN', 'CLOSE']
