@@ -1143,7 +1143,9 @@ export const LobbyView: React.FC<LobbyViewProps> = ({
             <div className="bg-[#9BBC0F] p-2 [@media(max-height:500px)]:p-1.5 border-2 border-[#0F380F] text-[10px] [@media(max-height:500px)]:text-[9px] leading-snug">
               <div className="font-bold border-b border-[#0F380F] pb-0.5 mb-0.5">RULES &amp; CONTROLS BRIEFING:</div>
               <div>
-                Both players plan moves in secret, then the board steps simultaneously. Grab tokens to grow ({settings.raceTurns} turns), then survive the shrinking ring (closes every {settings.shrinkEveryTurns} turns). Last snake slithering wins.
+                {(settings.shrinkEnabled ?? true)
+                  ? `Both players plan moves in secret, then the board steps simultaneously. Grab tokens to grow (${settings.raceTurns} turns), then survive the shrinking ring (closes every ${settings.shrinkEveryTurns} turns). Last snake slithering wins.`
+                  : `Both players plan moves in secret, then the board steps simultaneously. Grab tokens to grow (${settings.raceTurns} turns), then last snake slithering wins in territory play.`}
               </div>
               <div className="mt-0.5 pt-0.5 border-t border-[#0F380F]/40 font-bold text-[#306230] flex flex-col gap-0.5">
                 <div>📱 TOUCH / IPHONE: SWIPE = ONE STEP • TAP A CELL = GO THERE • TAP YOUR HEAD = LOCK</div>
