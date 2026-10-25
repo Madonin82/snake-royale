@@ -573,6 +573,10 @@ const GameApp: React.FC<{ campaignPlaytestLevel: CampaignLevel | null }> = ({ ca
   const [replayIdx, setReplayIdx] = useState<number>(0);
   const [replayPlaying, setReplayPlaying] = useState<boolean>(false);
   const [replaySpeed, setReplaySpeed] = useState<number>(5);
+  // Mirror of matchHistory for callbacks that need its length (hotseat
+  // round snapshots). Synced by effect below, next to the replay driver.
+  const matchHistoryRef = useRef<GameState[]>([]);
+  useEffect(() => { matchHistoryRef.current = matchHistory; }, [matchHistory]);
 
   const handleDisplayNameChange = useCallback((value: string) => {
     setDisplayName(value);
@@ -627,7 +631,7 @@ const GameApp: React.FC<{ campaignPlaytestLevel: CampaignLevel | null }> = ({ ca
   const planProjectionsRef = useRef<Record<string, { bodiesByPly: Record<string, Position[]>[]; lockedCount: number }>>({});
   const chainIntentRef = useRef<Record<string, ChainIntent | null>>({});
 
-  // LOCAL 2P HOTSEAT (unlock-to-move): one phone, one shared control set,
+  // LOCAL 2P HOTSEAT (simultaneous-resolution): one phone, one shared control set,
   // players pass the phone. Active seat = whose turn it is (unlock + plan).
   const [hotseatActiveSeat, setHotseatActiveSeat] = useState<'p1' | 'p2'>('p1');
   const hotseatActiveSeatRef = useRef<'p1' | 'p2'>('p1');
@@ -652,6 +656,11 @@ const GameApp: React.FC<{ campaignPlaytestLevel: CampaignLevel | null }> = ({ ca
   hotseatExecutingRef.current = hotseatExecuting;
   const hotseatChainRef = useRef<boolean>(false);
   const hotseatStepTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // Hotseat simultaneous-resolution (v2): a round replay owed to one seat.
+  // Set when a live round resolves (the seat that did not trigger it still
+  // has to watch it); consumed at that seat's unlock, which plays it back
+  // visual-only from matchHistory. Null when no replay is owed.
+  const hotseatReplayRef = useRef<{ seat: 'p1' | 'p2'; startIdx: number } | null>(null);
 
   // After a hotseat lock lands: first lock → PIN setup pad; otherwise → pass screen.
   const hotseatAfterLock = useCallback((seat: 'p1' | 'p2') => {
@@ -960,6 +969,24 @@ const GameApp: React.FC<{ campaignPlaytestLevel: CampaignLevel | null }> = ({ ca
     }
     if (emitState) dispatchAiState();
   }, [applyThinkTransition, dispatchAiState, isBuiltInAiActive, maybeOpenPlanningSessions]);
+
+  // Hotseat round replay finish: when a hotseat replay ends — either the
+  // driver stopped at the last recorded state, or the player exited the
+  // replay early — close the replay and open planning for the replaying
+  // seat. Pausing mid-replay does not finish it (still active, idx short
+  // of the end), so the player can resume watching.
+  useEffect(() => {
+    const pending = hotseatReplayRef.current;
+    if (!pending) return;
+    const endedNaturally = !replayPlaying && replayIdx >= matchHistory.length - 1;
+    const exitedEarly = !replayActive;
+    if (!endedNaturally && !exitedEarly) return;
+    hotseatReplayRef.current = null;
+    setReplayActive(false);
+    setReplayPlaying(false);
+    setHotseatExecuting(false);
+    commitLocks({ ...locksRef.current, [pending.seat]: false });
+  }, [replayActive, replayPlaying, replayIdx, matchHistory.length, commitLocks]);
 
   const getTargetKey = useCallback((
     playerSlot: 1 | 2,
@@ -2144,22 +2171,44 @@ const GameApp: React.FC<{ campaignPlaytestLevel: CampaignLevel | null }> = ({ ca
     }, 1000);
   }, []);
 
-  // ---- LOCAL 2P HOTSEAT: unlock-to-move execution ----
-  // Executes the active (locked) player's queued moves one at a time,
-  // with the other snake frozen. Each move is validated against the
-  // engine (clone-and-test) before committing: if a move would be
-  // illegal, stop before it and discard the rest (use-it-or-lose-it).
-  const executeHotseatMoves = useCallback((seat: 'p1' | 'p2') => {
+  // ---- LOCAL 2P HOTSEAT: simultaneous-resolution execution (v2) ----
+  // A hotseat round resolves like a simultaneous-mode round: both locked
+  // plans step together through processGameTick, and death rules apply
+  // exactly as in simultaneous mode. There is no clone-and-test stop:
+  // plans are commitments, execution is the judge. This is what makes
+  // death possible in hotseat again (v1's validate-and-stop blocked
+  // every fatal move before it executed, so nobody could die).
+  const executeHotseatRound = useCallback((triggerSeat: 'p1' | 'p2') => {
     if (hotseatChainRef.current) return;
     if (stateRef.current.phase === 'OVER') return;
+    // Live resolution needs both seats locked with a non-empty plan.
+    const alive = stateRef.current.snakes.filter(s => s.isAlive);
+    if (!alive.every(s => locksRef.current[s.id] && (moveBuffersRef.current[s.id]?.length ?? 0) > 0)) return;
     hotseatChainRef.current = true;
     setHotseatExecuting(true);
 
-    const finish = (releaseLock: boolean) => {
+    // Snapshot the pre-round history index BEFORE the first tick resolves,
+    // so the other seat's replay knows where this round begins in
+    // matchHistory. Match start seeds matchHistory with the initial state,
+    // so a pre-round entry always exists; clamp defensively.
+    const roundStartIdx = Math.max(0, matchHistoryRef.current.length - 1);
+    const otherSeat: 'p1' | 'p2' = triggerSeat === 'p1' ? 'p2' : 'p1';
+
+    const finish = (releaseTriggerLock: boolean) => {
       hotseatChainRef.current = false;
       setHotseatExecuting(false);
-      if (releaseLock) {
-        commitLocks({ ...locksRef.current, [seat]: false });
+      // Leftover moves are discarded (use-it-or-lose-it, as in v1).
+      moveBuffersRef.current = Object.fromEntries(
+        Object.keys(moveBuffersRef.current).map(k => [k, []]),
+      );
+      setMoveBuffers({ ...moveBuffersRef.current });
+      if (releaseTriggerLock) {
+        commitLocks({ ...locksRef.current, [triggerSeat]: false });
+      }
+      // If the match continues, the other seat still has to watch this
+      // round: its unlock plays it back visual-only from matchHistory.
+      if (stateRef.current.phase !== 'OVER') {
+        hotseatReplayRef.current = { seat: otherSeat, startIdx: roundStartIdx };
       }
     };
 
@@ -2170,57 +2219,49 @@ const GameApp: React.FC<{ campaignPlaytestLevel: CampaignLevel | null }> = ({ ca
         finish(false);
         return;
       }
-      const buf = moveBuffersRef.current[seat] ?? [];
-      if (buf.length === 0) {
-        // Buffer drained: release the lock → planning opens.
-        finish(true);
-        return;
-      }
-      const snake = current.snakes.find(s => s.id === seat);
-      if (!snake || !snake.isAlive) {
-        finish(true);
-        return;
-      }
-
-      const entry = buf[0];
-      // Clone-and-test: apply the entry to a clone, run the engine with
-      // the other snake frozen. If the active snake dies, the move is
-      // illegal → stop before it, discard the rest.
-      const testState = cloneGameState(current, current.gridSize ?? settingsRef.current.gridSize);
-      const testSnake = testState.snakes.find(s => s.id === seat)!;
-      if (entry.type === 'move') {
-        queueSnakeDirection(testSnake, entry.direction);
-      } else {
-        queueSnakeSkill(testSnake, { skillId: entry.type, direction: entry.direction, primes: entry.primes });
-      }
-      const frozen = new Set(current.snakes.filter(s => s.id !== seat && s.isAlive).map(s => s.id));
-      const testResult = processGameTick(testState, settingsRef.current, 0, { frozenSnakeIds: frozen });
-      const testActive = testResult.nextState.snakes.find(s => s.id === seat)!;
-      if (!testActive.isAlive) {
-        // Illegal move: stop before it, discard this + all remaining
-        // (use-it-or-lose-it). The board is unchanged from before the
-        // illegal move, so the player sees exactly where they stopped.
-        moveBuffersRef.current = { ...moveBuffersRef.current, [seat]: [] };
-        setMoveBuffers({ ...moveBuffersRef.current });
+      // canProgress, mirroring maybeAdvanceTurn: the round ends as soon as
+      // any alive snake's plan is exhausted. A drained plan ends the round;
+      // it does NOT keep its snake moving straight.
+      const canProgress = current.snakes
+        .filter(s => s.isAlive)
+        .every(s => (moveBuffersRef.current[s.id]?.length ?? 0) > 0);
+      if (!canProgress) {
         finish(true);
         return;
       }
 
-      // Legal: commit. Pop the entry, apply to the real state, run the tick.
-      const nextBuf = buf.slice(1);
-      moveBuffersRef.current = { ...moveBuffersRef.current, [seat]: nextBuf };
+      // Shift one entry per alive snake and queue it, exactly as
+      // maybeAdvanceTurn does (dart/rattle skill entries included).
+      for (const snake of current.snakes) {
+        if (!snake.isAlive) continue;
+        const buf = moveBuffersRef.current[snake.id] ?? [];
+        const entry = buf.shift();
+        if (!entry) continue;
+        if (typeof entry === 'string') {
+          queueSnakeDirection(snake, entry as Direction);
+        } else if (entry.type === 'dart') {
+          if (entry.direction) {
+            queueSnakeSkill(snake, { skillId: 'dart', direction: entry.direction });
+          } else {
+            queueSnakeDirection(snake, snake.direction);
+          }
+        } else if (entry.type === 'rattle') {
+          if (entry.direction) {
+            queueSnakeSkill(snake, { skillId: 'rattle', direction: entry.direction, primes: entry.primes ?? 1 });
+          } else {
+            queueSnakeDirection(snake, snake.direction);
+          }
+        } else {
+          queueSnakeDirection(snake, entry.direction);
+        }
+      }
       setMoveBuffers({ ...moveBuffersRef.current });
-      const realSnake = stateRef.current.snakes.find(s => s.id === seat)!;
-      if (entry.type === 'move') {
-        queueSnakeDirection(realSnake, entry.direction);
-      } else {
-        queueSnakeSkill(realSnake, { skillId: entry.type, direction: entry.direction, primes: entry.primes });
-      }
+
       const prevState = stateRef.current;
-      const { nextState, events } = processGameTick(prevState, settingsRef.current, 0, { frozenSnakeIds: frozen });
+      const { nextState, events } = processGameTick(prevState, settingsRef.current, 0);
       playTickEvents(events);
 
-      // Token/SP fly effects (mirrors maybeAdvanceTurn's block).
+      // Token/SP fly effects (mirrors the v1 hotseat block).
       if (!aiMode && events.tokenEaten) {
         for (const [snakeId, spAwarded] of Object.entries(events.tokenEaten)) {
           if (spAwarded && spAwarded > 0) {
@@ -2254,8 +2295,27 @@ const GameApp: React.FC<{ campaignPlaytestLevel: CampaignLevel | null }> = ({ ca
     step();
   }, [aiMode, commitLocks, dispatchAiState, playTickEvents, triggerHitstop]);
 
+  // Unlock resolution (v2): tap head while locked, after the PIN check.
+  // - If a round replay is owed to this seat, start it: visual-only
+  //   playback of the last resolved round from matchHistory. Planning
+  //   opens when the replay finishes (see the finish effect above).
+  // - Otherwise, if both seats hold locked plans, resolve the round live.
+  // - Otherwise there is nothing to watch and nothing to resolve; the
+  //   seat just stays locked (unreachable in the normal alternating flow).
+  const resolveHotseatUnlock = useCallback((seat: 'p1' | 'p2') => {
+    const pending = hotseatReplayRef.current;
+    if (pending && pending.seat === seat) {
+      setReplayIdx(pending.startIdx);
+      setReplayActive(true);
+      setReplayPlaying(true);
+      setHotseatExecuting(true);
+      return;
+    }
+    executeHotseatRound(seat);
+  }, [executeHotseatRound]);
+
   // Tap head while locked = unlock. PIN pad if a PIN is set, otherwise
-  // the locked moves play immediately.
+  // resolve the unlock (live round, or a replay owed to this seat).
   const handleHotseatUnlock = useCallback((seat: 'p1' | 'p2') => {
     if (playModeRef.current !== 'LOCAL_HOTSEAT') return;
     if (seat !== hotseatActiveSeatRef.current) return;
@@ -2270,8 +2330,8 @@ const GameApp: React.FC<{ campaignPlaytestLevel: CampaignLevel | null }> = ({ ca
       setHotseatPinPad({ mode: 'unlock', seat });
       return;
     }
-    executeHotseatMoves(seat);
-  }, [executeHotseatMoves]);
+    resolveHotseatUnlock(seat);
+  }, [resolveHotseatUnlock]);
 
   // Pass screen TAP WHEN READY: the incoming player takes the phone.
   // Their think timer starts at turn begin (unlock + plan phase) and
@@ -2326,7 +2386,7 @@ const GameApp: React.FC<{ campaignPlaytestLevel: CampaignLevel | null }> = ({ ca
       setHotseatPinPad(null);
       setHotseatPinInput('');
       setHotseatPinError(null);
-      executeHotseatMoves(pad.seat);
+      resolveHotseatUnlock(pad.seat);
     } else {
       setHotseatPinError('Wrong PIN — try again.');
       setHotseatPinInput('');
@@ -2685,6 +2745,14 @@ const GameApp: React.FC<{ campaignPlaytestLevel: CampaignLevel | null }> = ({ ca
     setHotseatPassTo(null);
     setHotseatActiveSeat('p1');
     setHotseatExecuting(false);
+    hotseatReplayRef.current = null;
+    setReplayActive(false);
+    setReplayPlaying(false);
+    hotseatChainRef.current = false;
+    if (hotseatStepTimerRef.current) {
+      clearTimeout(hotseatStepTimerRef.current);
+      hotseatStepTimerRef.current = null;
+    }
     if (campaignPlaytestLevel) {
       window.location.hash = '#/level-editor';
       return;
@@ -3492,6 +3560,7 @@ const GameApp: React.FC<{ campaignPlaytestLevel: CampaignLevel | null }> = ({ ca
       setHotseatPassTo(null);
       setHotseatActiveSeat('p1');
       setHotseatExecuting(false);
+      hotseatReplayRef.current = null;
     }
     maybeOpenPlanningSessions();
     dispatchAiState(initial);
