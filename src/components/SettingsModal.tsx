@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { GameSettings } from '../types/game';
+import { buildResetSettings } from '../game/settingsStorage';
 import { soundEngine } from '../audio/soundEngine';
 import { GamepadMenuAction } from '../game/gamepad';
 import { validateEmailAuthForm } from '../game/authValidation';
@@ -87,13 +88,13 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
     }
   };
 
-  type SettingsRow = 'STYLE' | 'TURNS' | 'GRID' | 'TICKS' | 'THINK_TIME' | 'SOUND' | 'CRT' | 'CONTROLS' | 'ACCOUNT' | 'ADMIN' | 'CLOSE';
+  type SettingsRow = 'STYLE' | 'TURNS' | 'GRID' | 'TICKS' | 'THINK_TIME' | 'SOUND' | 'CRT' | 'RESET' | 'CONTROLS' | 'ACCOUNT' | 'ADMIN' | 'CLOSE';
 
   const baseRows: SettingsRow[] = isOnlineGuest
     ? ['SOUND', 'CRT', 'CONTROLS', 'ACCOUNT', 'CLOSE']
     : settings.turnBased
-    ? ['STYLE', 'TURNS', 'GRID', 'THINK_TIME', 'SOUND', 'CRT', 'CONTROLS', 'ACCOUNT', 'CLOSE']
-    : ['STYLE', 'GRID', 'TICKS', 'SOUND', 'CRT', 'CONTROLS', 'ACCOUNT', 'CLOSE'];
+    ? ['STYLE', 'TURNS', 'GRID', 'THINK_TIME', 'SOUND', 'CRT', 'RESET', 'CONTROLS', 'ACCOUNT', 'CLOSE']
+    : ['STYLE', 'GRID', 'TICKS', 'SOUND', 'CRT', 'RESET', 'CONTROLS', 'ACCOUNT', 'CLOSE'];
 
   const rows: SettingsRow[] = (signedInUser && ADMIN_UIDS.includes(signedInUser.uid))
     ? [...baseRows.slice(0, -1), 'ADMIN', 'CLOSE']
@@ -211,6 +212,26 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
     }
   }, []);
 
+  // Two-step factory reset: first activation arms, second confirms.
+  // Armed state clears if the modal closes or focus moves elsewhere,
+  // so a stray confirm press cannot wipe settings by accident.
+  const [resetArmed, setResetArmed] = useState(false);
+
+  const handleResetDefaults = useCallback(() => {
+    const next = buildResetSettings();
+    soundEngine.setEnabled(next.soundEnabled);
+    onUpdateSettings(next);
+    setResetArmed(false);
+  }, [onUpdateSettings]);
+
+  useEffect(() => {
+    if (!isOpen) setResetArmed(false);
+  }, [isOpen]);
+
+  useEffect(() => {
+    if (currentRow !== 'RESET') setResetArmed(false);
+  }, [currentRow]);
+
   useEffect(() => {
     if (!isOpen) return;
 
@@ -279,6 +300,12 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
           }
           case 'CRT':
             onUpdateSettings({ crtFilterEnabled: !settings.crtFilterEnabled });
+            break;
+          case 'RESET':
+            if (!isOnlineGuest) {
+              if (resetArmed) handleResetDefaults();
+              else setResetArmed(true);
+            }
             break;
           case 'ACCOUNT':
             if (!authBusy) {
@@ -349,6 +376,9 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
           case 'CRT':
             onUpdateSettings({ crtFilterEnabled: !settings.crtFilterEnabled });
             break;
+          case 'RESET':
+            if (!isOnlineGuest && !resetArmed) setResetArmed(true);
+            break;
           case 'CLOSE':
             break;
         }
@@ -372,6 +402,8 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
     isGoogleSignedIn,
     handleSignOut,
     handleGoogleSignIn,
+    resetArmed,
+    handleResetDefaults,
   ]);
 
   if (!isOpen) return null;
@@ -664,6 +696,46 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
               {settings.crtFilterEnabled ? 'ON' : 'OFF'}
             </button>
           </div>
+
+          {/* Restore all settings to defaults (two-step: arm, then confirm) */}
+          {!isOnlineGuest && (
+            <div
+              className={`flex flex-col gap-1 p-2 border transition-all ${
+                currentRow === 'RESET'
+                  ? 'bg-[#8BAC0F] border-[#0F380F] ring-2 ring-[#0F380F]'
+                  : 'bg-[#8BAC0F] border-[#0F380F]'
+              }`}
+              onClick={() => setFocusIndex(rows.indexOf('RESET'))}
+            >
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-2">
+                  {currentRow === 'RESET' && <span className="animate-pulse">►</span>}
+                  <span>RESTORE DEFAULTS</span>
+                </div>
+                {currentRow === 'RESET' && (
+                  <span className="text-[9px] bg-[#0F380F] text-[#9BBC0F] px-1 font-bold">
+                    {resetArmed ? '[A] CONFIRM RESET' : '[A] ARM'}
+                  </span>
+                )}
+              </div>
+              {resetArmed && (
+                <div className="text-[10px] font-bold text-[#0F380F]">
+                  Resets EVERY setting (match rules, bot, sound, display) to defaults. Press again to confirm.
+                </div>
+              )}
+              <button
+                onClick={() => {
+                  if (resetArmed) handleResetDefaults();
+                  else setResetArmed(true);
+                }}
+                className={`py-1.5 border border-[#0F380F] font-black cursor-pointer ${
+                  resetArmed ? 'bg-[#0F380F] text-[#9BBC0F]' : 'bg-[#9BBC0F] hover:bg-[#8BAC0F]'
+                }`}
+              >
+                {resetArmed ? 'YES, RESET ALL' : 'RESTORE DEFAULTS'}
+              </button>
+            </div>
+          )}
 
           {/* Controls Gestures Section */}
           <div

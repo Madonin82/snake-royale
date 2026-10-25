@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
+  buildResetSettings,
   getDeviceGestureDefaults,
   getStoredUserSettings,
   resolveInitialSettings,
@@ -141,4 +142,52 @@ test('precedence: campaign/level settings > stored user settings > DEFAULT_SETTI
   // Stored user settings fill in what the level didn't specify:
   assert.equal(resolved.raceTurns, 60);
   assert.equal(resolved.gestureTapPathEnabled, false);
+});
+
+test('buildResetSettings matches a fresh install plus clears for fields DEFAULT_SETTINGS does not carry', () => {
+  const reset = buildResetSettings();
+  // Fresh-install values (Node env: non-touch device defaults).
+  assert.equal(reset.gridSize, 8);
+  assert.equal(reset.raceTurns, 60);
+  assert.equal(reset.shrinkEveryTurns, 8);
+  assert.equal(reset.shrinkEnabled, true);
+  assert.equal(reset.botDifficulty, 'MEDIUM');
+  assert.equal(reset.skillsAvailable, 'after_race');
+  assert.equal(reset.soundEnabled, true);
+  assert.equal(reset.crtFilterEnabled, false);
+  // Fields DEFAULT_SETTINGS does not carry must be explicitly cleared,
+  // or a merge-based reset would keep a leaked level bot/identity.
+  assert.equal(reset.aiStyle, undefined);
+  assert.equal(reset.campaignAiStyles, undefined);
+  assert.equal(reset.campaignAiDifficulties, undefined);
+  assert.equal(reset.levelId, undefined);
+  assert.equal(reset.levelName, undefined);
+});
+
+test('buildResetSettings merged over poisoned settings clears every leaked field', () => {
+  const poisoned: GameSettings = {
+    ...DEFAULT_SETTINGS,
+    gridSize: 12,
+    raceTurns: 30,
+    shrinkEveryTurns: 1,
+    shrinkEnabled: false,
+    botDifficulty: 'EASY',
+    aiStyle: 'OPPORTUNIST',
+    levelId: 'level-1',
+    levelName: 'Leaked Level',
+    campaignAiStyles: { p2: 'GREEDY' },
+    campaignAiDifficulties: { p2: 'HARD' },
+  };
+  // This is the merge App.handleUpdateSettings performs.
+  const merged = { ...poisoned, ...buildResetSettings() };
+  assert.equal(merged.gridSize, 8);
+  assert.equal(merged.raceTurns, 60);
+  assert.equal(merged.shrinkEveryTurns, 8);
+  assert.equal(merged.shrinkEnabled, true);
+  assert.equal(merged.botDifficulty, 'MEDIUM');
+  assert.equal(merged.aiStyle, undefined);
+  assert.equal(merged.levelId, undefined);
+  assert.equal(merged.levelName, undefined);
+  assert.equal(merged.campaignAiStyles, undefined);
+  assert.equal(merged.campaignAiDifficulties, undefined);
 });

@@ -125,3 +125,27 @@ export function saveStoredUserSettings(
     // Private mode / quota errors
   }
 }
+
+/**
+ * Builds a full factory reset: exactly what a fresh install loads
+ * (DEFAULT_SETTINGS overlaid with per-device gesture defaults), plus
+ * explicit clears for the optional fields DEFAULT_SETTINGS does not
+ * carry. Those fields (bot AI style, campaign AI maps, level id/name)
+ * can only have arrived from a level-editor playtest or campaign
+ * mount, so a merge-based reset must clear them — otherwise spreading
+ * this over current settings would silently keep a leaked bot style
+ * or level behind. Callers apply it with onUpdateSettings, which
+ * merges it over current settings and persists it via the save
+ * effect; JSON drops the undefined-valued keys on save.
+ */
+export function buildResetSettings(): GameSettings {
+  return {
+    ...DEFAULT_SETTINGS,
+    ...getDeviceGestureDefaults(isTouchDevice()),
+    aiStyle: undefined,
+    campaignAiStyles: undefined,
+    campaignAiDifficulties: undefined,
+    levelId: undefined,
+    levelName: undefined,
+  };
+}
