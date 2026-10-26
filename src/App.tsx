@@ -2393,6 +2393,20 @@ const GameApp: React.FC<{ campaignPlaytestLevel: CampaignLevel | null }> = ({ ca
     if (!next) return;
     setHotseatPassTo(null);
     setHotseatActiveSeat(next);
+    // If the incoming seat is owed a round playback, open their screen
+    // on the pre-round board already: the playback then plays forward
+    // from here on unlock, instead of the screen sitting on the settled
+    // board (spoiling the result) and jumping backward at unlock.
+    // Buffers, locks, and history are untouched — playback's own walk
+    // still restores the settled board before planning opens.
+    const pending = hotseatReplayRef.current;
+    if (pending && pending.seat === next) {
+      const startState = matchHistoryRef.current[pending.startIdx];
+      if (startState) {
+        stateRef.current = startState;
+        setGameState(startState);
+      }
+    }
     applyThinkTransition({ type: 'PLANNING_ENTERED', player: next, at: Date.now() });
   }, [applyThinkTransition]);
 
