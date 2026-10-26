@@ -1320,6 +1320,13 @@ const GameApp: React.FC<{ campaignPlaytestLevel: CampaignLevel | null }> = ({ ca
     const current = stateRef.current;
     const s = settingsRef.current;
     if (!s.turnBased || current.phase === 'OVER') return;
+    // Do not re-enter mid-execution: the scheduled chain's own beat
+    // advances the next step. Without this, a network input arriving
+    // during the beat — the guest sends its next input on every tick
+    // receipt — executes a step immediately, and a locked plan plays
+    // out at network speed instead of the 550ms beat. Mid-beat inputs
+    // just sit in the buffer until the beat lands.
+    if (chainPendingRef.current) return;
     const isOnline = playModeRef.current === 'ONLINE_HOST' || playModeRef.current === 'ONLINE_JOIN' || playModeRef.current === 'ONLINE_SERVER';
     const isAuthority = playModeRef.current === 'ONLINE_HOST' || playModeRef.current === 'ONLINE_SERVER';
     if (
