@@ -1602,9 +1602,15 @@ const GameApp: React.FC<{ campaignPlaytestLevel: CampaignLevel | null }> = ({ ca
 
     if (!setLock(who, true)) return;
     if (playModeRef.current === 'ONLINE_JOIN') {
+      // Send the whole locked plan up front. The host's UI hides the
+      // remote queue (Hud "Hidden" + no board path), so this no longer
+      // leaks the plan — and the host can then step at beat pace instead
+      // of waiting one network round trip per move.
       if (buffer.length > 0 && sentTickRef.current !== current.tick) {
         sentTickRef.current = current.tick;
-        networkManager.sendInput(buffer[0], current.tick);
+        for (const entry of buffer) {
+          networkManager.sendInput(entry, current.tick);
+        }
       }
       return;
     }
@@ -1819,9 +1825,12 @@ const GameApp: React.FC<{ campaignPlaytestLevel: CampaignLevel | null }> = ({ ca
     if (!setLock(targetKey)) return;
 
     if (playModeRef.current === 'ONLINE_JOIN') {
+      // Send the whole locked plan up front (see autoLockPlayer).
       if (sentTickRef.current !== current.tick) {
         sentTickRef.current = current.tick;
-        networkManager.sendInput(buf[0], current.tick);
+        for (const entry of buf) {
+          networkManager.sendInput(entry, current.tick);
+        }
       }
       return;
     }
@@ -3218,16 +3227,13 @@ const GameApp: React.FC<{ campaignPlaytestLevel: CampaignLevel | null }> = ({ ca
               if (myRole) {
                 const buf = [...moveBuffersRef.current[myRole]];
                 if (buf.length > 0) {
+                  // Consume the executed move locally only. Do NOT re-send
+                  // here: the whole plan already went to the host at lock
+                  // time, and re-sending the next entry would duplicate it
+                  // in the host's buffer.
                   buf.shift();
                   moveBuffersRef.current = { ...moveBuffersRef.current, [myRole]: buf };
                   setMoveBuffers({ ...moveBuffersRef.current });
-
-                  if (buf.length > 0) {
-                    if (sentTickRef.current !== safeState.tick) {
-                      sentTickRef.current = safeState.tick;
-                      networkManager.sendInput(buf[0], safeState.tick);
-                    }
-                  }
                 }
                 if (moveBuffersRef.current[myRole].length === 0) {
                   commitLocks({ ...locksRef.current, [myRole]: false });
