@@ -2887,11 +2887,16 @@ const GameApp: React.FC<{ campaignPlaytestLevel: CampaignLevel | null }> = ({ ca
   }, [campaignPlaytestLevel]);
 
   const handleMenuAction = useCallback((action: GamepadMenuAction, _slot: 1 | 2) => {
-    // Pause has no gamepad handler of its own, so swallow menu actions
-    // while it is open instead of letting them reach a lobby/settings
-    // handler behind the overlay.
-    if (pauseMenuOpen) return;
+    // While paused, route menu actions to the pause menu's own handler
+    // (D-pad / A / B / Start) instead of a lobby/settings handler behind it.
+    if (pauseMenuOpen) {
+      if (activeHandlerRef.current) activeHandlerRef.current(action);
+      return;
+    }
     lastMenuDeviceRef.current = 'gamepad';
+    // START (+ / Menu / Options, gamepad button 9) toggles pause during a
+    // match, same as P on keyboard. Settings/latency modals keep START
+    // for their own handlers, so they are checked first via isUiActive.
     const isUiActive =
       inLobby ||
       inOnlineLobby ||
@@ -2899,6 +2904,11 @@ const GameApp: React.FC<{ campaignPlaytestLevel: CampaignLevel | null }> = ({ ca
       settingsModalOpen ||
       latencyModalOpen ||
       gameState.phase === 'OVER';
+
+    if (action === 'START' && !isUiActive) {
+      setPauseMenuOpen(true);
+      return;
+    }
 
     if (isUiActive && activeHandlerRef.current) {
       activeHandlerRef.current(action);
@@ -4330,6 +4340,7 @@ const GameApp: React.FC<{ campaignPlaytestLevel: CampaignLevel | null }> = ({ ca
         quitLabel={campaignPlaytestLevel ? 'QUIT TO EDITOR' : 'QUIT TO TITLE SCREEN'}
         settings={settings}
         onUpdateControlSettings={handlePauseControlSettings}
+        onRegisterHandler={(h) => { activeHandlerRef.current = h; }}
       />
 
       {!inLobby && !inOnlineLobby && !replayActive && !activeHitstop && fatalMoveSnakes.length === 0 && (

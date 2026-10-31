@@ -1,5 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { GameSettings } from '../types/game';
+import { GamepadMenuAction } from '../game/gamepad';
+import { soundEngine } from '../audio/soundEngine';
 
 interface PauseMenuProps {
   isOpen: boolean;
@@ -11,6 +13,7 @@ interface PauseMenuProps {
   // match rule, so it must never be broadcast to an online opponent.
   // Callers pass a setter that does NOT call networkManager.updateRoomSettings.
   onUpdateControlSettings: (newSettings: Partial<GameSettings>) => void;
+  onRegisterHandler?: (handler: ((action: GamepadMenuAction) => void) | null) => void;
 }
 
 const CONTROL_TOGGLES = [
@@ -29,14 +32,101 @@ export const PauseMenu: React.FC<PauseMenuProps> = ({
   quitLabel,
   settings,
   onUpdateControlSettings,
+  onRegisterHandler,
 }) => {
   const [quitArmed, setQuitArmed] = useState(false);
+  const [focusIndex, setFocusIndex] = useState(0);
+
+  // Linear focus order, top to bottom: RESUME, the 6 control toggles,
+  // QUIT, and CANCEL once quit is armed. Linear (not grid-aware) so
+  // D-pad up/down and left/right both move one step, wrapping around.
+  const focusIds: string[] = [
+    'resume',
+    ...CONTROL_TOGGLES.map((t) => t.key),
+    'quit',
+    ...(quitArmed ? ['cancel'] : []),
+  ];
 
   useEffect(() => {
-    if (isOpen) setQuitArmed(false);
+    if (isOpen) {
+      setQuitArmed(false);
+      setFocusIndex(0);
+    }
   }, [isOpen]);
 
+  // Disarming quit removes CANCEL from the list; clamp focus back to QUIT.
+  useEffect(() => {
+    if (isOpen && focusIndex >= focusIds.length) {
+      setFocusIndex(focusIds.length - 1);
+    }
+  }, [isOpen, quitArmed, focusIndex, focusIds.length]);
+
+  useEffect(() => {
+    if (!isOpen) return;
+
+    const activate = (id: string) => {
+      if (id === 'resume') {
+        onResume();
+        return;
+      }
+      if (id === 'quit') {
+        if (quitArmed) onQuit();
+        else setQuitArmed(true);
+        return;
+      }
+      if (id === 'cancel') {
+        setQuitArmed(false);
+        return;
+      }
+      const toggle = CONTROL_TOGGLES.find((t) => t.key === id);
+      if (toggle) {
+        const enabled = (settings as any)[toggle.key] !== false;
+        onUpdateControlSettings({ [toggle.key]: !enabled });
+      }
+    };
+
+    const handleAction = (action: GamepadMenuAction) => {
+      if (action === 'UP' || action === 'LEFT') {
+        soundEngine.playMenuMove();
+        setFocusIndex((prev) => (prev > 0 ? prev - 1 : focusIds.length - 1));
+        return;
+      }
+      if (action === 'DOWN' || action === 'RIGHT') {
+        soundEngine.playMenuMove();
+        setFocusIndex((prev) => (prev < focusIds.length - 1 ? prev + 1 : 0));
+        return;
+      }
+      if (action === 'CONFIRM') {
+        soundEngine.playMenuSelect();
+        activate(focusIds[focusIndex]);
+        return;
+      }
+      if (action === 'CANCEL') {
+        soundEngine.playMenuBack();
+        // B backs out of the quit confirmation first, then closes pause.
+        if (quitArmed) setQuitArmed(false);
+        else onResume();
+        return;
+      }
+      // START is the pause toggle itself: pressing it while paused resumes,
+      // same as P on keyboard. It does not confirm the focused item.
+      if (action === 'START') {
+        soundEngine.playMenuBack();
+        onResume();
+        return;
+      }
+    };
+
+    onRegisterHandler?.(handleAction);
+    return () => {
+      onRegisterHandler?.(null);
+    };
+  }, [isOpen, quitArmed, focusIndex, focusIds, settings, onResume, onQuit, onUpdateControlSettings, onRegisterHandler]);
+
   if (!isOpen) return null;
+
+  const focused = (id: string) =>
+    focusIds[focusIndex] === id ? ' ring-4 ring-[#ffffff] scale-[1.01]' : '';
 
   return (
     <div
@@ -51,12 +141,15 @@ export const PauseMenu: React.FC<PauseMenuProps> = ({
           <div className="mt-1 text-[11px] font-bold opacity-80">
             Your moves are blocked until you resume.
           </div>
+          <div className="mt-1 text-[10px] font-bold opacity-70">
+            Gamepad: D-pad to move, A to pick, B to go back, Start to resume.
+          </div>
         </div>
 
         <button
           type="button"
           onClick={onResume}
-          className="w-full cursor-pointer py-3 bg-[#0F380F] text-[#9BBC0F] font-black text-base border-2 border-[#0F380F] shadow-[3px_3px_0px_#306230] active:translate-x-[2px] active:translate-y-[2px] active:shadow-none"
+          className={`w-full cursor-pointer py-3 bg-[#0F380F] text-[#9BBC0F] font-black text-base border-2 border-[#0F380F] shadow-[3px_3px_0px_#306230] active:translate-x-[2px] active:translate-y-[2px] active:shadow-none${focused('resume')}`}
         >
           RESUME
         </button>
@@ -73,7 +166,7 @@ export const PauseMenu: React.FC<PauseMenuProps> = ({
                   onClick={() => onUpdateControlSettings({ [key]: !enabled })}
                   className={`min-h-[44px] py-2 px-2 border border-[#0F380F] font-black flex items-center justify-between cursor-pointer ${
                     enabled ? 'bg-[#0F380F] text-[#9BBC0F]' : 'bg-[#9BBC0F] text-[#0F380F]'
-                  }`}
+                  }${focused(key)}`}
                 >
                   <span>{label}</span>
                   <span>{enabled ? 'ON' : 'OFF'}</span>
@@ -94,7 +187,7 @@ export const PauseMenu: React.FC<PauseMenuProps> = ({
           }}
           className={`w-full cursor-pointer py-3 font-black text-base border-2 border-[#0F380F] ${
             quitArmed ? 'bg-red-700 text-white' : 'bg-[#9BBC0F] text-[#0F380F]'
-          }`}
+          }${focused('quit')}`}
         >
           {quitArmed ? 'QUIT MATCH — ARE YOU SURE?' : quitLabel}
         </button>
@@ -102,7 +195,7 @@ export const PauseMenu: React.FC<PauseMenuProps> = ({
           <button
             type="button"
             onClick={() => setQuitArmed(false)}
-            className="w-full cursor-pointer py-2 bg-[#8BAC0F] text-[#0F380F] font-black text-sm border-2 border-[#0F380F]"
+            className={`w-full cursor-pointer py-2 bg-[#8BAC0F] text-[#0F380F] font-black text-sm border-2 border-[#0F380F]${focused('cancel')}`}
           >
             CANCEL
           </button>
