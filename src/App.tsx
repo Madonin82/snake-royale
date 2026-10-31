@@ -55,6 +55,7 @@ import { LobbyView } from './components/LobbyView';
 import { OnlineRoomLobby } from './components/OnlineRoomLobby';
 import { LatencyHarnessModal } from './components/LatencyHarnessModal';
 import { SettingsModal } from './components/SettingsModal';
+import { PauseMenu } from './components/PauseMenu';
 import { MatchEndModal } from './components/MatchEndModal';
 import { ControlsOverlay } from './components/ControlsOverlay';
 import { ReplayControls } from './components/ReplayControls';
@@ -525,6 +526,9 @@ const GameApp: React.FC<{ campaignPlaytestLevel: CampaignLevel | null }> = ({ ca
   const realTimeInputBufferRef = useRef<Record<string, Direction[]>>({});
   const [latencyModalOpen, setLatencyModalOpen] = useState<boolean>(false);
   const [settingsModalOpen, setSettingsModalOpen] = useState<boolean>(false);
+  const [pauseMenuOpen, setPauseMenuOpen] = useState<boolean>(false);
+  const pauseMenuOpenRef = useRef<boolean>(false);
+  pauseMenuOpenRef.current = pauseMenuOpen;
   const [latencyReport, setLatencyReport] = useState<LatencyReport>(() => networkManager.getLatencyReport());
   const [gamepadCount, setGamepadCount] = useState<number>(0);
   const [isNintendoController, setIsNintendoController] = useState<boolean>(false);
@@ -549,6 +553,16 @@ const GameApp: React.FC<{ campaignPlaytestLevel: CampaignLevel | null }> = ({ ca
       setGameOverConfirmed(false);
     }
   }, [gameState.phase, inLobby, inOnlineLobby]);
+
+  // Pause only exists inside a live match. Close it when the match ends
+  // or the lobby returns, so it can never reopen on the next match
+  // from stale state. (Replay only starts after a match is OVER, which
+  // is already covered here.)
+  useEffect(() => {
+    if (inLobby || inOnlineLobby || gameState.phase === 'OVER') {
+      setPauseMenuOpen(false);
+    }
+  }, [inLobby, inOnlineLobby, gameState.phase]);
 
   // Optional display name + room seat names + series score
   const [displayName, setDisplayName] = useState<string>(() => {
@@ -993,6 +1007,7 @@ const GameApp: React.FC<{ campaignPlaytestLevel: CampaignLevel | null }> = ({ ca
 
   const handleSkillButton = useCallback((playerSlot: 1 | 2) => {
     const current = stateRef.current;
+    if (pauseMenuOpenRef.current) return;
     if (current.phase === 'OVER' || inLobby || inOnlineLobby) return;
     const targetKey = getTargetKey(playerSlot);
     if (hotseatBlocksInput(targetKey)) return;
@@ -1655,10 +1670,14 @@ const GameApp: React.FC<{ campaignPlaytestLevel: CampaignLevel | null }> = ({ ca
       const mode = playModeRef.current;
       const ready = current.readyConfirmed;
       const isOnline = mode === 'ONLINE_HOST' || mode === 'ONLINE_JOIN' || mode === 'ONLINE_SERVER';
+      // Paused: the think timer stops. The interval's clearCountdown
+      // path then resets it, so a player gets a fresh think window on
+      // resume instead of auto-locking mid-pause.
       const matchActive =
         !inLobby &&
         !inOnlineLobby &&
         !replayActive &&
+        !pauseMenuOpenRef.current &&
         Date.now() >= hitstopUntilRef.current &&
         current.phase !== 'OVER' &&
         (!isOnline || (ready?.p1 && ready?.p2));
@@ -1751,6 +1770,7 @@ const GameApp: React.FC<{ campaignPlaytestLevel: CampaignLevel | null }> = ({ ca
 
   const handleBufferUndo = useCallback((playerSlot: 1 | 2) => {
     const current = stateRef.current;
+    if (pauseMenuOpenRef.current) return;
     if (current.phase === 'OVER' || inLobby || inOnlineLobby) return;
     const targetKey = getTargetKey(playerSlot);
     if (hotseatBlocksInput(targetKey)) return;
@@ -1779,6 +1799,7 @@ const GameApp: React.FC<{ campaignPlaytestLevel: CampaignLevel | null }> = ({ ca
 
   const handleBufferClear = useCallback((playerSlot: 1 | 2) => {
     const current = stateRef.current;
+    if (pauseMenuOpenRef.current) return;
     if (current.phase === 'OVER' || inLobby || inOnlineLobby || !settingsRef.current.turnBased) return;
     const targetKey = getTargetKey(playerSlot);
     if (hotseatBlocksInput(targetKey)) return;
@@ -1804,6 +1825,7 @@ const GameApp: React.FC<{ campaignPlaytestLevel: CampaignLevel | null }> = ({ ca
     bridgeSeat?: 'p1' | 'p2',
   ) => {
     const current = stateRef.current;
+    if (pauseMenuOpenRef.current) return;
     if (current.phase === 'OVER' || inLobby || inOnlineLobby || !settingsRef.current.turnBased) return;
     const targetKey = getTargetKey(playerSlot, bridgeSeat);
     if (hotseatBlocksInput(targetKey)) return;
@@ -1851,6 +1873,7 @@ const GameApp: React.FC<{ campaignPlaytestLevel: CampaignLevel | null }> = ({ ca
     bridgeSeat?: 'p1' | 'p2',
   ): boolean => {
     const current = stateRef.current;
+    if (pauseMenuOpenRef.current) return false;
     if (current.phase === 'OVER' || inLobby || inOnlineLobby) return false;
     if (playModeRef.current === 'ONLINE_SERVER' || playModeRef.current === 'ONLINE_SPECTATOR') return false;
     if (playModeRef.current === 'ONLINE_HOST' && !joinerAcknowledgedMatchStartRef.current) return false;
@@ -2798,6 +2821,14 @@ const GameApp: React.FC<{ campaignPlaytestLevel: CampaignLevel | null }> = ({ ca
     });
   }, []);
 
+  // Pause-menu control changes are local-only, unlike handleUpdateSettings:
+  // a gesture preference is per-device, so it must not be broadcast to an
+  // online opponent (who would otherwise adopt the host's gestures).
+  // The existing save effect still persists it locally, except in playtests.
+  const handlePauseControlSettings = useCallback((newVals: Partial<GameSettings>) => {
+    setSettings(prev => ({ ...prev, ...newVals }));
+  }, []);
+
   const adoptRoomSettings = useCallback((roomSettings: Partial<GameSettings>) => {
     setSettings(prev => ({
       ...prev,
@@ -2849,13 +2880,23 @@ const GameApp: React.FC<{ campaignPlaytestLevel: CampaignLevel | null }> = ({ ca
     setInOnlineLobby(false);
     setReplayActive(false);
     setSettingsModalOpen(false);
+    setPauseMenuOpen(false);
     setLatencyModalOpen(false);
     turnDecisionsRef.current = [];
     agentDrivenRef.current = { p1: false, p2: false };
   }, [campaignPlaytestLevel]);
 
   const handleMenuAction = useCallback((action: GamepadMenuAction, _slot: 1 | 2) => {
+    // While paused, route menu actions to the pause menu's own handler
+    // (D-pad / A / B / Start) instead of a lobby/settings handler behind it.
+    if (pauseMenuOpen) {
+      if (activeHandlerRef.current) activeHandlerRef.current(action);
+      return;
+    }
     lastMenuDeviceRef.current = 'gamepad';
+    // START (+ / Menu / Options, gamepad button 9) toggles pause during a
+    // match, same as P on keyboard. Settings/latency modals keep START
+    // for their own handlers, so they are checked first via isUiActive.
     const isUiActive =
       inLobby ||
       inOnlineLobby ||
@@ -2864,10 +2905,15 @@ const GameApp: React.FC<{ campaignPlaytestLevel: CampaignLevel | null }> = ({ ca
       latencyModalOpen ||
       gameState.phase === 'OVER';
 
+    if (action === 'START' && !isUiActive) {
+      setPauseMenuOpen(true);
+      return;
+    }
+
     if (isUiActive && activeHandlerRef.current) {
       activeHandlerRef.current(action);
     }
-  }, [inLobby, inOnlineLobby, replayActive, settingsModalOpen, latencyModalOpen, gameState.phase]);
+  }, [inLobby, inOnlineLobby, replayActive, settingsModalOpen, latencyModalOpen, gameState.phase, pauseMenuOpen]);
 
   // Gamepad controller listener setup (run once)
   useEffect(() => {
@@ -2924,10 +2970,18 @@ const GameApp: React.FC<{ campaignPlaytestLevel: CampaignLevel | null }> = ({ ca
         inOnlineLobby ||
         settingsModalOpen ||
         latencyModalOpen ||
+        pauseMenuOpen ||
         (gameState.phase === 'OVER' && !activeHitstopRef.current && fatalMoveSnakesRef.current.length === 0) ||
         replayActive;
 
       if (isInMenuOrModal) {
+        // Pause closes on P or Escape, and never falls through to the
+        // in-game Escape = clear-buffer handler below.
+        if (pauseMenuOpen && (e.key === 'Escape' || e.key === 'p' || e.key === 'P')) {
+          setPauseMenuOpen(false);
+          e.preventDefault();
+          return;
+        }
         lastMenuDeviceRef.current = 'keyboard';
         if (e.key === 'Escape') {
           handleMenuAction('CANCEL', 1);
@@ -2984,6 +3038,13 @@ const GameApp: React.FC<{ campaignPlaytestLevel: CampaignLevel | null }> = ({ ca
       }
 
       // In-Game buffer / snake controls
+      // P opens pause. Escape stays as clear-buffer in-game, so it is
+      // NOT the pause key — that would change existing behavior.
+      if (e.code === 'KeyP') {
+        setPauseMenuOpen(true);
+        e.preventDefault();
+        return;
+      }
       if (e.code === 'KeyE') {
         handleSkillButton(1);
         e.preventDefault();
@@ -3081,6 +3142,7 @@ const GameApp: React.FC<{ campaignPlaytestLevel: CampaignLevel | null }> = ({ ca
     inOnlineLobby,
     settingsModalOpen,
     latencyModalOpen,
+    pauseMenuOpen,
     gameState.phase,
     replayActive,
   ]);
@@ -3915,6 +3977,15 @@ const GameApp: React.FC<{ campaignPlaytestLevel: CampaignLevel | null }> = ({ ca
         </div>
 
         <div className="flex items-center gap-2">
+          {!inLobby && !inOnlineLobby && gameState.phase !== 'OVER' && !replayActive && (
+            <button
+              onClick={() => setPauseMenuOpen(true)}
+              className="px-1.5 py-0.5 bg-[#9BBC0F] hover:bg-[#0F380F] hover:text-[#9BBC0F] border border-[#0F380F] cursor-pointer"
+              title="Pause (P)"
+            >
+              PAUSE
+            </button>
+          )}
           <button
             onClick={() => {
               const next = !settings.soundEnabled;
@@ -4259,6 +4330,16 @@ const GameApp: React.FC<{ campaignPlaytestLevel: CampaignLevel | null }> = ({ ca
         settings={settings}
         onUpdateSettings={handleUpdateSettings}
         isOnlineGuest={!inLobby && (playMode === 'ONLINE_JOIN' || playMode === 'ONLINE_SPECTATOR')}
+        onRegisterHandler={(h) => { activeHandlerRef.current = h; }}
+      />
+
+      <PauseMenu
+        isOpen={pauseMenuOpen && !inLobby && !inOnlineLobby && gameState.phase !== 'OVER' && !replayActive}
+        onResume={() => setPauseMenuOpen(false)}
+        onQuit={handleReturnToLobby}
+        quitLabel={campaignPlaytestLevel ? 'QUIT TO EDITOR' : 'QUIT TO TITLE SCREEN'}
+        settings={settings}
+        onUpdateControlSettings={handlePauseControlSettings}
         onRegisterHandler={(h) => { activeHandlerRef.current = h; }}
       />
 
