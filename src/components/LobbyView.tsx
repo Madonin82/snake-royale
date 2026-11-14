@@ -10,6 +10,8 @@ interface LobbyViewProps {
   onStartSolo: (difficulty: 'EASY' | 'MEDIUM' | 'HARD') => void;
   onStartLocal2P: () => void;
   onStartHotseat: () => void;
+  onStartLocal2PBridge?: () => void;
+  isAdmin?: boolean;
   onCreateOnlineRoom: (customLevel?: CampaignLevel | null) => void;
   onCreateServerRoom: (customLevel?: CampaignLevel | null) => void;
   onSpectateRoom: (roomCode: string) => void;
@@ -34,11 +36,14 @@ interface LobbyViewProps {
 }
 
 type ScreenId = 'MAIN' | 'SOLO' | 'VERSUS' | 'ONLINE' | 'SETTINGS';
+type VersusMode = 'simultaneous' | 'hotseat' | 'simultaneous_ai' | 'hotseat_ai';
 
 export const LobbyView: React.FC<LobbyViewProps> = ({
   onStartSolo,
   onStartLocal2P,
   onStartHotseat,
+  onStartLocal2PBridge,
+  isAdmin = false,
   onCreateOnlineRoom,
   onCreateServerRoom,
   onSpectateRoom,
@@ -64,11 +69,39 @@ export const LobbyView: React.FC<LobbyViewProps> = ({
   const [screen, setScreen] = useState<ScreenId>(initialRoom ? 'ONLINE' : 'MAIN');
   const [difficulty, setDifficulty] = useState<'EASY' | 'MEDIUM' | 'HARD'>(settings.botDifficulty || 'MEDIUM');
   // VERSUS mode: 'simultaneous' = existing local 2P (both plan at once),
-  // 'hotseat' = pass-the-phone unlock-to-move.
-  const [versusMode, setVersusMode] = useState<'simultaneous' | 'hotseat'>('simultaneous');
+  // 'hotseat' = pass-the-phone unlock-to-move, plus admin-gated AI modes.
+  const [versusMode, setVersusMode] = useState<VersusMode>('simultaneous');
   const [roomInput, setRoomInput] = useState(initialRoom);
   const [focusIndex, setFocusIndex] = useState<number>(0);
   const [levelLoadError, setLevelLoadError] = useState<string | null>(null);
+  const versusModes: VersusMode[] = isAdmin
+    ? ['simultaneous', 'hotseat', 'simultaneous_ai', 'hotseat_ai']
+    : ['simultaneous', 'hotseat'];
+
+  useEffect(() => {
+    if (!isAdmin && (versusMode === 'simultaneous_ai' || versusMode === 'hotseat_ai')) {
+      setVersusMode(versusMode === 'hotseat_ai' ? 'hotseat' : 'simultaneous');
+    }
+  }, [isAdmin, versusMode]);
+
+  const cycleVersusMode = (dir: 1 | -1) => {
+    setVersusMode(prev => {
+      const idx = versusModes.indexOf(prev);
+      const curIdx = idx === -1 ? 0 : idx;
+      return versusModes[(curIdx + dir + versusModes.length) % versusModes.length];
+    });
+  };
+
+  const launchVersusMode = () => {
+    if (versusMode === 'hotseat_ai') {
+      soundEngine.playDenied();
+      return;
+    }
+    soundEngine.playMenuSelect();
+    if (versusMode === 'hotseat') onStartHotseat();
+    else if (versusMode === 'simultaneous_ai') onStartLocal2PBridge?.();
+    else onStartLocal2P();
+  };
 
   const nameInputRef = useRef<HTMLInputElement>(null);
   const p1InputRef = useRef<HTMLInputElement>(null);
@@ -216,9 +249,7 @@ export const LobbyView: React.FC<LobbyViewProps> = ({
           soundEngine.playMenuSelect();
           onStartSolo(difficulty);
         } else if (screen === 'VERSUS') {
-          soundEngine.playMenuSelect();
-          if (versusMode === 'hotseat') onStartHotseat();
-          else onStartLocal2P();
+          launchVersusMode();
         } else if (screen === 'ONLINE') {
           if (roomInput.trim()) handleJoin();
           else {
@@ -261,7 +292,7 @@ export const LobbyView: React.FC<LobbyViewProps> = ({
         if (screen === 'VERSUS') {
           if (currentItem === 'MODE') {
             soundEngine.playMenuMove();
-            setVersusMode(prev => prev === 'hotseat' ? 'simultaneous' : 'hotseat');
+            cycleVersusMode(dir);
             return;
           }
         }
@@ -314,11 +345,9 @@ export const LobbyView: React.FC<LobbyViewProps> = ({
             p2InputRef.current?.focus();
           } else if (currentItem === 'MODE') {
             soundEngine.playMenuSelect();
-            setVersusMode(prev => prev === 'hotseat' ? 'simultaneous' : 'hotseat');
+            cycleVersusMode(1);
           } else if (currentItem === 'START_VERSUS') {
-            soundEngine.playMenuSelect();
-            if (versusMode === 'hotseat') onStartHotseat();
-            else onStartLocal2P();
+            launchVersusMode();
           }
           return;
         }
@@ -382,13 +411,26 @@ export const LobbyView: React.FC<LobbyViewProps> = ({
     currentItem,
     items,
     difficulty,
+    versusMode,
+    isAdmin,
     roomInput,
     settings,
+    onStartLocal2P,
+    onStartHotseat,
+    onStartLocal2PBridge,
     onRegisterHandler,
   ]);
 
   const thinkTimeLabel =
     settings.thinkTimeSeconds === null ? 'INFINITE' : `${settings.thinkTimeSeconds}S`;
+  const versusModeLabel =
+    versusMode === 'hotseat'
+      ? 'HOTSEAT (PASS PHONE)'
+      : versusMode === 'simultaneous_ai'
+        ? 'SAME SCREEN vs AI'
+        : versusMode === 'hotseat_ai'
+          ? 'HOTSEAT vs AI'
+          : 'SAME SCREEN (BOTH AT ONCE)';
 
   return (
     <div className="mobile-scroll-panel w-full max-w-[460px] md:max-w-[560px] [@media(orientation:landscape)]:max-w-[560px] max-h-full bg-[#9BBC0F] border-4 border-[#0F380F] shadow-[8px_8px_0px_#0F380F] [@media(max-height:500px)]:shadow-[4px_4px_0px_#0F380F] text-[#0F380F] p-3 sm:p-4 [@media(max-height:500px)]:p-2 font-mono select-none flex flex-col justify-between gap-2.5 [@media(max-height:500px)]:gap-1.5 overflow-hidden">
@@ -765,6 +807,22 @@ export const LobbyView: React.FC<LobbyViewProps> = ({
                   <span className="font-bold text-[#0F380F]">HOTSEAT:</span>
                   <div>One shared control set — pass the phone. Tap head to lock / unlock. Optional 2-digit PIN.</div>
                 </div>
+              ) : versusMode === 'hotseat_ai' ? (
+                <div className="col-span-2">
+                  <span className="font-bold text-[#0F380F]">HOTSEAT vs AI (COMING SOON):</span>
+                  <div>Hotseat AI bridge is pending hotseat fixes and is not playable yet.</div>
+                </div>
+              ) : versusMode === 'simultaneous_ai' ? (
+                <>
+                  <div>
+                    <span className="font-bold text-[#0F380F]">PLAYER 1:</span>
+                    <div>WASD / Touch / Gamepad 1</div>
+                  </div>
+                  <div>
+                    <span className="font-bold text-[#306230]">PLAYER 2 (AI):</span>
+                    <div>RTDB Bridge + Arrows / Gamepad 2</div>
+                  </div>
+                </>
               ) : (
                 <>
                   <div>
@@ -783,7 +841,7 @@ export const LobbyView: React.FC<LobbyViewProps> = ({
               type="button"
               onClick={() => {
                 soundEngine.playMenuSelect();
-                setVersusMode(prev => prev === 'hotseat' ? 'simultaneous' : 'hotseat');
+                cycleVersusMode(1);
               }}
               onMouseEnter={() => setFocusIndex(3)}
               className={`w-full py-2 [@media(max-height:500px)]:py-1.5 border-2 border-[#0F380F] font-black text-xs flex items-center justify-between gap-2 cursor-pointer transition-colors px-3 ${
@@ -796,18 +854,15 @@ export const LobbyView: React.FC<LobbyViewProps> = ({
                 {currentItem === 'MODE' && <span className="animate-pulse">►</span>}
                 <span>MODE</span>
               </span>
-              <span className="font-black">&larr; {versusMode === 'hotseat' ? 'HOTSEAT (PASS PHONE)' : 'SAME SCREEN (BOTH AT ONCE)'} &rarr;</span>
+              <span className="font-black">&larr; {versusModeLabel} &rarr;</span>
             </button>
 
             <button
               type="button"
-              onClick={() => {
-                soundEngine.playMenuSelect();
-                if (versusMode === 'hotseat') onStartHotseat();
-                else onStartLocal2P();
-              }}
+              onClick={launchVersusMode}
+              disabled={versusMode === 'hotseat_ai'}
               onMouseEnter={() => setFocusIndex(4)}
-              className={`w-full py-3 [@media(max-height:500px)]:py-2 mt-1 [@media(max-height:500px)]:mt-0.5 border-2 border-[#0F380F] font-black text-sm [@media(max-height:500px)]:text-xs flex items-center justify-center gap-2 cursor-pointer transition-all shadow-[3px_3px_0px_#0F380F] ${
+              className={`w-full py-3 [@media(max-height:500px)]:py-2 mt-1 [@media(max-height:500px)]:mt-0.5 border-2 border-[#0F380F] font-black text-sm [@media(max-height:500px)]:text-xs flex items-center justify-center gap-2 cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed transition-all shadow-[3px_3px_0px_#0F380F] ${
                 currentItem === 'START_VERSUS'
                   ? 'bg-[#0F380F] text-[#9BBC0F] ring-4 ring-[#0F380F] scale-[1.01]'
                   : 'bg-[#0F380F] hover:bg-[#306230] text-[#9BBC0F]'

@@ -15,7 +15,7 @@ type MessageHandler = (data: any) => void;
 
 const BRIDGE_SECRET_ALPHABET = 'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnpqrstuvwxyz23456789';
 
-function generateBridgeSecret(): string {
+export function generateBridgeSecret(): string {
   const secret: string[] = [];
   const randomValues = new Uint8Array(16);
   const maxUnbiasedByte = Math.floor(256 / BRIDGE_SECRET_ALPHABET.length) * BRIDGE_SECRET_ALPHABET.length;

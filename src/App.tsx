@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { BufferEntry, CompactGameState, Direction, GameSettings, GameState, LatencyReport, PlayMode, Position, RattleWall, SkillId } from './types/game';
 import { onAuthStateChanged, User } from 'firebase/auth';
-import { onValue, ref } from 'firebase/database';
+import { onValue, ref, remove, set } from 'firebase/database';
 import {
   createInitialState,
   DEFAULT_SETTINGS,
@@ -23,7 +23,7 @@ import { cloneGameState, toCompactGameState } from './game/aiBridge';
 import { shouldApplyRtdbBridgeCommand } from './game/aiBridgeRtdb';
 import { computeVirtualHead, findBfsPath, findFallbackBfsPath, resolveDominantDirection } from './game/mousePathfinding';
 import { gamepadController, GamepadMenuAction } from './game/gamepad';
-import { networkManager } from './game/network';
+import { generateBridgeSecret, networkManager } from './game/network';
 import { ADMIN_UIDS, auth, rtdb } from './firebase';
 import {
   areBothOnlinePlayersReady,
@@ -68,7 +68,7 @@ import {
   getCampaignPlaytestSettings,
   getMultiplayerCustomLevelSettings,
 } from './editor/playtestSession';
-import { ArrowLeft, Volume2, VolumeX } from 'lucide-react';
+import { ArrowLeft, Check, Copy, Play, Volume2, VolumeX } from 'lucide-react';
 
 export function computePreviewPlan(
   snake: any,
@@ -433,15 +433,22 @@ export const App: React.FC = () => {
     );
   }
 
+  const isAdmin = Boolean(
+    signedInUser &&
+    !signedInUser.isAnonymous &&
+    ADMIN_UIDS.includes(signedInUser.uid),
+  );
+
   return (
     <GameApp
       key={campaignPlaytestLevel ? `playtest-${campaignPlaytestLevel.id}-${campaignPlaytestLevel.spawns.length}` : 'default'}
       campaignPlaytestLevel={campaignPlaytestLevel}
+      isAdmin={isAdmin}
     />
   );
 };
 
-const GameApp: React.FC<{ campaignPlaytestLevel: CampaignLevel | null }> = ({ campaignPlaytestLevel }) => {
+const GameApp: React.FC<{ campaignPlaytestLevel: CampaignLevel | null; isAdmin?: boolean }> = ({ campaignPlaytestLevel, isAdmin = false }) => {
   const aiMode = useMemo(() => new URLSearchParams(window.location.search).get('ai') === '1', []);
   const initialRoomParam = useMemo(() => new URLSearchParams(window.location.search).get('room') || '', []);
   useEffect(() => {
@@ -489,6 +496,15 @@ const GameApp: React.FC<{ campaignPlaytestLevel: CampaignLevel | null }> = ({ ca
   const [onlineRoomId, setOnlineRoomId] = useState<string>('');
   const [bridgeSecret, setBridgeSecret] = useState<string | null>(null);
   const [onlineRole, setOnlineRole] = useState<'p1' | 'p2' | 'spectator' | 'server' | null>(null);
+  const [localBridgeArmed, setLocalBridgeArmed] = useState<boolean>(false);
+  const localBridgeArmedRef = useRef<boolean>(false);
+  const [localBridgeRoomId, setLocalBridgeRoomId] = useState<string>('');
+  const localBridgeRoomIdRef = useRef<string>('');
+  const [localBridgeSecret, setLocalBridgeSecret] = useState<string | null>(null);
+  const [localBridgeReadyPending, setLocalBridgeReadyPending] = useState<boolean>(false);
+  const [localBridgeArming, setLocalBridgeArming] = useState<boolean>(false);
+  const [localRoomCopied, setLocalRoomCopied] = useState<boolean>(false);
+  const [localSecretCopied, setLocalSecretCopied] = useState<boolean>(false);
   const [customOnlineLevel, setCustomOnlineLevel] = useState<CampaignLevel | null>(null);
   const customOnlineLevelRef = useRef<CampaignLevel | null>(null);
   customOnlineLevelRef.current = customOnlineLevel;
@@ -746,6 +762,8 @@ const GameApp: React.FC<{ campaignPlaytestLevel: CampaignLevel | null }> = ({ ca
   const lastStateRevisionRef = useRef<number>(-1);
   const lastInputSequenceRef = useRef<{ p1: number; p2: number }>({ p1: 0, p2: 0 });
   const lastBridgeCommandSequencesRef = useRef<Record<string, { matchId: string; seq: number }>>({});
+  const localMatchNumberRef = useRef<number>(0);
+  const localStateRevisionRef = useRef<number>(0);
   const startNewMatchRef = useRef<() => void>(() => {});
   // BUGFIX 7: tracks the last STATE_SYNC tick processed on the guest so the
   // buffer drain runs exactly once per completed step. Duplicate, stale, or
@@ -892,6 +910,50 @@ const GameApp: React.FC<{ campaignPlaytestLevel: CampaignLevel | null }> = ({ ca
 
   const bridgeSeatRef = useRef<'p1' | 'p2'>('p1');
   const soloAiP2OverriddenRef = useRef(false);
+
+  const publishLocalBridgeState = useCallback((state: GameState, currentLocks: Record<string, boolean>) => {
+    const roomId = localBridgeRoomIdRef.current;
+    const match = activeMatchRef.current;
+    if (!localBridgeArmedRef.current || !roomId || !match) return;
+
+    const stateRevision = ++localStateRevisionRef.current;
+    const updatedAt = Date.now();
+    // Buffers stay hidden; only locks go out (identical to NetworkManager.broadcastState).
+    const stateRefPath = ref(rtdb, `rooms/${roomId}/state/current`);
+    set(stateRefPath, {
+      matchId: match.matchId,
+      matchNumber: match.matchNumber,
+      stateRevision,
+      state,
+      locks: currentLocks,
+      tick: state.tick,
+      updatedAt,
+    }).catch(error => {
+      console.warn(`Writing local bridge state to RTDB: ${error instanceof Error ? error.message : String(error)}`);
+    });
+  }, []);
+
+  const teardownLocalBridge = useCallback(() => {
+    const roomId = localBridgeRoomIdRef.current;
+    const wasArmed = localBridgeArmedRef.current || Boolean(roomId);
+    localBridgeArmedRef.current = false;
+    setLocalBridgeArmed(false);
+    setLocalBridgeReadyPending(false);
+    localBridgeRoomIdRef.current = '';
+    setLocalBridgeRoomId('');
+    setLocalBridgeSecret(null);
+    localMatchNumberRef.current = 0;
+    localStateRevisionRef.current = 0;
+    if (wasArmed) {
+      activeMatchRef.current = null;
+      bridgeSeatRef.current = 'p1';
+    }
+    if (roomId) {
+      remove(ref(rtdb, `bridgeSecrets/${roomId}`)).catch(() => {});
+      remove(ref(rtdb, `rooms/${roomId}`)).catch(() => {});
+    }
+  }, []);
+
   const dispatchAiState = useCallback((state: GameState = stateRef.current) => {
     window.dispatchEvent(new CustomEvent<GameState>('snake-ai-state', {
       detail: cloneGameState(state, state.gridSize ?? settingsRef.current.gridSize),
@@ -1188,6 +1250,8 @@ const GameApp: React.FC<{ campaignPlaytestLevel: CampaignLevel | null }> = ({ ca
     }
     if (playModeRef.current === 'ONLINE_HOST' || playModeRef.current === 'ONLINE_SERVER') {
       networkManager.broadcastState(stateRef.current, locksRef.current);
+    } else if (playModeRef.current === 'LOCAL_2P' && localBridgeArmedRef.current) {
+      publishLocalBridgeState(stateRef.current, locksRef.current);
     }
     turnDecisionsRef.current.push({
       tick: stateRef.current.tick,
@@ -1197,7 +1261,7 @@ const GameApp: React.FC<{ campaignPlaytestLevel: CampaignLevel | null }> = ({ ca
       autoLock: isAuto,
     });
     return true;
-  }, [commitLocks]);
+  }, [commitLocks, publishLocalBridgeState]);
 
   const clearLocks = useCallback(() => {
     const playerIds = stateRef.current.snakes.map(snake => snake.id);
@@ -1547,6 +1611,8 @@ const GameApp: React.FC<{ campaignPlaytestLevel: CampaignLevel | null }> = ({ ca
 
     if (playModeRef.current === 'ONLINE_HOST' || playModeRef.current === 'ONLINE_SERVER') {
       networkManager.broadcastState(nextState, nextLocks);
+    } else if (playModeRef.current === 'LOCAL_2P' && localBridgeArmedRef.current) {
+      publishLocalBridgeState(nextState, nextLocks);
     }
 
     const openNextLockPhase = () => {
@@ -1610,7 +1676,7 @@ const GameApp: React.FC<{ campaignPlaytestLevel: CampaignLevel | null }> = ({ ca
       locksRef.current = nextLocks;
       setLocks(nextLocks);
     }
-  }, [aiMode, applyThinkTransition, campaignPlaytestLevel, commitLocks, dispatchAiState, isBuiltInAiActive, playTickEvents, triggerHitstop]);
+  }, [aiMode, applyThinkTransition, campaignPlaytestLevel, commitLocks, dispatchAiState, isBuiltInAiActive, playTickEvents, publishLocalBridgeState, triggerHitstop]);
 
   // Kick off AI planning at the start of turn-based solo/playtest matches so
   // bot cards immediately lock their initial plan and only active thinkers
@@ -1695,6 +1761,7 @@ const GameApp: React.FC<{ campaignPlaytestLevel: CampaignLevel | null }> = ({ ca
       const matchActive =
         !inLobby &&
         !inOnlineLobby &&
+        !localBridgeReadyPending &&
         !replayActive &&
         Date.now() >= hitstopUntilRef.current &&
         current.phase !== 'OVER' &&
@@ -1779,6 +1846,7 @@ const GameApp: React.FC<{ campaignPlaytestLevel: CampaignLevel | null }> = ({ ca
     autoLockPlayer,
     inLobby,
     inOnlineLobby,
+    localBridgeReadyPending,
     onlineRole,
     replayActive,
     settings.thinkTimeSeconds,
@@ -2174,14 +2242,14 @@ const GameApp: React.FC<{ campaignPlaytestLevel: CampaignLevel | null }> = ({ ca
 
   // When a match starts, if mouse was last used in menus, assign to P1; otherwise first board click claims P1
   useEffect(() => {
-    if (!inLobby && !inOnlineLobby && gameState.phase !== 'OVER') {
+    if (!inLobby && !inOnlineLobby && !localBridgeReadyPending && gameState.phase !== 'OVER') {
       hasClaimedMouseRef.current = false;
       if (lastMenuDeviceRef.current === 'mouse') {
         setMouseSeat('p1');
         hasClaimedMouseRef.current = true;
       }
     }
-  }, [inLobby, inOnlineLobby, gameState.phase]);
+  }, [inLobby, inOnlineLobby, localBridgeReadyPending, gameState.phase]);
 
   const getMouseTarget = useCallback((): { slot: 1 | 2; seat: 'p1' | 'p2' } => {
     if (playModeRef.current === 'LOCAL_2P') {
@@ -2789,6 +2857,50 @@ const GameApp: React.FC<{ campaignPlaytestLevel: CampaignLevel | null }> = ({ ca
     return unsubscribe;
   }, [getBridgeSeat, lockBridgeSeat, onlineRole, onlineRoomId, playMode, queueBridgeMoves]);
 
+  useEffect(() => {
+    if (
+      playMode !== 'LOCAL_2P' ||
+      !localBridgeArmed ||
+      !localBridgeRoomId ||
+      localBridgeReadyPending
+    ) return;
+
+    // Local bridge: single tab holds both seats and is the sole writer of state/current
+    // and applier of bridge commands, so there is no reload-rejoin recovery path for local;
+    // if local state ever wedges, abandon and restart from the VERSUS screen.
+    const commandPath = `bridges/${localBridgeRoomId}/p2`;
+    const commandRef = ref(rtdb, commandPath);
+    const unsubscribe = onValue(
+      commandRef,
+      snapshot => {
+        const command = snapshot.val();
+        const lastAppliedEntry = lastBridgeCommandSequencesRef.current[commandPath];
+        const lastAppliedSeq = lastAppliedEntry?.matchId === command?.matchId ? lastAppliedEntry.seq : -1;
+        if (!shouldApplyRtdbBridgeCommand(command, activeMatchRef.current?.matchId ?? null, lastAppliedSeq)) {
+          return;
+        }
+
+        agentDrivenRef.current.p2 = true;
+        if (command.moves) queueBridgeMoves(command.moves);
+        if (command.lock) lockBridgeSeat();
+        lastBridgeCommandSequencesRef.current[commandPath] = { matchId: command.matchId, seq: command.seq };
+      },
+      error => console.error(`AI bridge RTDB listener failed for ${commandPath}:`, error),
+    );
+
+    return unsubscribe;
+  }, [localBridgeArmed, localBridgeReadyPending, localBridgeRoomId, lockBridgeSeat, playMode, queueBridgeMoves]);
+
+  useEffect(() => {
+    return () => {
+      const roomId = localBridgeRoomIdRef.current;
+      if (roomId) {
+        remove(ref(rtdb, `bridgeSecrets/${roomId}`)).catch(() => {});
+        remove(ref(rtdb, `rooms/${roomId}`)).catch(() => {});
+      }
+    };
+  }, []);
+
   const selectBridgeSeat = useCallback((seat: 'p1' | 'p2') => {
     const mode = playModeRef.current;
     if (mode !== 'LOCAL_2P' && mode !== 'SOLO_AI') return;
@@ -2867,6 +2979,7 @@ const GameApp: React.FC<{ campaignPlaytestLevel: CampaignLevel | null }> = ({ ca
   const handleReturnToLobby = useCallback(() => {
     clearHitstop();
     realTimeInputBufferRef.current = {};
+    teardownLocalBridge();
     // Hotseat: drop any pass screen / PIN pad / execution on quit.
     hotseatPinsRef.current = {};
     setHotseatPins({});
@@ -2910,7 +3023,7 @@ const GameApp: React.FC<{ campaignPlaytestLevel: CampaignLevel | null }> = ({ ca
     setLatencyModalOpen(false);
     turnDecisionsRef.current = [];
     agentDrivenRef.current = { p1: false, p2: false };
-  }, [campaignPlaytestLevel]);
+  }, [campaignPlaytestLevel, teardownLocalBridge]);
 
   const handleMenuAction = useCallback((action: GamepadMenuAction, _slot: 1 | 2) => {
     // While the in-game menu is open, route menu actions to its own handler
@@ -2926,6 +3039,7 @@ const GameApp: React.FC<{ campaignPlaytestLevel: CampaignLevel | null }> = ({ ca
     const isUiActive =
       inLobby ||
       inOnlineLobby ||
+      localBridgeReadyPending ||
       replayActive ||
       settingsModalOpen ||
       latencyModalOpen ||
@@ -2941,7 +3055,7 @@ const GameApp: React.FC<{ campaignPlaytestLevel: CampaignLevel | null }> = ({ ca
     if (isUiActive && activeHandlerRef.current) {
       activeHandlerRef.current(action);
     }
-  }, [inLobby, inOnlineLobby, replayActive, settingsModalOpen, latencyModalOpen, hotseatPassTo, hotseatPinPad, gameState.phase, menuOpen]);
+  }, [inLobby, inOnlineLobby, localBridgeReadyPending, replayActive, settingsModalOpen, latencyModalOpen, hotseatPassTo, hotseatPinPad, gameState.phase, menuOpen]);
 
   // Gamepad controller listener setup (run once)
   useEffect(() => {
@@ -2996,6 +3110,7 @@ const GameApp: React.FC<{ campaignPlaytestLevel: CampaignLevel | null }> = ({ ca
       const isInMenuOrModal =
         inLobby ||
         inOnlineLobby ||
+        localBridgeReadyPending ||
         settingsModalOpen ||
         latencyModalOpen ||
         menuOpen ||
@@ -3177,6 +3292,7 @@ const GameApp: React.FC<{ campaignPlaytestLevel: CampaignLevel | null }> = ({ ca
     handleMenuAction,
     inLobby,
     inOnlineLobby,
+    localBridgeReadyPending,
     settingsModalOpen,
     latencyModalOpen,
     menuOpen,
@@ -3750,6 +3866,18 @@ const GameApp: React.FC<{ campaignPlaytestLevel: CampaignLevel | null }> = ({ ca
 
     if (mode === 'ONLINE_HOST' || mode === 'ONLINE_SERVER') {
       activeMatchRef.current = networkManager.broadcastMatchStart(initial, settingsRef.current);
+    } else if (mode === 'LOCAL_2P' && localBridgeArmedRef.current && localBridgeRoomIdRef.current) {
+      localMatchNumberRef.current += 1;
+      activeMatchRef.current = {
+        matchId: crypto.randomUUID(),
+        matchNumber: localMatchNumberRef.current,
+      };
+      localStateRevisionRef.current = 0;
+      selectBridgeSeat('p2');
+      publishLocalBridgeState(
+        initial,
+        Object.fromEntries(initial.snakes.map(snake => [snake.id, false])),
+      );
     } else {
       activeMatchRef.current = null;
     }
@@ -3765,9 +3893,94 @@ const GameApp: React.FC<{ campaignPlaytestLevel: CampaignLevel | null }> = ({ ca
 
   const handleStartLocal2P = () => {
     bridgeSeatRef.current = 'p1';
+    playModeRef.current = 'LOCAL_2P';
     setPlayMode('LOCAL_2P');
     startNewMatch();
   };
+
+  const handleStartLocal2PBridge = async () => {
+    const currentUser = auth.currentUser;
+    if (
+      !isAdmin ||
+      !currentUser ||
+      currentUser.isAnonymous ||
+      !ADMIN_UIDS.includes(currentUser.uid)
+    ) {
+      soundEngine.playDenied();
+      return;
+    }
+    if (localBridgeArming) return;
+
+    teardownLocalBridge();
+    setJoinError(null);
+    setLocalBridgeArming(true);
+    const roomId = `LOCAL-${Math.random().toString(36).substring(2, 6).toUpperCase()}`;
+    const secret = generateBridgeSecret();
+    let roomCreated = false;
+    try {
+      await set(ref(rtdb, `rooms/${roomId}`), {
+        p1Uid: currentUser.uid,
+        p2Uid: currentUser.uid,
+        createdAt: Date.now(),
+      });
+      roomCreated = true;
+      await set(ref(rtdb, `bridgeSecrets/${roomId}`), secret);
+    } catch (error) {
+      if (roomCreated) {
+        remove(ref(rtdb, `rooms/${roomId}`)).catch(() => {});
+      }
+      setLocalBridgeArming(false);
+      setJoinError(`Couldn't create local bridge room: ${error instanceof Error ? error.message : String(error)}`);
+      soundEngine.playDenied();
+      return;
+    }
+
+    localBridgeRoomIdRef.current = roomId;
+    setLocalBridgeRoomId(roomId);
+    setLocalBridgeSecret(secret);
+    localBridgeArmedRef.current = true;
+    setLocalBridgeArmed(true);
+    localMatchNumberRef.current = 0;
+    localStateRevisionRef.current = 0;
+    setLocalRoomCopied(false);
+    setLocalSecretCopied(false);
+    setLocalBridgeArming(false);
+    setLocalBridgeReadyPending(true);
+    setInLobby(false);
+    setInOnlineLobby(false);
+  };
+
+  const handleConfirmLocalBridgeReady = useCallback(() => {
+    if (!localBridgeReadyPending || !localBridgeArmedRef.current || !localBridgeRoomIdRef.current) return;
+    soundEngine.playMenuSelect();
+    setLocalBridgeReadyPending(false);
+    handleStartLocal2P();
+  }, [localBridgeReadyPending]);
+
+  const handleCancelLocalBridgeReady = useCallback(() => {
+    soundEngine.playMenuBack();
+    teardownLocalBridge();
+    setInLobby(true);
+  }, [teardownLocalBridge]);
+
+  useEffect(() => {
+    if (!localBridgeReadyPending) return;
+    const handleAction = (action: GamepadMenuAction) => {
+      if (action === 'CANCEL') {
+        handleCancelLocalBridgeReady();
+        return;
+      }
+      if (action === 'CONFIRM' || action === 'START') {
+        handleConfirmLocalBridgeReady();
+      }
+    };
+    activeHandlerRef.current = handleAction;
+    return () => {
+      if (activeHandlerRef.current === handleAction) {
+        activeHandlerRef.current = null;
+      }
+    };
+  }, [handleCancelLocalBridgeReady, handleConfirmLocalBridgeReady, localBridgeReadyPending]);
 
   const handleStartHotseat = () => {
     bridgeSeatRef.current = 'p1';
@@ -3986,7 +4199,7 @@ const GameApp: React.FC<{ campaignPlaytestLevel: CampaignLevel | null }> = ({ ca
 
   // Single-screen match layout: when a match (or replay) is on screen, the
   // root <main> becomes a locked viewport (100dvh, no scroll).
-  const isMatchView = !inLobby && !inOnlineLobby;
+  const isMatchView = !inLobby && !inOnlineLobby && !localBridgeReadyPending;
   // Hotseat: the single shared control set follows the active player.
   const controlsSlot: 1 | 2 = playMode === 'LOCAL_HOTSEAT' ? (hotseatActiveSeat === 'p2' ? 2 : 1) : 1;
   const controlsSnake = gameState.snakes.find(snake => snake.id === getTargetKey(controlsSlot))!;
@@ -4016,7 +4229,7 @@ const GameApp: React.FC<{ campaignPlaytestLevel: CampaignLevel | null }> = ({ ca
         </div>
 
         <div className="flex items-center gap-2">
-          {!inLobby && !inOnlineLobby && gameState.phase !== 'OVER' && !replayActive && hotseatPassTo === null && hotseatPinPad === null && (
+          {!inLobby && !inOnlineLobby && !localBridgeReadyPending && gameState.phase !== 'OVER' && !replayActive && hotseatPassTo === null && hotseatPinPad === null && (
             <button
               onClick={() => setMenuOpen(true)}
               className="px-1.5 py-0.5 bg-[#9BBC0F] hover:bg-[#0F380F] hover:text-[#9BBC0F] border border-[#0F380F] cursor-pointer"
@@ -4047,6 +4260,8 @@ const GameApp: React.FC<{ campaignPlaytestLevel: CampaignLevel | null }> = ({ ca
               onStartSolo={handleStartSolo}
               onStartLocal2P={handleStartLocal2P}
               onStartHotseat={handleStartHotseat}
+              onStartLocal2PBridge={handleStartLocal2PBridge}
+              isAdmin={isAdmin}
               onCreateOnlineRoom={handleCreateOnlineRoom}
               onCreateServerRoom={handleCreateServerRoom}
               onSpectateRoom={handleSpectateRoom}
@@ -4092,6 +4307,88 @@ const GameApp: React.FC<{ campaignPlaytestLevel: CampaignLevel | null }> = ({ ca
               }}
               onRegisterHandler={(h) => { activeHandlerRef.current = h; }}
             />
+          ) : localBridgeReadyPending ? (
+            <div className="mobile-scroll-panel w-full max-w-[440px] max-h-full bg-[#9BBC0F] border-4 border-[#0F380F] shadow-[8px_8px_0px_#0F380F] text-[#0F380F] p-3 sm:p-4 font-mono select-none flex flex-col justify-between gap-3 overflow-hidden">
+              <div className="flex items-center justify-between border-b-2 border-[#0F380F] pb-2">
+                <button
+                  type="button"
+                  onClick={handleCancelLocalBridgeReady}
+                  className="flex items-center gap-1 px-2 py-1 border border-[#0F380F] text-xs font-bold cursor-pointer bg-[#8BAC0F] hover:bg-[#0F380F] hover:text-[#9BBC0F] transition-colors"
+                >
+                  <ArrowLeft className="w-3.5 h-3.5" />
+                  <span>BACK</span>
+                </button>
+                <div className="text-xs font-black uppercase tracking-wider">
+                  LOCAL 2P vs AI BRIDGE
+                </div>
+              </div>
+
+              <div className="p-2.5 border-2 border-[#0F380F] bg-[#8BAC0F] text-center flex flex-col items-center gap-1.5">
+                <div className="text-[11px] font-bold uppercase tracking-wider">
+                  LOCAL ROOM ID (P2 AI AGENT):
+                </div>
+                <div className="flex items-center justify-center gap-2">
+                  <span className="text-2xl font-black tracking-widest bg-[#9BBC0F] px-3 py-1 border-2 border-[#0F380F]">
+                    {localBridgeRoomId}
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      soundEngine.playMenuSelect();
+                      navigator.clipboard.writeText(localBridgeRoomId);
+                      setLocalRoomCopied(true);
+                      setTimeout(() => setLocalRoomCopied(false), 2000);
+                    }}
+                    className="bg-[#0F380F] hover:bg-[#306230] text-[#9BBC0F] p-2 border-2 border-[#0F380F] cursor-pointer shadow-[2px_2px_0px_#0F380F]"
+                    title="Copy Room ID"
+                  >
+                    {localRoomCopied ? <Check className="w-5 h-5" /> : <Copy className="w-5 h-5" />}
+                  </button>
+                </div>
+                {localRoomCopied && <span className="text-[10px] font-bold">COPIED TO CLIPBOARD!</span>}
+              </div>
+
+              {localBridgeSecret && (
+                <div className="p-2.5 border-2 border-[#0F380F] bg-[#8BAC0F] text-center flex flex-col items-center gap-1.5">
+                  <div className="text-[11px] font-bold uppercase tracking-wider">
+                    BRIDGE SECRET (SHARE WITH AI AGENT):
+                  </div>
+                  <div className="flex items-center justify-center gap-2">
+                    <span className="text-xl font-black tracking-widest bg-[#9BBC0F] px-3 py-1 border-2 border-[#0F380F]">
+                      {localBridgeSecret}
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        soundEngine.playMenuSelect();
+                        navigator.clipboard.writeText(localBridgeSecret);
+                        setLocalSecretCopied(true);
+                        setTimeout(() => setLocalSecretCopied(false), 2000);
+                      }}
+                      className="bg-[#0F380F] hover:bg-[#306230] text-[#9BBC0F] p-2 border-2 border-[#0F380F] cursor-pointer shadow-[2px_2px_0px_#0F380F]"
+                      title="Copy Bridge Secret"
+                    >
+                      {localSecretCopied ? <Check className="w-5 h-5" /> : <Copy className="w-5 h-5" />}
+                    </button>
+                  </div>
+                  {localSecretCopied && <span className="text-[10px] font-bold">COPIED TO CLIPBOARD!</span>}
+                </div>
+              )}
+
+              <div className="bg-[#8BAC0F] p-2 border-2 border-[#0F380F] text-[10px] font-bold text-center leading-snug">
+                SHARE ROOM ID &amp; SECRET WITH THE P2 AI AGENT, THEN CONFIRM READY TO START THE MATCH.
+              </div>
+
+              <button
+                type="button"
+                onClick={handleConfirmLocalBridgeReady}
+                className="w-full py-3 border-2 border-[#0F380F] bg-[#0F380F] hover:bg-[#306230] text-[#9BBC0F] font-black text-sm flex items-center justify-center gap-2 cursor-pointer shadow-[3px_3px_0px_#0F380F]"
+              >
+                <Play className="w-4 h-4 fill-current" />
+                <span>CONFIRM READY</span>
+                <span className="text-[10px] bg-[#9BBC0F] text-[#0F380F] px-1.5 py-0.5 ml-1 font-bold">[A / ENTER]</span>
+              </button>
+            </div>
           ) : (
             <div className="match-grid-container gap-2">
               <Hud
@@ -4400,7 +4697,7 @@ const GameApp: React.FC<{ campaignPlaytestLevel: CampaignLevel | null }> = ({ ca
       />
 
       <InGameMenu
-        isOpen={menuOpen && !inLobby && !inOnlineLobby && gameState.phase !== 'OVER' && !replayActive && hotseatPassTo === null && hotseatPinPad === null}
+        isOpen={menuOpen && !inLobby && !inOnlineLobby && !localBridgeReadyPending && gameState.phase !== 'OVER' && !replayActive && hotseatPassTo === null && hotseatPinPad === null}
         onClose={() => setMenuOpen(false)}
         onOpenControls={handleOpenMenuControls}
         onQuit={handleReturnToLobby}
@@ -4409,7 +4706,7 @@ const GameApp: React.FC<{ campaignPlaytestLevel: CampaignLevel | null }> = ({ ca
         onRegisterDisarm={(d) => { menuDisarmRef.current = d; }}
       />
 
-      {!inLobby && !inOnlineLobby && !replayActive && !activeHitstop && fatalMoveSnakes.length === 0 && (
+      {!inLobby && !inOnlineLobby && !localBridgeReadyPending && !replayActive && !activeHitstop && fatalMoveSnakes.length === 0 && (
         <MatchEndModal
           gameState={gameState}
           playMode={playMode}
